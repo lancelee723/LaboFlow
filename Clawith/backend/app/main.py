@@ -72,6 +72,13 @@ async def lifespan(app: FastAPI):
     intercept_standard_logging()
     logger.info("[startup] Logging configured")
 
+    # Warn about default JWT secrets in production
+    if "change-me" in settings.SECRET_KEY.lower() or "change-me" in settings.JWT_SECRET_KEY.lower():
+        logger.warning(
+            "[startup] WARNING: SECRET_KEY or JWT_SECRET_KEY contains default 'change-me' value. "
+            "This is insecure for production. Set unique secrets in your .env file."
+        )
+
     import asyncio
     import sys
     import os
@@ -109,10 +116,10 @@ async def lifespan(app: FastAPI):
         import app.models.notification   # noqa
         import app.models.gateway_message # noqa
         import app.models.agent_credential  # noqa
-
-        import app.models.identity       # noqa
         import app.models.presentation   # noqa
         import app.models.ppt_template    # noqa
+
+        import app.models.identity       # noqa
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("[startup] Database tables ready")
@@ -298,6 +305,7 @@ from app.api.admin import router as admin_router
 from app.api.pages import router as pages_router, public_router as pages_public_router
 from app.api.agent_credentials import router as credentials_router
 from app.api.agentbay_control import router as agentbay_control_router
+
 from app.api.presentations import router as presentations_router
 from app.api.templates import router as templates_router
 

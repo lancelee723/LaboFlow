@@ -139,8 +139,6 @@ class IdentityOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ─── PPT Template (AIPPT) ──────────────────────────────
-
 class PPTTemplateOut(BaseModel):
     id: str
     name: str

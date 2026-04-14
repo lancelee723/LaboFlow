@@ -1137,7 +1137,7 @@ async def sso_verify_token(
     if not token:
         raise HTTPException(status_code=400, detail="token is required")
 
-    payload = decode_access_token(token)  # raises 401 if invalid
+    payload = decode_access_token(token)
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token")
