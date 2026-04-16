@@ -1,0 +1,69 @@
+services:
+  clawith:
+    build: ./Clawith/backend
+    ports:
+      - "8008:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://clawith:clawith@postgres:5432/clawith
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
+      - SECRET_KEY=${SECRET_KEY:-change-me-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - clawith_data:/data
+
+  aippt-server:
+    build: ./aippt/server
+    ports:
+      - "8009:8009"
+    environment:
+      - CORS_ORIGINS=http://localhost:3008,http://aippt-web
+    depends_on:
+      - clawith
+    volumes:
+      - aippt_templates:/app/uploads/templates
+
+  aippt-web:
+    build:
+      context: ./aippt
+      args:
+        BASE_PATH: /ppt/
+    ports:
+      - "3008:80"
+    depends_on:
+      - aippt-server
+      - clawith
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=clawith
+      - POSTGRES_PASSWORD=clawith
+      - POSTGRES_DB=clawith
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clawith"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redis_data:
+  clawith_data:
+  aippt_templates:
