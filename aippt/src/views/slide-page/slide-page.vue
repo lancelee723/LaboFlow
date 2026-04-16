@@ -134,9 +134,13 @@
             <span>导出</span>
           </a-button>
           <template #content>
-            <a-doption @click="handleExportPPTX">
+            <a-doption @click="handleExportPPTX('standard')">
               <template #icon><icon-download :size="16" /></template>
-              导出 PPTX
+              导出 PPTX（标准）
+            </a-doption>
+            <a-doption @click="handleExportPPTX('professional')">
+              <template #icon><icon-download :size="16" /></template>
+              导出 PPTX（专业咨询风格）
             </a-doption>
             <a-doption @click="handleExportJSON">
               <template #icon><icon-code :size="16" /></template>
@@ -2992,9 +2996,63 @@ const applyTemplate = (themeName) => {
  * Export PPTX (Placeholder)
  * TODO: Implement PPTX export functionality
  */
-const handleExportPPTX = () => {
-  Message.info('PPTX 导出功能开发中...')
-  console.log('[handleExportPPTX] Export functionality placeholder')
+const handleExportPPTX = async (mode = 'standard') => {
+  try {
+    if (mode === 'professional') {
+      const { exportProfessionalPPTX } = await import('@/utils/export/pptxExporter')
+      Message.info('正在生成专业咨询风格 PPTX...')
+
+      const storyline = parsedSlides.value.map((slide, i) => {
+        const visualData = getSlideVisualData(i)
+        const titleText = visualData.texts?.find(t => (t.fontSize || 0) >= 20)
+        const title = titleText?.content || titleText?.text || `第${i + 1}页`
+        const bulletTexts = visualData.texts?.filter(t => (t.fontSize || 0) < 20) || []
+        const bullets = bulletTexts.map(t => t.content || t.text || '').filter(Boolean)
+
+        if (i === 0) {
+          return { type: 'cover', data: { title, subtitle: bullets[0] || '' } }
+        }
+        if (i === parsedSlides.value.length - 1) {
+          return { type: 'closing', data: { title, message: bullets.join('\n') } }
+        }
+        if (bullets.length <= 3 && bullets.length > 0) {
+          return { type: 'three_stat', data: { title, items: bullets.map((b, j) => ({ label: b, value: '', color: ['#006BA6', '#007A53', '#D46A00'][j % 3] })) } }
+        }
+        return { type: 'two_column_text', data: { title, left: bullets.slice(0, Math.ceil(bullets.length / 2)).join('\n'), right: bullets.slice(Math.ceil(bullets.length / 2)).join('\n') } }
+      })
+
+      await exportProfessionalPPTX(documentTitle.value || 'presentation', storyline)
+      Message.success('专业咨询风格 PPTX 导出成功！')
+    } else {
+      const { exportToPPTXViaServer, exportToPPTX } = await import('@/utils/export/pptxExporter')
+      Message.info('正在导出 PPTX 文件...')
+
+      try {
+        await exportToPPTXViaServer({
+          title: documentTitle.value || 'presentation',
+          slides: parsedSlides.value,
+          getSlideVisualData,
+          themeStyle: currentThemeStyle.value,
+          onProgress: (percent) => {
+            console.log(`[handleExportPPTX] Progress: ${percent}%`)
+          }
+        })
+        Message.success('PPTX 导出成功！')
+      } catch (serverError) {
+        console.warn('[handleExportPPTX] Server export failed, falling back to client:', serverError.message)
+        await exportToPPTX({
+          title: documentTitle.value || 'presentation',
+          slides: parsedSlides.value,
+          getSlideVisualData,
+          themeStyle: currentThemeStyle.value,
+        })
+        Message.success('PPTX 导出成功（客户端模式）！')
+      }
+    }
+  } catch (error) {
+    console.error('[handleExportPPTX] Export failed:', error)
+    Message.error('导出失败：' + (error.message || '未知错误'))
+  }
 }
 
 /**

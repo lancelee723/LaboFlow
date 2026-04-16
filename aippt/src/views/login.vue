@@ -90,78 +90,22 @@
               <p class="form-subtitle">{{ tAuth('loginSubtitle') }}</p>
             </div>
 
-            <!-- Social Login Buttons (shown by default) -->
-            <div v-if="!showEmailLogin" class="social-buttons-section">
-              <div class="social-buttons">
-                <button class="social-button" @click="showEmailLogin = true">
-                  <Icon name="email" :size="20" />
-                  <span>{{ tAuth('email') }}</span>
-                </button>
-                <button class="social-button" @click="handleGithubLogin">
-                  <Icon name="github" :size="20" />
-                  <span>GitHub</span>
+            <!-- Clawith SSO + Email Login -->
+            <div class="social-buttons-section">
+              <div class="social-buttons" v-if="clawithAvailable">
+                <button class="social-button" @click="handleClawithLogin">
+                  <Icon name="server" :size="20" />
+                  <span>Clawith 账号登录</span>
                 </button>
               </div>
 
-              <div class="divider-section">
+              <div class="divider-section" v-if="clawithAvailable">
                 <div class="divider-line"></div>
-                <span class="divider-text">{{ tAuth('orUseActivationCode') }}</span>
+                <span class="divider-text">或</span>
                 <div class="divider-line"></div>
               </div>
 
-              <!-- Demo Account Quick Login -->
-              <div class="demo-account-section">
-                <button class="demo-login-btn" @click="handleDemoLogin" :disabled="demoLoading">
-                  <span v-if="!demoLoading" class="demo-btn-inner">
-                    <Icon name="rocket" :size="18" />
-                    <span>{{ tAuth('demoLogin') }}</span>
-                    <span class="demo-badge">{{ tAuth('demoFree') }}</span>
-                  </span>
-                  <span v-else class="demo-btn-inner">
-                    <span class="demo-loading-dot"></span>
-                    {{ tAuth('demoLoading') }}
-                  </span>
-                </button>
-                <p class="demo-hint">{{ tAuth('demoHint') }}</p>
-              </div>
-
-              <!-- Activation Code Login Form -->
-              <a-form :model="form" layout="vertical" @submit="handleSubmit">
-                <a-form-item field="name" class="form-item">
-                  <template #label>
-                    <span class="field-label">{{ tAuth('activationCode') }}</span>
-                  </template>
-                  <a-input
-                    v-model="form.name"
-                    :placeholder="tAuth('activationCodePlaceholder')"
-                    size="large"
-                    required
-                    maxlength="32"
-                  />
-                </a-form-item>
-
-                <a-form-item>
-                  <a-button 
-                    html-type="submit" 
-                    type="primary" 
-                    long 
-                    size="large"
-                    class="submit-button"
-                  >
-                    <Icon name="login-icon" :size="18" />
-                    <span>{{ tAuth('loginNow') }}</span>
-                  </a-button>
-                </a-form-item>
-              </a-form>
-
-              <p class="switch-mode-text">
-                {{ tAuth('noAccount') }}
-                <a class="switch-link" @click="mode = 'register'">{{ tAuth('registerNow') }}</a>
-              </p>
-            </div>
-
-            <!-- Email Login Form (hidden by default) -->
-            <div v-else class="email-form-section">
+              <!-- Email Login Form -->
               <a-form :model="form" layout="vertical" @submit="handleSubmit">
                 <a-form-item field="email" class="form-item">
                   <template #label>
@@ -204,9 +148,10 @@
                 </a-form-item>
               </a-form>
 
-              <button class="back-button" @click="showEmailLogin = false">
-                ← {{ tAuth('backToOptions') }}
-              </button>
+              <p class="switch-mode-text">
+                {{ tAuth('noAccount') }}
+                <a class="switch-link" @click="mode = 'register'">{{ tAuth('registerNow') }}</a>
+              </p>
             </div>
           </div>
 
@@ -223,10 +168,6 @@
                 <button class="social-button" @click="showEmailRegister = true">
                   <Icon name="email" :size="20" />
                   <span>{{ tAuth('email') }}</span>
-                </button>
-                <button class="social-button" @click="handleGithubLogin">
-                  <Icon name="github" :size="20" />
-                  <span>GitHub</span>
                 </button>
               </div>
 
@@ -435,11 +376,9 @@ const Icon = IIcon
 
 const router = useRouter()
 const mode = ref('login')
-const showEmailLogin = ref(false)
 const showEmailRegister = ref(false)
 const agreeTerms = ref(false)
 const isEmailValid = ref(false)
-const demoLoading = ref(false)
 
 // Verification code states
 const verificationCodeSent = ref(false)
@@ -497,31 +436,24 @@ const resetAttempts = (key) => {
   try { localStorage.removeItem(key) } catch {}
 }
 
-// GitHub OAuth configuration
-const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || ''
-const GITHUB_REDIRECT_URI = import.meta.env.VITE_GITHUB_REDIRECT_URI || `${window.location.origin}${import.meta.env.BASE_URL}login`
+const CLAWITH_API_URL = import.meta.env.VITE_CLAWITH_API_URL || ''
 
-const handleGithubLogin = () => {
-  if (!GITHUB_CLIENT_ID) {
-    Message.error(tAuth('githubOAuthNotConfigured'))
-    return
+const clawithAvailable = ref(false)
+
+onMounted(async () => {
+  if (CLAWITH_API_URL) {
+    try {
+      const res = await fetch(`${CLAWITH_API_URL}/api/health`, { signal: AbortSignal.timeout(3000) })
+      clawithAvailable.value = res.ok
+    } catch {
+      clawithAvailable.value = false
+    }
   }
-  
-  // Save current redirect URL for after OAuth completes
-  const currentRedirect = router.currentRoute.value.query.redirect
-  if (currentRedirect) {
-    sessionStorage.setItem('oauth_redirect', currentRedirect)
-  }
-  
-  // Build GitHub OAuth URL
-  const githubAuthUrl = new URL('https://github.com/login/oauth/authorize')
-  githubAuthUrl.searchParams.append('client_id', GITHUB_CLIENT_ID)
-  githubAuthUrl.searchParams.append('redirect_uri', GITHUB_REDIRECT_URI)
-  githubAuthUrl.searchParams.append('scope', 'user:email')
-  githubAuthUrl.searchParams.append('state', Math.random().toString(36).substring(7))
-  
-  // Redirect to GitHub OAuth
-  window.location.href = githubAuthUrl.toString()
+})
+
+const handleClawithLogin = () => {
+  const redirect = `${window.location.origin}${import.meta.env.BASE_URL}login?sso_redirect=1`
+  window.location.href = `${CLAWITH_API_URL}/login?redirect=${encodeURIComponent(redirect)}`
 }
 
 // Format countdown timer (MM:SS)
@@ -704,61 +636,6 @@ const handleBackToRegister = () => {
   showEmailRegister.value = false
 }
 
-// Demo account quick login
-const DEMO_ACCOUNT = import.meta.env.VITE_DEMO_ACCOUNT || 'demo@aippt.cc'
-const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD || 'demo123456'
-
-const handleDemoLogin = async () => {
-  if (demoLoading.value) return
-  demoLoading.value = true
-  try {
-    const res = await authApi.login({
-      email: DEMO_ACCOUNT,
-      password: DEMO_PASSWORD
-    })
-    const payload = unwrapResponse(res)
-    if ((payload?.code ?? 0) === 200 && payload?.data?.token) {
-      const u = payload.data
-      localStorage.setItem('jwt_token', u.token)
-      localStorage.setItem('uid', u.user?.id || 'demo')
-      localStorage.setItem('username', u.user?.username || u.user?.email || 'Demo User')
-      localStorage.setItem('userRole', u.user?.role || '0')
-      localStorage.setItem('userColor', generateRandomColor())
-      Message.success(tAuth('demoLoginSuccess'))
-      const redirect = router.currentRoute.value.query.redirect
-      if (redirect) {
-        const baseUrl = import.meta.env.BASE_URL || '/'
-        const cleanRedirect = typeof redirect === 'string' && redirect.startsWith(baseUrl)
-          ? redirect.slice(baseUrl.length - 1)
-          : redirect
-        router.push(cleanRedirect)
-      } else {
-        router.push('/')
-      }
-    } else {
-      // Fallback: use local guest mode without backend
-      const demoUid = 'demo_' + Math.random().toString(36).slice(2, 8)
-      localStorage.setItem('uid', demoUid)
-      localStorage.setItem('username', 'Demo User')
-      localStorage.setItem('userRole', '0')
-      localStorage.setItem('userColor', generateRandomColor())
-      Message.success(tAuth('demoLoginSuccess'))
-      router.push('/')
-    }
-  } catch {
-    // Network error or no backend: use local guest mode
-    const demoUid = 'demo_' + Math.random().toString(36).slice(2, 8)
-    localStorage.setItem('uid', demoUid)
-    localStorage.setItem('username', 'Demo User')
-    localStorage.setItem('userRole', '0')
-    localStorage.setItem('userColor', generateRandomColor())
-    Message.success(tAuth('demoLoginSuccess'))
-    router.push('/')
-  } finally {
-    demoLoading.value = false
-  }
-}
-
 const handleSubmit = async (data) => {
   if(data && data.values) {
     const failKey = mode.value === 'login' ? 'login_fail_rate' : 'register_fail_rate'
@@ -772,46 +649,62 @@ const handleSubmit = async (data) => {
     } catch {}
 
     if (mode.value === 'login') {
-      // Validation for email login
-      if (showEmailLogin.value) {
-        if (!data.values.email || !data.values.password) {
-          Message.error(tAuth('emailAndPasswordRequired') || 'Email and password are required')
-          return
-        }
-        if (!data.values.email.includes('@')) {
-          Message.error(tAuth('invalidEmail') || 'Please enter a valid email address')
-          return
-        }
-      } else {
-        // Validation for activation code login
-        if (!data.values.name) {
-          Message.error(tAuth('activationCodeRequired') || 'Please enter activation code')
-          return
-        }
+      if (!data.values.email || !data.values.password) {
+        Message.error(tAuth('emailAndPasswordRequired') || 'Email and password are required')
+        return
+      }
+      if (!data.values.email.includes('@')) {
+        Message.error(tAuth('invalidEmail') || 'Please enter a valid email address')
+        return
       }
 
       try {
         const res = await authApi.login({
-          email: showEmailLogin.value ? data.values.email : data.values.name,
+          email: data.values.email,
           password: data.values.password
         })
         const payload = unwrapResponse(res)
         
-        // 后端返回格式：{ code: 200, message: '...', data: { user, token } }
-        if ((payload?.code ?? 0) === 200 && payload?.data?.token) {
-          const u = payload.data
-          localStorage.setItem('jwt_token', u.token)
-          localStorage.setItem('uid', u.user?.id || '')
-          localStorage.setItem('username', u.user?.username || u.user?.email || '')
-          localStorage.setItem('userRole', u.user?.role || '0')
+        const token = payload?.access_token || payload?.data?.token
+        const user = payload?.user || payload?.data?.user
+        const requiresTenantSelection = payload?.requires_tenant_selection
+
+        if (requiresTenantSelection && payload?.tenants) {
+          const tenants = payload.tenants
+          if (tenants.length > 0) {
+            const res2 = await authApi.login({
+              email: data.values.email,
+              password: data.values.password,
+              tenant_id: tenants[0].tenant_id,
+            })
+            const payload2 = unwrapResponse(res2)
+            const token2 = payload2?.access_token || payload2?.data?.token
+            const user2 = payload2?.user || payload2?.data?.user
+            if (token2) {
+              localStorage.setItem('jwt_token', token2)
+              localStorage.setItem('uid', user2?.id || '')
+              localStorage.setItem('username', user2?.username || user2?.email || '')
+              localStorage.setItem('userRole', user2?.role || '0')
+              localStorage.setItem('userColor', generateRandomColor())
+              resetAttempts(failKey)
+              router.push('/')
+              return
+            }
+          }
+        }
+
+        if (token) {
+          localStorage.setItem('jwt_token', token)
+          localStorage.setItem('uid', user?.id || '')
+          localStorage.setItem('username', user?.username || user?.email || '')
+          localStorage.setItem('userRole', user?.role || '0')
           localStorage.setItem('userColor', generateRandomColor())
           resetAttempts(failKey)
           const redirect = router.currentRoute.value.query.redirect
           if (redirect) {
-            // Remove base URL prefix if it exists to prevent duplication
             const baseUrl = import.meta.env.BASE_URL || '/'
             const cleanRedirect = typeof redirect === 'string' && redirect.startsWith(baseUrl)
-              ? redirect.slice(baseUrl.length - 1) // Keep the leading slash
+              ? redirect.slice(baseUrl.length - 1)
               : redirect
             router.push(cleanRedirect)
           } else {
@@ -904,22 +797,22 @@ const handleSubmit = async (data) => {
         })
         const payload = unwrapResponse(res)
         
-        // 后端返回格式：{ code: 201, message: '...', data: { user, token } }
-        if (((payload?.code ?? 0) === 200 || (payload?.code ?? 0) === 201) && payload?.data?.token) {
-          const u = payload.data
-          localStorage.setItem('jwt_token', u.token)
-          localStorage.setItem('uid', u.user?.id || '')
-          localStorage.setItem('username', u.user?.username || u.user?.email || '')
-          localStorage.setItem('userRole', u.user?.role || '0')
+        const token = payload?.access_token || payload?.data?.token
+        const user = payload?.user || payload?.data?.user
+        
+        if (token) {
+          localStorage.setItem('jwt_token', token)
+          localStorage.setItem('uid', user?.id || '')
+          localStorage.setItem('username', user?.username || user?.email || '')
+          localStorage.setItem('userRole', user?.role || '0')
           localStorage.setItem('userColor', generateRandomColor())
           resetAttempts(failKey)
           Message.success(tAuth('registerSuccess') || '注册成功！')
           const redirect = router.currentRoute.value.query.redirect
           if (redirect) {
-            // Remove base URL prefix if it exists to prevent duplication
             const baseUrl = import.meta.env.BASE_URL || '/'
             const cleanRedirect = typeof redirect === 'string' && redirect.startsWith(baseUrl)
-              ? redirect.slice(baseUrl.length - 1) // Keep the leading slash
+              ? redirect.slice(baseUrl.length - 1)
               : redirect
             router.push(cleanRedirect)
           } else {
@@ -1002,58 +895,7 @@ const handleSubmit = async (data) => {
   }
 }
 
-// Handle OAuth callback on component mount
-onMounted(async () => {
-  const urlParams = new URLSearchParams(window.location.search)
-  const code = urlParams.get('code')
-  const state = urlParams.get('state')
-  
-  if (code && state) {
-    try {
-      Message.loading({ content: tAuth('githubAuthenticating'), duration: 0 })
-      
-      // Call backend to exchange code for token
-      const res = await authApi.githubCallback({ code, state })
-      const payload = unwrapResponse(res)
-      
-      Message.clear()
-      
-      if ((payload?.code ?? 0) === 200 && payload?.data?.token) {
-        const u = payload.data
-        localStorage.setItem('jwt_token', u.token)
-        localStorage.setItem('uid', u.user?.id || '')
-        localStorage.setItem('username', u.user?.username || u.user?.email || '')
-        localStorage.setItem('userRole', u.user?.role || '0')
-        localStorage.setItem('userColor', generateRandomColor())
-        
-        Message.success(tAuth('githubLoginSuccess'))
-        
-        // Get saved redirect URL
-        const savedRedirect = sessionStorage.getItem('oauth_redirect')
-        sessionStorage.removeItem('oauth_redirect')
-        
-        if (savedRedirect) {
-          const baseUrl = import.meta.env.BASE_URL || '/'
-          const cleanRedirect = savedRedirect.startsWith(baseUrl)
-            ? savedRedirect.slice(baseUrl.length - 1)
-            : savedRedirect
-          router.push(cleanRedirect)
-        } else {
-          router.push('/')
-        }
-      } else {
-        Message.error(payload?.message || tAuth('githubAuthFailed'))
-        // Clean up URL
-        router.replace('/login')
-      }
-    } catch (error) {
-      Message.clear()
-      console.error('GitHub OAuth error:', error)
-      Message.error(tAuth('githubAuthFailed'))
-      router.replace('/login')
-    }
-  }
-})
+
 </script>
 <style scoped>
 /* Animations */
@@ -1786,89 +1628,4 @@ onMounted(async () => {
   }
 }
 
-/* Demo Account Section */
-.demo-account-section {
-  margin-bottom: 20px;
-}
-
-.demo-login-btn {
-  width: 100%;
-  padding: 12px 20px;
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  color: #fff;
-  border: none;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 4px 15px rgba(37, 99, 235, 0.3);
-  position: relative;
-  overflow: hidden;
-}
-
-.demo-login-btn::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.demo-login-btn:hover:not(:disabled)::before {
-  opacity: 1;
-}
-
-.demo-login-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
-}
-
-.demo-login-btn:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.demo-login-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.demo-btn-inner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.demo-badge {
-  background: rgba(255,255,255,0.25);
-  padding: 2px 8px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.3px;
-}
-
-.demo-hint {
-  margin: 8px 0 0;
-  text-align: center;
-  font-size: 12px;
-  color: #94a3b8;
-  line-height: 1.4;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
-}
-
-.demo-loading-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #fff;
-  display: inline-block;
-  animation: pulse 1s ease-in-out infinite;
-  margin-right: 4px;
-}</style>
+</style>

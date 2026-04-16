@@ -31,6 +31,7 @@ import {
     IconSwitchHorizontal,
     IconChevronRight,
     IconCheck,
+    IconChartBar,
 } from '@tabler/icons-react';
 import { useAppStore } from '../stores';
 
@@ -538,8 +539,7 @@ export default function Layout() {
             <nav className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
                 <div className="sidebar-top">
                     <div className="sidebar-logo">
-                        <img src={theme === 'dark' ? '/logo-white.png' : '/logo-black.png'} alt="" style={{ width: 22, height: 22 }} />
-                        <span className="sidebar-logo-text">Clawith</span>
+                        <span className="sidebar-logo-text">LaboFlow</span>
                         <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
                             padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             marginLeft: 'auto', color: 'var(--text-tertiary)',
@@ -585,6 +585,15 @@ export default function Layout() {
                             <span className="sidebar-item-text">{t('nav.aiPPT', 'AI PPT')}</span>
                             <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
                         </a>
+                        <NavLink
+                            to="/pro-charts"
+                            className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
+                        >
+                            <span className="sidebar-item-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                <IconChartBar size={14} stroke={1.5} />
+                            </span>
+                            <span className="sidebar-item-text">Pro Charts</span>
+                        </NavLink>
                     </div>
                 </div>
                 

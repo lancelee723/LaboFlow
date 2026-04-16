@@ -63,7 +63,7 @@ function getAuthHeaders(): Record<string, string> {
 export async function fetchServerAISettings(): Promise<AISettings | null> {
   try {
     const base = resolveApiBaseUrl()
-    const url = (base || '').replace(/\/$/, '') + '/enterprise/aippt-llm-runtime'
+    const url = (base || '').replace(/\/$/, '') + '/api/enterprise/aippt-llm-runtime'
     const res = await fetch(url, { headers: getAuthHeaders() })
     if (!res.ok) return null
     const data = await res.json()
@@ -219,4 +219,40 @@ export function setAISettings(next: Partial<AISettings>) {
 
 export function getAvailableModels(provider: ProviderKey): Array<{label: string; value: string}> {
   return getModels(provider)
+}
+
+export interface AvailableModel {
+  provider: string
+  model: string
+  label: string
+  available: boolean
+}
+
+const AVAILABLE_MODELS_CACHE_KEY = 'pxdoc_available_models_cache'
+
+export async function fetchAvailableModels(): Promise<AvailableModel[]> {
+  try {
+    const base = resolveApiBaseUrl()
+    const url = (base || '').replace(/\/$/, '') + '/api/enterprise/llm-models'
+    const res = await fetch(url, { headers: getAuthHeaders() })
+    if (!res.ok) return []
+    const data = await res.json()
+    const models = data?.data?.models || data?.models || []
+    return models.map(m => ({
+      provider: m.provider,
+      model: m.model,
+      label: m.label || `${m.provider}/${m.model}`,
+      available: m.enabled !== false && !!m.api_key_masked,
+    }))
+  } catch {
+    const cached = localStorage.getItem(AVAILABLE_MODELS_CACHE_KEY)
+    if (cached) {
+      try { return JSON.parse(cached) } catch {}
+    }
+    return []
+  }
+}
+
+export function cacheAvailableModels(models: AvailableModel[]) {
+  localStorage.setItem(AVAILABLE_MODELS_CACHE_KEY, JSON.stringify(models))
 }

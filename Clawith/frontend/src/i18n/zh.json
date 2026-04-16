@@ -1,14 +1,14 @@
 {
   "app": {
-    "name": "Clawith",
+    "name": "LaboFlow",
     "tagline": "企业数字员工平台"
   },
   "login": {
     "hero": {
-      "badge": "开源 · 多智能体协作",
-      "title": "Clawith",
+      "badge": "企业级AI工作台",
+      "title": "LaboFlow",
       "subtitle": "OpenClaw for Teams",
-      "description": "OpenClaw 赋能个人。<br>Clawith 将其扩展到前沿组织。",
+      "description": "OpenClaw 赋能个人。<br>LaboFlow 将其扩展到前沿组织。",
       "features": {
         "multiAgent": {
           "title": "多智能体团队",

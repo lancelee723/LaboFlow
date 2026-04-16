@@ -58,8 +58,25 @@
 
         <!-- 空状态 -->
         <a-empty v-if="!loading && filteredTemplates.length === 0" description="暂无模板" />
+
+        <!-- 上传模板卡片 -->
+        <div class="template-card upload-card" @click="handleUploadClick">
+          <div class="template-preview">
+            <div class="template-placeholder">
+              <Icon name="upload" :size="48" />
+            </div>
+          </div>
+          <div class="template-info">
+            <div class="template-name">上传模板</div>
+            <div class="template-meta">
+              <span>支持 .pptx 文件</span>
+            </div>
+          </div>
+        </div>
       </div>
       </a-spin>
+
+      <input ref="uploadInputRef" type="file" accept=".pptx" style="display:none" @change="handleFileUpload" />
 
       <!-- 底部操作 -->
       <div class="template-actions">
@@ -108,11 +125,13 @@ const selectedTemplate = ref(null);
 // 分类列表
 const categories = [
   { label: '全部', value: 'all' },
+  { label: '咨询风格', value: 'consulting' },
   { label: '商务', value: 'business' },
   { label: '创意', value: 'creative' },
   { label: '极简', value: 'minimal' },
   { label: '科技', value: 'tech' },
   { label: '教育', value: 'education' },
+  { label: '我的上传', value: 'user_upload' },
 ];
 
 // 过滤模板
@@ -127,21 +146,35 @@ const filteredTemplates = computed(() => {
 const loadTemplates = async () => {
   loading.value = true;
   try {
-    const result = await templateApi.getTemplates({
-      category: selectedCategory.value === 'all' ? undefined : selectedCategory.value,
-      page: 1,
-      pageSize: 100
-    })
-    
-    console.log('[TemplateSelector] API response:', result);
-    
-    if (result.code === 200 && result.data) {
-      templates.value = result.data.templates || [];
-      console.log('[TemplateSelector] Loaded templates:', templates.value.length);
-    } else {
-      console.error('[TemplateSelector] API error:', result);
-      Message.error(result.message || '加载模板失败');
+    const allTemplates = []
+
+    try {
+      const result = await templateApi.getTemplates({
+        category: selectedCategory.value === 'all' ? undefined : selectedCategory.value,
+        page: 1,
+        pageSize: 100
+      })
+      if (result.code === 200 && result.data) {
+        allTemplates.push(...(result.data.templates || []))
+      }
+    } catch (e) {
+      console.warn('[TemplateSelector] Backend templates unavailable:', e.message)
     }
+
+    try {
+      const exportApiUrl = import.meta.env.VITE_EXPORT_API_URL || ''
+      const res = await fetch(`${exportApiUrl}/api/templates?category=${selectedCategory.value === 'all' ? '' : selectedCategory.value}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data?.data?.templates) {
+          allTemplates.push(...data.data.templates)
+        }
+      }
+    } catch (e) {
+      console.warn('[TemplateSelector] Export server templates unavailable:', e.message)
+    }
+
+    templates.value = allTemplates
   } catch (error) {
     console.error('[TemplateSelector] Failed to load templates:', error);
     Message.error('加载模板失败');
@@ -175,6 +208,45 @@ const handleCancel = () => {
 onMounted(() => {
   loadTemplates();
 });
+
+const uploadInputRef = ref(null)
+
+const handleUploadClick = () => {
+  uploadInputRef.value?.click()
+}
+
+const handleFileUpload = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  if (!file.name.endsWith('.pptx')) {
+    Message.error('仅支持 .pptx 文件')
+    return
+  }
+
+  try {
+    const exportApiUrl = import.meta.env.VITE_EXPORT_API_URL || ''
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', file.name.replace('.pptx', ''))
+
+    const res = await fetch(`${exportApiUrl}/api/templates/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (res.ok) {
+      Message.success('模板上传成功！')
+      loadTemplates()
+    } else {
+      Message.error('模板上传失败')
+    }
+  } catch (e) {
+    Message.error('上传失败：' + e.message)
+  }
+
+  event.target.value = ''
+}
 </script>
 
 <style scoped>
@@ -288,6 +360,16 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.upload-card {
+  border-style: dashed;
+  border-color: #94a3b8;
+}
+
+.upload-card:hover {
+  border-color: #1677ff;
+  border-style: dashed;
 }
 
 /* 底部操作 */

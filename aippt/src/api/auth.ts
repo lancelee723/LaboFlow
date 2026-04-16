@@ -25,8 +25,13 @@ export const authApi = {
   login: (data: {
     email: string
     password: string
+    tenant_id?: string
   }) => {
-    return request.post('/api/auth/login', data)
+    return request.post('/api/auth/login', {
+      login_identifier: data.email,
+      password: data.password,
+      tenant_id: data.tenant_id || undefined,
+    })
   },
 
   // 获取当前用户信息

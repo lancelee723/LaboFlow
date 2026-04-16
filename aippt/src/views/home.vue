@@ -239,13 +239,30 @@ const fetchPresentations = async () => {
         time: formatTime(p.updatedAt || p.createdAt),
         thumbnail: p.thumbnail
       }))
+      return
     }
   } catch (error) {
-    console.error('Failed to fetch presentations:', error)
-    // Keep demo data on error
+    console.warn('[Home] Backend unavailable, loading local presentations:', error.message)
   } finally {
     loading.value = false
   }
+
+  try {
+    const localData = localStorage.getItem('aippt_local_presentations')
+    if (localData) {
+      const localPresentations = JSON.parse(localData)
+      if (Array.isArray(localPresentations)) {
+        works.value = localPresentations.map(p => ({
+          id: p.id,
+          name: p.title || t('slide.home.untitledWork'),
+          title: p.title || t('slide.home.untitledWork'),
+          subtitle: p.description || '',
+          time: formatTime(p.updatedAt || p.createdAt),
+          thumbnail: p.thumbnail
+        }))
+      }
+    }
+  } catch {}
 }
 
 // Format timestamp to relative time
@@ -274,8 +291,7 @@ onMounted(() => {
 })
 
 const createNewPpt = () => {
-  // Navigate to workspace/home-redirect which will create a new presentation
-  router.push('/workspace')
+  router.push('/slide/new')
 }
 
 const createNewAiPpt = () => {

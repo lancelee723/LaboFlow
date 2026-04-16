@@ -1,15 +1,35 @@
-# ========== Environment Variables ==========
-.env
-.env.*
-!.env.example
+# ========== WHITELIST MODE ==========
+# Ignore everything by default, then selectively allow specific items
 
-# ========== macOS System Files ==========
+# Ignore all files and folders
+*
+
+# ── Allow specific folders ──────────────────────
+!aiPPT/
+!Clawith/
+!LightRAG/
+
+# ── Allow specific root-level files ─────────────
+!.env.example
+!README.md
+!docker-compose.yml
+!nginx.conf
+!dev.sh
+!setup-all.sh
+!stop.sh
+
+# ── Always include .gitignore itself ────────────
+!.gitignore
+
+# ========== Common ignores (for allowed folders) ==========
+
+# macOS
 .DS_Store
 .AppleDouble
 .LSOverride
 ._*
 
-# ========== IDE & Editor Files ==========
+# IDE & Editor
 .vscode/
 .idea/
 *.swp
@@ -17,7 +37,7 @@
 *~
 .claude/
 
-# ========== Python ==========
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -46,20 +66,18 @@ env/
 .ruff_cache/
 .mypy_cache/
 
-# ========== Node.js / Frontend ==========
+# Node.js / Frontend
 node_modules/
 .pnpm-store/
 dist/
 build/
 *.tsbuildinfo
 
-# ========== Docker ==========
+# Docker
 **/.dockerignore
 docker-compose.override.yml
-docker-compose.*.yml
-!docker-compose.yml
 
-# ========== Data & Storage ==========
+# Data & Storage
 .data/
 **/agent_data/
 **/rag_storage/
@@ -70,16 +88,17 @@ docker-compose.*.yml
 *.sqlite*
 *.pid
 
-# ========== Logs ==========
+# Logs
 *.log
 **/logs/
 **/log/
 
-# ========== Backup ==========
+# Backup
 .backup/
 
-# ========== Miscellaneous ==========
+# Miscellaneous
 *.zip
 *.tar.gz
 *.tgz
-TODO.md
+*.lock
+*.log

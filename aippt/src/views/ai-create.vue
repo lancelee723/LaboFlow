@@ -196,15 +196,18 @@
             <div class="options-list">
               <!-- Model Selection -->
               <a-dropdown trigger="click">
-                <div class="option-item">
+                <div class="option-item" :title="currentModelTooltip">
                   <Icon name="star-fill" :size="16" class="option-icon-blue" />
-                  <span class="option-label">{{ selectedModel }}</span>
+                  <span class="option-label">{{ currentModelDisplay }}</span>
                   <Icon name="chevron-down" :size="14" class="dropdown-icon" />
                 </div>
                 <template #content>
-                  <a-doption @click="selectedModel = 'DeepSeek V3'">DeepSeek V3</a-doption>
-                  <a-doption @click="selectedModel = 'GPT-4'">GPT-4</a-doption>
-                  <a-doption @click="selectedModel = 'Claude 3'">Claude 3</a-doption>
+                  <a-doption
+                    v-for="m in availableModels"
+                    :key="m.provider + '/' + m.model"
+                    @click="selectModel(m)"
+                  >{{ m.label }}</a-doption>
+                  <a-doption v-if="availableModels.length === 0" disabled>加载中...</a-doption>
                 </template>
               </a-dropdown>
 
@@ -295,7 +298,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Message } from '@arco-design/web-vue'
@@ -305,19 +308,45 @@ import {
   Doption as ADoption
 } from '@arco-design/web-vue'
 import IIcon from '@/utils/slide/icon.js'
-import { generateOutlineOnly, generatePPTFromOutline, convertCozeToPPTData } from '@/api/coze'
-import { generateOutlineStream } from '@/api/coze-stream'
 import OutlineEditor from '@/components/OutlineEditor.vue'
 import TemplateSelector from '@/components/TemplateSelector.vue'
 import { convertMarkdownToPPT } from '@/utils/markdown-to-ppt'
 import { templateApi } from '@/api/template'
 import { presentationApi } from '@/api/presentation'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
+import { ensureServerSettingsLoaded, getAISettings, fetchAvailableModels, cacheAvailableModels, setAISettings } from '@/utils/ai/config'
+import { PROVIDERS } from '@/utils/ai/providers'
+import { streamGenerate } from '@/utils/ai'
+import { STORYLINE_SYSTEM_PROMPT, parseStorylineFromAI } from '@/utils/ai/prompts/storyline'
+import { exportProfessionalPPTX } from '@/utils/export/pptxExporter'
 
 
 const Icon = IIcon
 const router = useRouter()
 const { t } = useI18n()
+
+onMounted(async () => {
+  await ensureServerSettingsLoaded()
+  aiSettingsLoaded.value = true
+  try {
+    const models = await fetchAvailableModels()
+    if (models.length > 0) {
+      availableModels.value = models.filter(m => m.available)
+      cacheAvailableModels(models)
+    } else {
+      const settings = getAISettings()
+      const providerConfig = PROVIDERS[settings.provider]
+      if (providerConfig?.models) {
+        availableModels.value = providerConfig.models.map(m => ({
+          provider: settings.provider,
+          model: m.value,
+          label: `${providerConfig.label} · ${m.label}`,
+          available: true,
+        }))
+      }
+    }
+  } catch {}
+})
 
 // State
 
@@ -374,6 +403,7 @@ const generatedOutline = ref('')
 const generatedTitle = ref('')
 const isGeneratingPPT = ref(false)
 const outlineEditorRef = ref(null)
+let outlineAbortController = null
 
 const {
   isRecording,
@@ -386,7 +416,27 @@ const {
 } = useSpeechRecognition(speechOptions.value)
 
 // Options
-const selectedModel = ref('DeepSeek V3')
+const aiSettingsLoaded = ref(false)
+const availableModels = ref([])
+
+const currentModelDisplay = computed(() => {
+  const settings = getAISettings()
+  const providerConfig = PROVIDERS[settings.provider]
+  const providerLabel = providerConfig?.label || settings.provider
+  const modelObj = providerConfig?.models?.find(m => m.value === settings.model)
+  const modelLabel = modelObj?.label || settings.model
+  return `${providerLabel} · ${modelLabel}`
+})
+const currentModelTooltip = computed(() => {
+  const settings = getAISettings()
+  const providerConfig = PROVIDERS[settings.provider]
+  return `${providerConfig?.label || settings.provider} / ${settings.model}`
+})
+
+const selectModel = (m) => {
+  setAISettings({ provider: m.provider, model: m.model })
+}
+
 const selectedPageCount = ref('15 - 20页')
 const selectedTextAmount = ref('详细')
 const selectedLanguage = ref('简体中文')
@@ -651,73 +701,90 @@ const handleGenerate = async () => {
 
   try {
     console.log('[AI Create] 开始生成 PPT 大纲，主题:', pptTopic.value)
-    
-    // Stage 1: 调用 Coze 工作流流式生成 PPT 大纲
-    
-    // 初始化流式数据
+
+    const pageCountMap = {
+      '5 - 10页': '5-10',
+      '15 - 20页': '15-20',
+      '20 - 30页': '20-30',
+    }
+    const pageCountNum = pageCountMap[selectedPageCount.value] || '15-20'
+
+    const userPrompt = `请为以下主题生成PPT大纲：
+
+主题：${pptTopic.value}
+页数要求：${pageCountNum}页
+内容详略：${selectedTextAmount.value}
+语言：${selectedLanguage.value}
+风格：${selectedStyle.value}
+
+请生成结构化的大纲内容。`
+
+    const systemPrompt = `你是一位专业的PPT内容策划师。请根据用户提供的主题和要求，生成结构化的PPT大纲。
+
+输出格式要求：
+1. 使用 Markdown 格式
+2. 使用 ## 标题表示每个章节（幻灯片页面）
+3. 每个章节下使用 - 列表项表示该页的要点
+4. 每个章节包含 2-4 个要点
+5. 第一页为封面页，最后一页为总结页
+6. 只输出大纲内容，不要输出其他解释
+
+示例格式：
+## 封面：数字化转型战略规划
+- 副标题：驱动企业高质量发展的新引擎
+- 汇报人：AI助手
+- 日期：2025年
+
+## 数字化转型背景与趋势
+- 全球数字化进程加速，行业变革势在必行
+- 政策导向：国家数字经济战略持续推进
+- 企业面临的核心挑战与机遇
+
+## 核心战略框架
+- 技术底座：云原生+AI双轮驱动
+- 数据资产：从数据治理到数据赋能
+- 组织变革：敏捷化与数字化协同`
+
     let streamedOutline = ''
     let streamedTitle = pptTopic.value
-    
-    // 设置为编辑模式，显示空的编辑器
+
     generatedOutline.value = ''
     generatedTitle.value = streamedTitle
     showOutlineEditor.value = true
-    
-    // 等待 OutlineEditor 渲染完成，然后启动流式进度条
+
     await nextTick()
     if (outlineEditorRef.value) {
       outlineEditorRef.value.startStreaming()
     }
-    
-    // 开始流式生成
-    await generateOutlineStream({
-      keyword: pptTopic.value,
-      model: selectedModel.value,
-      pageCount: selectedPageCount.value,
-      textAmount: selectedTextAmount.value,
-      language: selectedLanguage.value,
-      style: selectedStyle.value
-    }, (type, data) => {
-      console.log('[AI Create Stream]', type, data)
-      
-      switch (type) {
-        case 'start':
-          console.log('[AI Create] 开始生成大纲')
-          if (outlineEditorRef.value) {
-            outlineEditorRef.value.updateStreamingProgress(5)
-          }
-          break
-          
-        case 'title':
-          streamedTitle = data.content
-          generatedTitle.value = streamedTitle
-          console.log('[AI Create] 收到标题:', streamedTitle)
-          if (outlineEditorRef.value) {
-            outlineEditorRef.value.updateStreamingProgress(10)
-          }
-          break
-          
-        case 'outline':
-          // 逐步追加大纲内容
-          streamedOutline += data.content
+
+    if (outlineAbortController) {
+      outlineAbortController.abort()
+    }
+
+    outlineAbortController = streamGenerate(
+      userPrompt,
+      systemPrompt,
+      {
+        onDelta: (chunk) => {
+          streamedOutline += chunk
           generatedOutline.value = streamedOutline
-          console.log('[AI Create] 大纲进度:', data.progress + '%')
-          if (outlineEditorRef.value) {
-            // 将进度映射到 10-95% 范围
-            const mappedProgress = 10 + (parseInt(data.progress) * 0.85)
-            outlineEditorRef.value.updateStreamingProgress(mappedProgress)
+
+          const titleMatch = streamedOutline.match(/^##\s*(?:封面[：:]?)?\s*(.+)/m)
+          if (titleMatch && titleMatch[1]) {
+            streamedTitle = titleMatch[1].trim()
+            generatedTitle.value = streamedTitle
           }
-          break
-          
-        case 'complete':
-          streamedOutline = data.outline
-          streamedTitle = data.title
+
+          if (outlineEditorRef.value) {
+            const estimatedProgress = Math.min(10 + streamedOutline.length * 0.1, 90)
+            outlineEditorRef.value.updateStreamingProgress(estimatedProgress)
+          }
+        },
+        onDone: () => {
           generatedOutline.value = streamedOutline
           generatedTitle.value = streamedTitle
-          console.log('[AI Create] 大纲生成完成')
           if (outlineEditorRef.value) {
             outlineEditorRef.value.updateStreamingProgress(100)
-            // 稍微延迟关闭进度条，让用户看到 100%
             setTimeout(() => {
               if (outlineEditorRef.value) {
                 outlineEditorRef.value.stopStreaming()
@@ -725,15 +792,27 @@ const handleGenerate = async () => {
               Message.success('大纲生成成功！')
             }, 500)
           }
-          break
-          
-        case 'error':
-          throw new Error(data.message || '生成失败')
+          isGenerating.value = false
+        },
+        onError: (err) => {
+          if (err?.name === 'AbortError') return
+          console.error('[AI Create] 生成失败:', err)
+          if (outlineEditorRef.value) {
+            outlineEditorRef.value.stopStreaming()
+          }
+          Message.error(err.message || t('slide.create.generateError'))
+          isGenerating.value = false
+        }
+      },
+      undefined,
+      {
+        taskContext: {
+          slideCount: parseInt(pageCountNum) || 15,
+          hasDocument: false,
+        }
       }
-    })
-    
+    )
 
-    
   } catch (error) {
     Message.clear()
     console.error('[AI Create] 生成失败:', error)
@@ -741,7 +820,6 @@ const handleGenerate = async () => {
       content: error.message || t('slide.create.generateError'),
       duration: 3000
     })
-  } finally {
     isGenerating.value = false
   }
 }
@@ -761,65 +839,96 @@ const handleOutlineConfirm = async ({ outline, title, needsTemplate }) => {
 // 生成 PPT（提取为独立函数）
 const generatePPTWithOutline = async (outline, title, template = null) => {
   isGeneratingPPT.value = true
-  
+
   try {
     console.log('[AI Create] Stage 2: 根据大纲生成 PPT')
-    
+
     Message.loading({
-      content: '正在生成完整 PPT...',
+      content: '正在生成完整 PPT 内容...',
       duration: 0,
       id: 'ppt-generating'
     })
-    
-    // Stage 2: 根据编辑后的大纲生成 PPT
-    const pptResult = await generatePPTFromOutline({
-      outline,
-      title,
-      keyword: pptTopic.value,
-      style: selectedStyle.value
-    })
-    
-    if (!pptResult.success) {
-      throw new Error(pptResult.error || '生成失败')
+
+    let fullMarkdown = ''
+    const pageCountMap = {
+      '5 - 10页': '5-10',
+      '15 - 20页': '15-20',
+      '20 - 30页': '20-30',
     }
-    
-    // 解析 Markdown 为 PPT 数据结构
-    const pptData = convertCozeToPPTData(pptResult)
-    
-    console.log('[AI Create] PPT 数据结构:', pptData)
-    
-    // 创建新的 Slide 文档并保存数据
+    const pageCountNum = pageCountMap[selectedPageCount.value] || '15-20'
+
+    await new Promise((resolve, reject) => {
+      streamGenerate(
+        `请根据以下大纲生成完整的PPT内容，使用 Markdown 格式，每页用 --- 分隔：\n\n${outline}`,
+        `你是一位专业的PPT内容撰写师。请根据提供的大纲，为每一页生成详细的内容。
+每页使用 --- 分隔符分开。
+每页使用 ## 标题开头，下方使用 - 列表项展开要点。
+每页包含 3-5 个要点，内容详实专业。
+语言：${selectedLanguage.value}，风格：${selectedStyle.value}`,
+        {
+          onDelta: (chunk) => { fullMarkdown += chunk },
+          onDone: () => resolve(undefined),
+          onError: (err) => reject(err),
+        },
+        undefined,
+        {
+          taskContext: { slideCount: parseInt(pageCountNum) || 15, hasDocument: false },
+        }
+      )
+    })
+
+    const pptData = convertMarkdownToPPT(fullMarkdown, template)
+
     Message.loading({
       content: '正在创建演示文档...',
       duration: 0,
       id: 'creating-doc'
     })
-    
-    // 调用文档 API 创建新文档（type='slide'）
-    const { documentApi } = await import('@/api/document')
-    const docResponse = await documentApi.createDocument(pptData.title, 'slide')
-    
-    if (docResponse.data?.code !== 200) {
-      throw new Error('创建文档失败')
+
+    try {
+      const { documentApi } = await import('@/api/document')
+      const docResponse = await documentApi.createDocument(title || pptData.title || '未命名演示文稿', 'slide')
+
+      if (docResponse.data?.code === 200 && docResponse.data?.data?.id) {
+        const docId = docResponse.data.data.id
+        await documentApi.saveSlide(docId, JSON.stringify(pptData))
+
+        Message.clear()
+        Message.success({
+          content: `成功生成 ${pptData.slides?.length || 0} 页演示文稿！`,
+          duration: 2000
+        })
+
+        setTimeout(() => {
+          router.push(`/slide/${docId}`)
+        }, 500)
+        return
+      }
+    } catch (e) {
+      console.warn('[AI Create] Backend save failed, using local storage:', e.message)
     }
-    
-    const docId = docResponse.data.data.id
-    console.log('[AI Create] 文档创建成功, ID:', docId)
-    
-    // 保存 PPT 内容到后端
-    await documentApi.saveSlide(docId, JSON.stringify(pptData))
-    
+
     Message.clear()
+    const localId = 'local_' + Date.now()
+    const localPresentations = JSON.parse(localStorage.getItem('aippt_local_presentations') || '[]')
+    localPresentations.unshift({
+      id: localId,
+      title: title || '未命名演示文稿',
+      markdownContent: fullMarkdown,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    localStorage.setItem('aippt_local_presentations', JSON.stringify(localPresentations))
+
     Message.success({
-      content: `成功生成 ${pptData.slides.length} 页演示文稿！`,
+      content: `成功生成演示文稿！`,
       duration: 2000
     })
-    
-    // 跳转到 Slide 编辑器
+
     setTimeout(() => {
-      router.push(`/slide/${docId}`)
+      router.push(`/slide/${localId}`)
     }, 500)
-    
+
   } catch (error) {
     Message.clear()
     console.error('[AI Create] PPT 生成失败:', error)
@@ -851,55 +960,101 @@ const handleOutlineOptimize = async () => {
 
 // 模板选择器事件处理
 const handleTemplateSelected = async (template) => {
+  showTemplateSelector.value = false
+
+  // 咨询风格模板走 Storyline 路径（AI → JSON → 后端 MckEngine → PPTX 下载）
+  if (template.category === 'consulting' && template.source === 'builtin') {
+    await handleStorylinePath(template)
+    return
+  }
+
+  // 默认走 Konva 路径（保存 markdown → 跳转编辑器）
   try {
-    Message.loading({
-      content: '正在应用模板...',
-      duration: 0,
-      id: 'applying-template'
-    })
+    Message.loading({ content: '正在应用模板...', duration: 0, id: 'applying-template' })
 
-    // 1. 获取完整模板数据
     const result = await templateApi.getTemplate(template.id)
-    
-    if (result.code !== 200) {
-      throw new Error(result.message || '获取模板失败')
-    }
+    if (result.code !== 200) throw new Error(result.message || '获取模板失败')
 
-    const fullTemplate = result.data.template
-
-    // 2. 获取 Markdown 大纲
     const { outline, title } = pendingOutlineData.value
-    
-    console.log('[AI Create] Saving with markdown outline and template reference')
-
-    // 3. 创建新的 Slide 文档并保存（保存 markdown 内容）
-    Message.loading({
-      content: '正在保存文档...',
-      duration: 0,
-      id: 'saving-doc'
-    })
+    Message.loading({ content: '正在保存文档...', duration: 0, id: 'saving-doc' })
 
     const docId = await createAndSavePresentation({
-      title: title,
-      content: outline,  // 保存 markdown 内容，而不是转换后的 PPT 数据
+      title,
+      content: outline,
       templateId: template.id
     })
 
     Message.clear()
     Message.success('PPT 创建成功！')
-
-    // 4. 跳转到编辑页面
-    setTimeout(() => {
-      router.push(`/slide/${docId}`)
-    }, 500)
-
+    setTimeout(() => router.push(`/slide/${docId}`), 500)
   } catch (error) {
     Message.clear()
     console.error('[AI Create] 应用模板失败:', error)
     Message.error(error.message || '应用模板失败，请重试')
   } finally {
-    showTemplateSelector.value = false
     pendingOutlineData.value = null
+  }
+}
+
+// Storyline 路径：AI 生成 Storyline JSON → 后端 MckEngine 渲染 → PPTX 下载
+const handleStorylinePath = async (template) => {
+  const { outline, title } = pendingOutlineData.value || {}
+  pendingOutlineData.value = null
+
+  if (!title && !pptTopic.value) {
+    Message.error('缺少主题信息，无法生成')
+    return
+  }
+
+  const pptTitle = title || pptTopic.value
+
+  Message.loading({ content: '正在生成专业咨询风格 PPT...', duration: 0, id: 'storyline-gen' })
+  isGeneratingPPT.value = true
+
+  try {
+    const userPrompt = `请为以下主题生成 Storyline JSON：
+
+主题：${pptTitle}
+${outline ? `\n参考大纲：\n${outline}` : ''}
+
+直接输出 JSON 数组，不要有任何额外说明。`
+
+    // 用 Promise 包装 streamGenerate 以便 await
+    const storylineJson = await new Promise<string>((resolve, reject) => {
+      let fullText = ''
+      const ctrl = streamGenerate(
+        userPrompt,
+        STORYLINE_SYSTEM_PROMPT,
+        {
+          onDelta: (chunk) => { fullText += chunk },
+          onDone: () => resolve(fullText),
+          onError: (err) => {
+            if (err?.name === 'AbortError') return
+            reject(err)
+          },
+        }
+      )
+    })
+
+    const storyline = parseStorylineFromAI(storylineJson)
+    if (!storyline || storyline.length === 0) {
+      throw new Error('AI 未能生成有效的 Storyline，请重试')
+    }
+
+    Message.loading({ content: `正在渲染 ${storyline.length} 张幻灯片...`, duration: 0, id: 'storyline-gen' })
+
+    await exportProfessionalPPTX(pptTitle, storyline, (percent) => {
+      console.log(`[Storyline] Export progress: ${percent}%`)
+    })
+
+    Message.clear()
+    Message.success(`专业 PPT 已生成并下载！共 ${storyline.length} 张幻灯片`)
+  } catch (error) {
+    Message.clear()
+    console.error('[Storyline] 生成失败:', error)
+    Message.error(error.message || '专业 PPT 生成失败，请重试')
+  } finally {
+    isGeneratingPPT.value = false
   }
 }
 

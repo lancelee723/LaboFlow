@@ -5,10 +5,10 @@
   },
   "login": {
     "hero": {
-      "badge": "Open Source · Multi-Agent Collaboration",
-      "title": "Clawith",
+      "badge": "Enterprise AI Workbench",
+      "title": "LaboFlow",
       "subtitle": "OpenClaw for Teams",
-      "description": "OpenClaw empowers individuals.<br>Clawith scales it to frontier organizations.",
+      "description": "OpenClaw empowers individuals.<br>LaboFlow scales it to frontier organizations.",
       "features": {
         "multiAgent": {
           "title": "Multi-Agent Crew",

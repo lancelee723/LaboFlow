@@ -153,38 +153,20 @@ const localIP = getLocalIP();
     server: {
       host: '0.0.0.0',
       port: env.PORT || '5173',
-      open: true,
+      open: false,
       strictPort: false,
       cors: true,
       proxy: {
-        // API 代理到后端服务
-        '/api': {
-          target: 'http://127.0.0.1:8008',
-          changeOrigin: true,
-          secure: false,
-        },
-        // 开发环境同源代理（避免 localhost/域名差异导致的跨域与解析问题）
-        '/ws': {
-          target: 'ws://127.0.0.1:3002',
-          ws: true,
-          changeOrigin: true,
-        },
-      // 信令通道代理：/signal -> 后端 ws://127.0.0.1:3002
-        '/signal': {
-          target: 'ws://127.0.0.1:3002',
-          ws: true,
-          changeOrigin: true,
-        },
-        // 图片代理接口（开发调试用）：/api/image-proxy?url=<原图URL>
+        // ── 最长前缀优先：更具体的规则必须排在通用 /api 之前 ──────────────
+
+        // 图片代理（开发调试用）：/api/image-proxy?url=<原图URL>
         '/api/image-proxy': {
           target: image_service_url,
           changeOrigin: true,
           rewrite: (path) => {
-          // 从查询参数中获取原始图片URL
             const url = new URL(path, 'http://localhost')
             const imageUrl = url.searchParams.get('url')
             if (imageUrl) {
-            // 解析图片URL，提取路径部分
               try {
                 const parsedUrl = new URL(imageUrl)
                 return parsedUrl.pathname + parsedUrl.search
@@ -194,6 +176,42 @@ const localIP = getLocalIP();
             }
             return '/404'
           },
+        },
+
+        // aippt-server：导出 & 模板（FastAPI on :8009）
+        '/api/export': {
+          target: 'http://127.0.0.1:8009',
+          changeOrigin: true,
+        },
+        '/api/templates': {
+          target: 'http://127.0.0.1:8009',
+          changeOrigin: true,
+        },
+
+        // Clawith 后端 API（auth / enterprise / 其他，:8008）
+        '/api': {
+          target: 'http://127.0.0.1:8008',
+          changeOrigin: true,
+          secure: false,
+        },
+
+        // Clawith AI 试用流：/ai/trial/stream 等
+        '/ai': {
+          target: 'http://127.0.0.1:8008',
+          changeOrigin: true,
+        },
+
+        // 协作 WebSocket
+        '/ws': {
+          target: 'ws://127.0.0.1:3002',
+          ws: true,
+          changeOrigin: true,
+        },
+        // 信令通道
+        '/signal': {
+          target: 'ws://127.0.0.1:3002',
+          ws: true,
+          changeOrigin: true,
         },
       },
     },
