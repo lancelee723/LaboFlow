@@ -372,3 +372,32 @@ class PlaywrightClient:
             "url": self._page.url,
             "title": await self._page.title(),
         }
+
+    # ─── Accessibility actions (ref-based) ──────────────────────────────
+
+    async def browser_click(self, ref: str) -> dict:
+        loc = await self._locator_for_ref(ref)
+        await loc.click(timeout=10000)
+        # Page may have navigated; return current state
+        return {
+            "success": True,
+            "url": self._page.url,
+            "title": await self._page.title(),
+        }
+
+    async def browser_type(self, ref: str, text: str, submit: bool = False) -> dict:
+        loc = await self._locator_for_ref(ref)
+        await loc.fill(text, timeout=10000)
+        if submit:
+            await loc.press("Enter")
+        return {"success": True, "ref": ref, "chars": len(text), "submit": submit}
+
+    async def browser_select(self, ref: str, values: list[str]) -> dict:
+        loc = await self._locator_for_ref(ref)
+        await loc.select_option(values, timeout=10000)
+        return {"success": True, "ref": ref, "values": values}
+
+    async def browser_hover(self, ref: str) -> dict:
+        loc = await self._locator_for_ref(ref)
+        await loc.hover(timeout=10000)
+        return {"success": True, "ref": ref}

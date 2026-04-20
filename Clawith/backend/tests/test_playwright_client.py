@@ -181,3 +181,40 @@ class TestNavigate:
         from app.services.playwright_client import URLBlockedError
         with pytest.raises(URLBlockedError):
             await client.browser_navigate("http://postgres:5432/")
+
+
+class TestAccessibilityActions:
+    @pytest.mark.asyncio
+    async def test_click_by_ref_navigates(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        snap = await client.browser_snapshot()
+        import re
+        # Find the ref for the "Next" link
+        link_refs = [m.group(1) for m in re.finditer(r'link "Next"\s*\[ref=(\w+)\]', snap["tree"])]
+        assert link_refs, f"Next link not found in tree:\n{snap['tree']}"
+        result = await client.browser_click(link_refs[0])
+        assert result["success"] is True
+        assert result["url"].endswith("/next")
+
+    @pytest.mark.asyncio
+    async def test_type_fills_input(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/form")
+        snap = await client.browser_snapshot()
+        import re
+        # The username textbox
+        tb_refs = [m.group(1) for m in re.finditer(r'(?:textbox|searchbox)[^\[]*\[ref=(\w+)\]', snap["tree"])]
+        assert tb_refs, f"textbox not found:\n{snap['tree']}"
+        await client.browser_type(tb_refs[0], "alice")
+        # Verify the value landed in the DOM
+        value = await client._page.eval_on_selector("#u", "el => el.value")
+        assert value == "alice"
+
+    @pytest.mark.asyncio
+    async def test_hover_on_ref_does_not_raise(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        snap = await client.browser_snapshot()
+        import re
+        refs = re.findall(r"\[ref=(\w+)\]", snap["tree"])
+        assert refs
+        result = await client.browser_hover(refs[0])
+        assert result["success"] is True
