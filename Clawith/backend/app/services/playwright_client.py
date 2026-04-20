@@ -350,3 +350,25 @@ class PlaywrightClient:
                 "Call playwright_browser_snapshot again."
             )
         return loc.first
+
+    # ─── Navigation ─────────────────────────────────────────────────────
+
+    async def browser_navigate(self, url: str, wait_until: str = "load") -> dict:
+        """Navigate to URL. Raises URLBlockedError on gated URLs."""
+        _check_url_safe(url)
+        await self.ensure_context()
+        try:
+            await self._page.goto(url, wait_until=wait_until, timeout=30000)
+        except Exception as e:
+            msg = str(e)
+            if "Timeout" in msg or "timeout" in msg:
+                raise NavigationTimeoutError(
+                    f"Navigation to {url!r} timed out (>30 s). "
+                    "Try playwright_browser_screenshot to check state, or retry."
+                )
+            raise
+        return {
+            "success": True,
+            "url": self._page.url,
+            "title": await self._page.title(),
+        }

@@ -160,3 +160,24 @@ class TestSnapshot:
         await client.browser_snapshot()
         with pytest.raises(RefExpiredError):
             client._resolve_ref(stale_ref)
+
+
+class TestNavigate:
+    @pytest.mark.asyncio
+    async def test_navigate_public_url(self, client, local_http_server, bypass_url_check):
+        result = await client.browser_navigate(f"{local_http_server}/")
+        assert result["success"] is True
+        assert result["url"].endswith("/")
+        assert result["title"] == "Index"
+
+    @pytest.mark.asyncio
+    async def test_navigate_blocked_scheme_raises(self, client):
+        from app.services.playwright_client import URLBlockedError
+        with pytest.raises(URLBlockedError):
+            await client.browser_navigate("file:///etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_navigate_blocked_internal_raises(self, client):
+        from app.services.playwright_client import URLBlockedError
+        with pytest.raises(URLBlockedError):
+            await client.browser_navigate("http://postgres:5432/")
