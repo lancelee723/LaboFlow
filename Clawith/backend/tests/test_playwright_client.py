@@ -127,3 +127,36 @@ class TestLifecycle:
     async def test_close_is_idempotent(self, client):
         await client.close()
         await client.close()  # second call must not raise
+
+
+class TestSnapshot:
+    @pytest.mark.asyncio
+    async def test_snapshot_returns_refs(self, client, local_http_server, bypass_url_check):
+        await client.ensure_context()
+        await client._page.goto(f"{local_http_server}/")
+        snap = await client.browser_snapshot()
+        assert "url" in snap
+        assert "tree" in snap
+        # Each interactive element gets a `[ref=...]` tag in the YAML-ish tree
+        assert "[ref=" in snap["tree"]
+        # The anchor tag from the fixture page must be present
+        assert "Next" in snap["tree"] or "link" in snap["tree"].lower()
+
+    @pytest.mark.asyncio
+    async def test_ref_expired_after_new_snapshot_and_dom_change(self, client, local_http_server, bypass_url_check):
+        from app.services.playwright_client import RefExpiredError
+
+        await client.ensure_context()
+        await client._page.goto(f"{local_http_server}/")
+        snap1 = await client.browser_snapshot()
+        # Grab the first ref from the tree
+        import re
+        refs = re.findall(r"\[ref=([\w\-]+)\]", snap1["tree"])
+        assert refs, "no refs in snapshot"
+        stale_ref = refs[0]
+
+        # Navigate elsewhere and take a new snapshot — the old ref is stale
+        await client._page.goto(f"{local_http_server}/form")
+        await client.browser_snapshot()
+        with pytest.raises(RefExpiredError):
+            client._resolve_ref(stale_ref)

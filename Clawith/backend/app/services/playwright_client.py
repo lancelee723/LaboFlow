@@ -212,3 +212,141 @@ class PlaywrightClient:
             logger.warning(f"[Playwright] playwright.stop failed: {e}")
         finally:
             self._playwright = None
+
+    # ─── Accessibility snapshot + ref registry ──────────────────────────
+
+    async def browser_snapshot(self) -> dict:
+        """Return an accessibility-tree snapshot of the current page.
+
+        Every interactive node (button, link, textbox, combobox, checkbox,
+        etc.) is assigned a short opaque `ref` that stays valid until the
+        next snapshot is taken. The LLM uses these refs to address elements.
+        """
+        await self.ensure_context()
+        # Reset ref registry (but keep counter incrementing for uniqueness)
+        self._ref_registry = {}
+
+        # Extract DOM tree using JavaScript
+        dom_data = await self._page.evaluate(self._get_dom_extraction_script())
+        tree_lines: list[str] = []
+        self._walk_ax(dom_data, tree_lines, depth=0)
+        return {
+            "url": self._page.url,
+            "title": await self._page.title(),
+            "tree": "\n".join(tree_lines),
+        }
+
+    def _get_dom_extraction_script(self) -> str:
+        """Return JavaScript code to extract DOM tree with roles and labels."""
+        return """
+        (function() {
+            function extractTree(node, maxDepth = 15, depth = 0) {
+                if (depth > maxDepth) return null;
+                if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+                const role = node.getAttribute("role") ||
+                             (node.tagName === "BUTTON" && "button") ||
+                             (node.tagName === "A" && "link") ||
+                             (node.tagName === "INPUT" && "textbox") ||
+                             (node.tagName === "TEXTAREA" && "textbox") ||
+                             (node.tagName === "SELECT" && "combobox") ||
+                             (node.tagName === "H1" && "heading") ||
+                             (node.tagName === "H2" && "heading") ||
+                             (node.tagName === "H3" && "heading") ||
+                             (node.tagName === "FORM" && "form") ||
+                             null;
+
+                if (!role) {
+                    const children = [];
+                    for (let child of node.children) {
+                        const childData = extractTree(child, maxDepth, depth + 1);
+                        if (childData) children.push(childData);
+                    }
+                    return children.length > 0 ? { children } : null;
+                }
+
+                // Get element's accessible name
+                let name = node.getAttribute("aria-label") ||
+                          node.getAttribute("title") ||
+                          node.textContent ||
+                          node.getAttribute("placeholder") ||
+                          "";
+                name = name.trim().substring(0, 80);
+
+                const result = { role, name };
+
+                const children = [];
+                for (let child of node.children) {
+                    const childData = extractTree(child, maxDepth, depth + 1);
+                    if (childData) {
+                        if (childData.children && !childData.role) {
+                            children.push(...childData.children);
+                        } else {
+                            children.push(childData);
+                        }
+                    }
+                }
+                if (children.length > 0) result.children = children;
+
+                return result;
+            }
+            return extractTree(document.documentElement);
+        })()
+        """
+
+    def _walk_ax(self, node: Optional[dict], out: list[str], depth: int) -> None:
+        if node is None:
+            return
+
+        role = node.get("role", "")
+        name = (node.get("name") or "").replace("\n", " ").strip()[:80]
+        indent = "  " * depth
+
+        if not role:
+            # Intermediate node, process children
+            for child in node.get("children", []) or []:
+                self._walk_ax(child, out, depth)
+            return
+
+        line = f"{indent}- {role}"
+        if name:
+            line += f' "{name}"'
+
+        # Assign a ref only to interactive roles
+        if role in {
+            "button", "link", "textbox", "combobox", "checkbox",
+            "radio", "menuitem", "tab", "switch", "searchbox", "form",
+        }:
+            self._ref_counter += 1
+            ref_id = f"e{self._ref_counter}"
+            # Store selector data — we'll resolve it at action time
+            self._ref_registry[ref_id] = {
+                "role": role,
+                "name": name,
+            }
+            line += f" [ref={ref_id}]"
+
+        out.append(line)
+        for child in node.get("children", []) or []:
+            self._walk_ax(child, out, depth + 1)
+
+    def _resolve_ref(self, ref: str) -> dict:
+        """Return the selector dict for a ref, or raise RefExpiredError."""
+        if ref not in getattr(self, "_ref_registry", {}):
+            raise RefExpiredError(
+                f"Element ref '{ref}' is stale. Call playwright_browser_snapshot again."
+            )
+        return self._ref_registry[ref]
+
+    async def _locator_for_ref(self, ref: str):
+        """Return a Playwright Locator for a ref entry."""
+        entry = self._resolve_ref(ref)
+        role = entry["role"]
+        name = entry["name"]
+        loc = self._page.get_by_role(role, name=name) if name else self._page.get_by_role(role)
+        if await loc.count() == 0:
+            raise RefExpiredError(
+                f"Element ref '{ref}' no longer matches a visible element. "
+                "Call playwright_browser_snapshot again."
+            )
+        return loc.first
