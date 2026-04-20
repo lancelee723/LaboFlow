@@ -8,6 +8,8 @@
 !aiPPT/
 !Clawith/
 !LightRAG/
+!docs/
+!docs/**
 
 # ── Allow specific root-level files ─────────────
 !.env.example
