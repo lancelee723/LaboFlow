@@ -401,3 +401,48 @@ class PlaywrightClient:
         loc = await self._locator_for_ref(ref)
         await loc.hover(timeout=10000)
         return {"success": True, "ref": ref}
+
+    # ─── Fallback actions (coordinate-based) ────────────────────────────
+
+    async def browser_screenshot(self, full_page: bool = False) -> bytes:
+        await self.ensure_context()
+        return await self._page.screenshot(full_page=full_page, type="png")
+
+    async def browser_click_xy(self, x: int, y: int) -> dict:
+        await self.ensure_context()
+        # Try to get href for anchor tags, or fall back to mouse click
+        href = await self._page.evaluate(f"""
+            () => {{
+                const el = document.elementFromPoint({x}, {y});
+                if (el && el.tagName === 'A' && el.href) {{
+                    return el.href;
+                }}
+                return null;
+            }}
+        """)
+        if href:
+            await self._page.goto(href, timeout=30000, wait_until="load")
+        else:
+            # Fallback: try dispatching a click event
+            await self._page.evaluate(f"""
+                () => {{
+                    const el = document.elementFromPoint({x}, {y});
+                    if (el) {{
+                        const evt = new MouseEvent('click', {{
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: {x},
+                            clientY: {y}
+                        }});
+                        el.dispatchEvent(evt);
+                    }}
+                }}
+            """)
+        return {"success": True, "x": x, "y": y}
+
+    async def browser_type_xy(self, x: int, y: int, text: str) -> dict:
+        await self.ensure_context()
+        await self._page.mouse.click(x, y)
+        await self._page.keyboard.type(text, delay=10)
+        return {"success": True, "x": x, "y": y, "chars": len(text)}

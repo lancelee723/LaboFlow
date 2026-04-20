@@ -218,3 +218,36 @@ class TestAccessibilityActions:
         assert refs
         result = await client.browser_hover(refs[0])
         assert result["success"] is True
+
+
+class TestFallbackActions:
+    @pytest.mark.asyncio
+    async def test_screenshot_returns_png_bytes(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        png = await client.browser_screenshot()
+        assert isinstance(png, bytes)
+        # PNG magic header
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+    @pytest.mark.asyncio
+    async def test_click_xy_fires_at_coords(self, client, local_http_server, bypass_url_check):
+        # Navigate to a page with a link and click its approximate coords
+        await client.browser_navigate(f"{local_http_server}/")
+        # The "Next" link is near top-left, click at its center
+        box = await client._page.locator("#go").bounding_box()
+        assert box
+        x, y = int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2)
+        await client.browser_click_xy(x, y)
+        # Give navigation a moment
+        await client._page.wait_for_load_state("load", timeout=5000)
+        assert client._page.url.endswith("/next")
+
+    @pytest.mark.asyncio
+    async def test_type_xy_fills_focused_input(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/form")
+        box = await client._page.locator("#u").bounding_box()
+        assert box
+        x, y = int(box["x"] + 5), int(box["y"] + box["height"] / 2)
+        await client.browser_type_xy(x, y, "bob")
+        value = await client._page.eval_on_selector("#u", "el => el.value")
+        assert value == "bob"
