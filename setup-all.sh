@@ -102,6 +102,20 @@ else
     ok "Clawith backend .venv and frontend node_modules already set up (skipping)"
 fi
 
+# Install Playwright Chromium browser binary into the Clawith backend venv.
+# pip installs the Python bindings (from pyproject.toml) but the browser
+# binary must be downloaded separately via `playwright install`.
+PLAYWRIGHT_BIN="$ROOT/Clawith/backend/.venv/bin/playwright"
+if [ -x "$PLAYWRIGHT_BIN" ]; then
+    # `playwright install` is idempotent — safe to re-run, fast when already installed
+    warn "Installing Playwright Chromium browser binary (first time only, ~120 MB)..."
+    "$PLAYWRIGHT_BIN" install chromium || fail "playwright install chromium failed"
+    ok "Playwright Chromium ready"
+else
+    warn "playwright not found in .venv — skipping Chromium install"
+    warn "To install manually:  Clawith/backend/.venv/bin/pip install playwright && Clawith/backend/.venv/bin/playwright install chromium"
+fi
+
 # ── 4. LightRAG ──────────────────────────────────────────────
 step "[4/5] LightRAG"
 cd "$ROOT/LightRAG"
