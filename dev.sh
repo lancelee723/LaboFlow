@@ -11,6 +11,10 @@
 #
 # Writes PIDs to .data/pid/  and logs to .data/log/
 # Stop everything with:  ./stop.sh
+#
+# Test mode (runs unit/integration tests without starting services):
+#   ./dev.sh --test [pytest-args...]
+#   ./dev.sh --test tests/test_playwright_client.py -v
 # ─────────────────────────────────────────────────────────────
 set -e
 
@@ -20,6 +24,53 @@ for _brew_prefix in /opt/homebrew /usr/local; do
 done
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+# ── Test mode ────────────────────────────────────────────────
+# Usage:  ./dev.sh --test [pytest-args...]
+# Runs Clawith backend test suite without starting any services.
+# Creates/reuses a Python 3.12 venv at Clawith/backend/.venv-test
+if [ "${1:-}" = "--test" ]; then
+    shift   # remaining args forwarded to pytest
+    BACKEND_DIR="$ROOT/Clawith/backend"
+    VENV="$BACKEND_DIR/.venv-test"
+
+    echo -e "\033[0;36m[dev.sh --test]\033[0m Setting up test environment..."
+
+    # Create venv with Python 3.12 if missing
+    if [ ! -x "$VENV/bin/python" ]; then
+        echo "  Creating .venv-test with Python 3.12 (via uv)..."
+        uv venv --python 3.12 "$VENV"
+    fi
+
+    # Install/sync project deps (fast when up-to-date)
+    uv pip install --python "$VENV/bin/python" -e "$BACKEND_DIR[dev]" --quiet
+
+    # Install Playwright Chromium if not already present
+    if ! "$VENV/bin/python" -c "
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    p.chromium.launch().close()
+" 2>/dev/null; then
+        echo "  Installing Playwright Chromium..."
+        "$VENV/bin/python" -m playwright install chromium
+    fi
+
+    echo -e "\033[0;36m[dev.sh --test]\033[0m Running tests..."
+    cd "$BACKEND_DIR"
+
+    # Default: all Playwright/doc/integration tests; override by passing args
+    if [ $# -eq 0 ]; then
+        "$VENV/bin/python" -m pytest \
+            tests/test_playwright_client.py \
+            tests/test_doc_tools.py \
+            tests/test_playwright_agent_integration.py \
+            -v
+    else
+        "$VENV/bin/python" -m pytest "$@"
+    fi
+    exit $?
+fi
+
 DATA_DIR="$ROOT/.data"
 PID_DIR="$DATA_DIR/pid"
 LOG_DIR="$DATA_DIR/log"
