@@ -86,3 +86,44 @@ class TestURLBlocklist:
         monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
         with pytest.raises(URLBlockedError, match="private"):
             _check_url_safe("http://rebind.example/")
+
+
+# ─── Lifecycle tests (real Chromium) ────────────────────────────────────
+
+import pytest_asyncio
+
+from app.services.playwright_client import PlaywrightClient
+
+
+@pytest_asyncio.fixture
+async def client():
+    c = PlaywrightClient()
+    await c.start()
+    try:
+        yield c
+    finally:
+        await c.close()
+
+
+class TestLifecycle:
+    @pytest.mark.asyncio
+    async def test_start_creates_browser(self, client):
+        assert client._browser is not None
+        assert client._browser.is_connected()
+
+    @pytest.mark.asyncio
+    async def test_ensure_context_creates_context(self, client):
+        await client.ensure_context()
+        assert client._context is not None
+
+    @pytest.mark.asyncio
+    async def test_ensure_context_is_idempotent(self, client):
+        await client.ensure_context()
+        first = client._context
+        await client.ensure_context()
+        assert client._context is first
+
+    @pytest.mark.asyncio
+    async def test_close_is_idempotent(self, client):
+        await client.close()
+        await client.close()  # second call must not raise

@@ -124,3 +124,91 @@ def _check_url_safe(url: str) -> None:
     for ip in _resolve_host_ips(host):
         if _is_private_ip(ip):
             raise URLBlockedError(f"blocked — {host} resolves to private IP {ip}")
+
+
+# ─── PlaywrightClient ──────────────────────────────────────────────────
+
+import asyncio
+from typing import Optional
+
+from loguru import logger
+
+# Note: playwright is imported lazily inside start() so that test collection
+# doesn't fail if the package is absent in a dev environment.
+
+
+class PlaywrightClient:
+    """One Chromium process, one BrowserContext per ChatSession.
+
+    Lifecycle:
+        c = PlaywrightClient()
+        await c.start()           # launches Chromium
+        await c.ensure_context()  # lazily creates a BrowserContext
+        # ... issue tool calls ...
+        await c.close()           # closes context + browser + playwright
+    """
+
+    def __init__(self):
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._lock = asyncio.Lock()
+        self._ref_registry: dict[str, dict] = {}
+        self._ref_counter = 0
+        self._agent_id: str | None = None
+        self._session_id: str | None = None
+
+    async def start(self) -> None:
+        """Launch Chromium. Idempotent."""
+        if self._browser is not None and self._browser.is_connected():
+            return
+        from playwright.async_api import async_playwright
+
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(
+            headless=True,
+            args=["--disable-dev-shm-usage", "--no-sandbox"],
+        )
+        logger.info("[Playwright] Chromium launched")
+
+    async def ensure_context(self) -> None:
+        """Lazily create a BrowserContext with its own cookies/storage."""
+        if self._browser is None or not self._browser.is_connected():
+            await self.start()
+        if self._context is None:
+            self._context = await self._browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+            )
+            self._page = await self._context.new_page()
+
+    async def close(self) -> None:
+        """Close context, browser, and playwright. Safe to call twice."""
+        try:
+            if self._context is not None:
+                await self._context.close()
+        except Exception as e:
+            logger.warning(f"[Playwright] context.close failed: {e}")
+        finally:
+            self._context = None
+            self._page = None
+
+        try:
+            if self._browser is not None:
+                await self._browser.close()
+        except Exception as e:
+            logger.warning(f"[Playwright] browser.close failed: {e}")
+        finally:
+            self._browser = None
+
+        try:
+            if self._playwright is not None:
+                await self._playwright.stop()
+        except Exception as e:
+            logger.warning(f"[Playwright] playwright.stop failed: {e}")
+        finally:
+            self._playwright = None
