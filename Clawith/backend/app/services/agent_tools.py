@@ -2384,6 +2384,10 @@ async def execute_tool(
     if tool_name.startswith("agentbay_"):
         arguments["_session_id"] = session_id
 
+    # Same for built-in Playwright browser / doc tools
+    if tool_name.startswith("playwright_browser_") or tool_name in ("doc_read", "doc_extract_tables"):
+        arguments["_session_id"] = session_id
+
         # Take Control lock: block automatic tool execution while a human
         # is manually controlling the browser/desktop session. This prevents
         # input collisions between human clicks and agent-initiated actions.
@@ -10002,22 +10006,12 @@ async def _agentbay_file_transfer(agent_id: Optional[uuid.UUID], ws: Path, argum
 # Playwright Browser handlers
 # ──────────────────────────────────────────────────────────────────────────
 
-import uuid as _uuid
 
-
-def _chat_session_id_for_handlers() -> str:
-    """Resolve the current ChatSession id from context, fallback to 'default'.
-
-    TODO: if project has a ContextVar for chat session, replace with real lookup.
-    """
-    return "default"
-
-
-async def _get_playwright_client(agent_id):
+async def _get_playwright_client(agent_id, arguments):
+    """Get or create a PlaywrightClient for the given agent+session pair."""
     from app.services.playwright_client import get_playwright_client_for_session
-    return await get_playwright_client_for_session(
-        str(agent_id), _chat_session_id_for_handlers()
-    )
+    session_id = arguments.pop("_session_id", "") or "default"
+    return await get_playwright_client_for_session(str(agent_id), session_id)
 
 
 def _fmt(result) -> str:
@@ -10033,59 +10027,65 @@ def _fmt(result) -> str:
 
 
 async def _playwright_browser_navigate(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_navigate(
         arguments["url"], wait_until=arguments.get("wait_until", "load")
     ))
 
 
 async def _playwright_browser_snapshot(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_snapshot())
 
 
 async def _playwright_browser_click(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_click(arguments["ref"]))
 
 
 async def _playwright_browser_type(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_type(
         arguments["ref"], arguments["text"], submit=arguments.get("submit", False)
     ))
 
 
 async def _playwright_browser_select(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_select(arguments["ref"], arguments["values"]))
 
 
 async def _playwright_browser_hover(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_hover(arguments["ref"]))
 
 
 async def _playwright_browser_screenshot(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
-    png = await client.browser_screenshot(full_page=arguments.get("full_page", False))
-    return _fmt(png)
+    client = await _get_playwright_client(agent_id, arguments)
+    raw_bytes = await client.browser_screenshot(full_page=arguments.get("full_page", False))
+    from app.services.vision_inject import store_temp_screenshot
+    img_id = store_temp_screenshot(raw_bytes)
+    return (
+        f"Internal screenshot captured for analysis. [ImageID: {img_id}]\n"
+        "NOTE: This screenshot is for YOUR eyes only (LLM vision). "
+        "If the user asked to SEE it, save it to workspace and return the path."
+    )
 
 
 async def _playwright_browser_click_xy(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_click_xy(arguments["x"], arguments["y"]))
 
 
 async def _playwright_browser_type_xy(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_type_xy(
         arguments["x"], arguments["y"], arguments["text"]
     ))
 
 
 async def _playwright_browser_wait_for(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_wait_for(
         selector=arguments.get("selector", ""),
         text=arguments.get("text", ""),
@@ -10094,38 +10094,39 @@ async def _playwright_browser_wait_for(agent_id, arguments):
 
 
 async def _playwright_browser_eval(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_eval(arguments["expression"]))
 
 
 async def _playwright_browser_get_text(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_get_text(arguments.get("ref", "")))
 
 
 async def _playwright_browser_back(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_back())
 
 
 async def _playwright_browser_close_tab(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_close_tab())
 
 
 async def _playwright_browser_download(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_download(
         arguments["ref"], timeout_ms=arguments.get("timeout_ms", 30000)
     ))
 
 
 async def _playwright_browser_list_downloads(agent_id, arguments):
-    client = await _get_playwright_client(agent_id)
+    client = await _get_playwright_client(agent_id, arguments)
     return _fmt(await client.browser_list_downloads())
 
 
 async def _doc_read_tool(agent_id, arguments):
+    arguments.pop("_session_id", None)
     from app.services.doc_parser import doc_read
     try:
         res = doc_read(
@@ -10139,6 +10140,7 @@ async def _doc_read_tool(agent_id, arguments):
 
 
 async def _doc_extract_tables_tool(agent_id, arguments):
+    arguments.pop("_session_id", None)
     from app.services.doc_parser import doc_extract_tables
     try:
         res = doc_extract_tables(
