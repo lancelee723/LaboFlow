@@ -64,6 +64,18 @@ async def _start_ss_local() -> None:
     logger.warning("[Proxy] All SS nodes failed — Discord API calls will run without proxy")
 
 
+async def _playwright_cleanup_loop():
+    """Every 60 seconds, reap idle Playwright sessions."""
+    from app.services.playwright_client import cleanup_playwright_sessions
+
+    while True:
+        try:
+            await cleanup_playwright_sessions()
+        except Exception as e:
+            logger.warning(f"[Playwright] cleanup loop iteration failed: {e}")
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
@@ -226,6 +238,7 @@ async def lifespan(app: FastAPI):
             ("dingtalk_stream", dingtalk_stream_manager.start_all()),
             ("wecom_stream", wecom_stream_manager.start_all()),
             ("discord_gw", discord_gateway_manager.start_all()),
+            ("playwright_cleanup", _playwright_cleanup_loop()),
         ]:
             task = asyncio.create_task(coro, name=name)
             task.add_done_callback(_bg_task_error)
