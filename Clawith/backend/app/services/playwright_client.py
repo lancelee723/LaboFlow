@@ -158,6 +158,37 @@ from loguru import logger
 # doesn't fail if the package is absent in a dev environment.
 
 
+def _with_crash_retry(fn):
+    """Wrap a PlaywrightClient method so one-shot Chromium crashes auto-recover."""
+    async def wrapper(self, *args, **kwargs):
+        async with self._lock:  # serialize tool calls per client
+            try:
+                return await fn(self, *args, **kwargs)
+            except Exception as e:
+                msg = str(e)
+                crash_markers = (
+                    "Target page, context or browser has been closed",
+                    "Browser has been closed",
+                    "Target closed",
+                    "TargetClosedError",
+                )
+                if not any(m in msg for m in crash_markers):
+                    raise
+                logger.warning(f"[Playwright] Chromium crash detected in {fn.__name__}, retrying once")
+                # Rebuild browser + context from scratch
+                await self.close()
+                await self.start()
+                await self.ensure_context()
+                try:
+                    return await fn(self, *args, **kwargs)
+                except Exception as retry_err:
+                    raise PlaywrightCrashError(
+                        f"Browser crashed during {fn.__name__}, recovery failed: {retry_err}"
+                    )
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
 class PlaywrightClient:
     """One Chromium process, one BrowserContext per ChatSession.
 
@@ -236,6 +267,7 @@ class PlaywrightClient:
 
     # ─── Accessibility snapshot + ref registry ──────────────────────────
 
+    @_with_crash_retry
     async def browser_snapshot(self) -> dict:
         """Return an accessibility-tree snapshot of the current page.
 
@@ -374,6 +406,7 @@ class PlaywrightClient:
 
     # ─── Navigation ─────────────────────────────────────────────────────
 
+    @_with_crash_retry
     async def browser_navigate(self, url: str, wait_until: str = "load") -> dict:
         """Navigate to URL. Raises URLBlockedError on gated URLs."""
         _check_url_safe(url)
@@ -396,6 +429,7 @@ class PlaywrightClient:
 
     # ─── Accessibility actions (ref-based) ──────────────────────────────
 
+    @_with_crash_retry
     async def browser_click(self, ref: str) -> dict:
         loc = await self._locator_for_ref(ref)
         await loc.click(timeout=10000)
@@ -406,6 +440,7 @@ class PlaywrightClient:
             "title": await self._page.title(),
         }
 
+    @_with_crash_retry
     async def browser_type(self, ref: str, text: str, submit: bool = False) -> dict:
         loc = await self._locator_for_ref(ref)
         await loc.fill(text, timeout=10000)
@@ -413,11 +448,13 @@ class PlaywrightClient:
             await loc.press("Enter")
         return {"success": True, "ref": ref, "chars": len(text), "submit": submit}
 
+    @_with_crash_retry
     async def browser_select(self, ref: str, values: list[str]) -> dict:
         loc = await self._locator_for_ref(ref)
         await loc.select_option(values, timeout=10000)
         return {"success": True, "ref": ref, "values": values}
 
+    @_with_crash_retry
     async def browser_hover(self, ref: str) -> dict:
         loc = await self._locator_for_ref(ref)
         await loc.hover(timeout=10000)
@@ -425,10 +462,12 @@ class PlaywrightClient:
 
     # ─── Fallback actions (coordinate-based) ────────────────────────────
 
+    @_with_crash_retry
     async def browser_screenshot(self, full_page: bool = False) -> bytes:
         await self.ensure_context()
         return await self._page.screenshot(full_page=full_page, type="png")
 
+    @_with_crash_retry
     async def browser_click_xy(self, x: int, y: int) -> dict:
         await self.ensure_context()
         # Try to get href for anchor tags, or fall back to mouse click
@@ -462,6 +501,7 @@ class PlaywrightClient:
             """)
         return {"success": True, "x": x, "y": y}
 
+    @_with_crash_retry
     async def browser_type_xy(self, x: int, y: int, text: str) -> dict:
         await self.ensure_context()
         await self._page.mouse.click(x, y)
@@ -470,6 +510,7 @@ class PlaywrightClient:
 
     # ─── Auxiliary actions ──────────────────────────────────────────────
 
+    @_with_crash_retry
     async def browser_wait_for(
         self, selector: str = "", text: str = "", timeout_ms: int = 10000
     ) -> dict:
@@ -484,6 +525,7 @@ class PlaywrightClient:
             await self._page.wait_for_load_state("networkidle", timeout=timeout_ms)
         return {"success": True}
 
+    @_with_crash_retry
     async def browser_eval(self, expression: str) -> dict:
         """Evaluate a JS expression in the page context.
 
@@ -493,6 +535,7 @@ class PlaywrightClient:
         value = await self._page.evaluate(expression)
         return {"success": True, "value": value}
 
+    @_with_crash_retry
     async def browser_get_text(self, ref: str = "") -> dict:
         await self.ensure_context()
         if ref:
@@ -502,11 +545,13 @@ class PlaywrightClient:
             text = await self._page.inner_text("body", timeout=5000)
         return {"success": True, "text": text}
 
+    @_with_crash_retry
     async def browser_back(self) -> dict:
         await self.ensure_context()
         await self._page.go_back(timeout=10000)
         return {"success": True, "url": self._page.url}
 
+    @_with_crash_retry
     async def browser_close_tab(self) -> dict:
         """Close current page and open a fresh one inside the same context."""
         if self._page is not None:
@@ -524,6 +569,7 @@ class PlaywrightClient:
 
     # ─── Downloads ──────────────────────────────────────────────────────
 
+    @_with_crash_retry
     async def browser_download(self, ref: str, timeout_ms: int = _DOWNLOAD_TIMEOUT_MS) -> dict:
         """Click a ref, wait for a download event, enforce size cap.
 
@@ -577,6 +623,7 @@ class PlaywrightClient:
             "mime": mime or "application/octet-stream",
         }
 
+    @_with_crash_retry
     async def browser_list_downloads(self) -> dict:
         """List files in the current session's download dir."""
         target_dir = _downloads_root_for_session(self._agent_id, self._session_id)
@@ -589,3 +636,63 @@ class PlaywrightClient:
                     "file_id": str(p),
                 })
         return {"success": True, "files": files}
+
+
+# ─── Session cache ──────────────────────────────────────────────────────
+
+from datetime import datetime, timedelta
+
+_PLAYWRIGHT_SESSION_TIMEOUT = timedelta(minutes=5)
+_playwright_sessions: dict[tuple[str, str], tuple["PlaywrightClient", datetime]] = {}
+
+
+async def get_playwright_client_for_session(
+    agent_id: str, session_id: str
+) -> "PlaywrightClient":
+    """Get-or-create a PlaywrightClient bound to (agent_id, session_id)."""
+    key = (str(agent_id), str(session_id))
+    now = datetime.now()
+
+    if key in _playwright_sessions:
+        client, _ = _playwright_sessions[key]
+        # Health check — if browser died, drop and recreate
+        if client._browser is not None and client._browser.is_connected():
+            _playwright_sessions[key] = (client, now)
+            return client
+        else:
+            logger.warning(f"[Playwright] Browser for {key} disconnected, recreating")
+            try:
+                await client.close()
+            except Exception:
+                pass
+            del _playwright_sessions[key]
+
+    client = PlaywrightClient()
+    await client.start()
+    await client.bind_session(agent_id=str(agent_id), session_id=str(session_id))
+    _playwright_sessions[key] = (client, now)
+    return client
+
+
+async def cleanup_playwright_sessions() -> None:
+    """Close any client idle longer than _PLAYWRIGHT_SESSION_TIMEOUT."""
+    now = datetime.now()
+    expired = [
+        k for k, (_, last_used) in _playwright_sessions.items()
+        if now - last_used > _PLAYWRIGHT_SESSION_TIMEOUT
+    ]
+    for k in expired:
+        client, _ = _playwright_sessions.pop(k)
+        agent_id, session_id = k
+        try:
+            await client.close()
+        except Exception as e:
+            logger.warning(f"[Playwright] close during cleanup failed: {e}")
+        # Wipe download dir
+        try:
+            download_dir = _downloads_root_for_session(agent_id, session_id)
+            if download_dir.exists():
+                shutil.rmtree(download_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"[Playwright] download cleanup failed: {e}")
+        logger.info(f"[Playwright] Cleaned up session {k}")

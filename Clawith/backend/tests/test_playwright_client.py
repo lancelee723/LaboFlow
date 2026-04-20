@@ -318,3 +318,65 @@ class TestDownload:
         res = await client.browser_list_downloads()
         names = sorted(f["filename"] for f in res["files"])
         assert names == ["a.txt", "b.pdf"]
+
+
+class TestSessionCache:
+    @pytest.mark.asyncio
+    async def test_get_client_returns_same_instance_for_same_key(self):
+        from app.services.playwright_client import (
+            get_playwright_client_for_session,
+            _playwright_sessions,
+        )
+        _playwright_sessions.clear()
+        c1 = await get_playwright_client_for_session("a", "s1")
+        c2 = await get_playwright_client_for_session("a", "s1")
+        assert c1 is c2
+        await c1.close()
+        _playwright_sessions.clear()
+
+    @pytest.mark.asyncio
+    async def test_get_client_isolates_different_sessions(self):
+        from app.services.playwright_client import (
+            get_playwright_client_for_session,
+            _playwright_sessions,
+        )
+        _playwright_sessions.clear()
+        c1 = await get_playwright_client_for_session("a", "s1")
+        c2 = await get_playwright_client_for_session("a", "s2")
+        assert c1 is not c2
+        await c1.close()
+        await c2.close()
+        _playwright_sessions.clear()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_idle_sessions(self):
+        from datetime import datetime, timedelta
+        from app.services.playwright_client import (
+            get_playwright_client_for_session,
+            cleanup_playwright_sessions,
+            _playwright_sessions,
+        )
+        _playwright_sessions.clear()
+        client = await get_playwright_client_for_session("a", "s-old")
+        # Force last_used to 10 min ago
+        key = ("a", "s-old")
+        old = datetime.now() - timedelta(minutes=10)
+        _playwright_sessions[key] = (client, old)
+        await cleanup_playwright_sessions()
+        assert key not in _playwright_sessions
+
+    @pytest.mark.asyncio
+    async def test_crash_retry_recovers(self, local_http_server, bypass_url_check):
+        """If the browser is closed underneath us, the wrapped call recreates it."""
+        from app.services.playwright_client import get_playwright_client_for_session, _playwright_sessions
+        _playwright_sessions.clear()
+        client = await get_playwright_client_for_session("a", "s-crash")
+        await client.browser_navigate(f"{local_http_server}/")
+        # Simulate crash
+        await client._browser.close()
+        assert not client._browser.is_connected()
+        # Next call should auto-recover
+        result = await client.browser_navigate(f"{local_http_server}/form")
+        assert result["success"] is True
+        await client.close()
+        _playwright_sessions.clear()
