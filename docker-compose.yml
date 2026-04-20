@@ -1,69 +1,115 @@
 services:
-  clawith:
-    build: ./Clawith/backend
-    ports:
-      - "8008:8000"
+  postgres:
+    image: postgres:15.12-alpine
+    restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql+asyncpg://clawith:clawith@postgres:5432/clawith
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
-      - SECRET_KEY=${SECRET_KEY:-change-me-secret}
+      POSTGRES_USER: ${POSTGRES_USER:-clawith}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clawith}
+      POSTGRES_DB: ${POSTGRES_DB:-clawith}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-clawith}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - laboflow
+
+  redis:
+    image: redis:7.4.2-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - laboflow
+
+  clawith-backend:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-backend:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-clawith}:${POSTGRES_PASSWORD:-clawith}@postgres:5432/${POSTGRES_DB:-clawith}
+      REDIS_URL: redis://redis:6379/0
+      AGENT_DATA_DIR: /data/agents
+      AGENT_TEMPLATE_DIR: /app/agent_template
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-secret}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      CORS_ORIGINS: '["*"]'
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
+      DOCKER_NETWORK: laboflow
+    volumes:
+      - agent_data:/data/agents
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - clawith_data:/data
+    networks:
+      - laboflow
 
-  aippt-server:
-    build: ./aippt/server
-    ports:
-      - "8009:8009"
-    environment:
-      - CORS_ORIGINS=http://localhost:3008,http://aippt-web
+  clawith-frontend:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-frontend:${TAG:-latest}
+    restart: unless-stopped
     depends_on:
-      - clawith
-    volumes:
-      - aippt_templates:/app/uploads/templates
+      - clawith-backend
+    networks:
+      - laboflow
 
-  aippt-web:
-    build:
-      context: ./aippt
-      args:
-        BASE_PATH: /ppt/
-    ports:
-      - "3008:80"
-    depends_on:
-      - aippt-server
-      - clawith
-
-  postgres:
-    image: postgres:16-alpine
+  lightrag:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-lightrag:${TAG:-latest}
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=clawith
-      - POSTGRES_PASSWORD=clawith
-      - POSTGRES_DB=clawith
+      HOST: "0.0.0.0"
+      PORT: "9621"
+      WORKING_DIR: "/app/data/rag_storage"
+      INPUT_DIR: "/app/data/inputs"
+      TOKEN_SECRET: ${JWT_SECRET_KEY:-change-me-jwt-secret}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      LLM_BINDING: ${LIGHTRAG_LLM_BINDING:-openai}
+      LLM_MODEL: ${LIGHTRAG_LLM_MODEL:-gpt-4o-mini}
+      LLM_BINDING_HOST: ${LIGHTRAG_LLM_BINDING_HOST:-https://api.openai.com/v1}
+      LLM_BINDING_API_KEY: ${LIGHTRAG_LLM_BINDING_API_KEY:-}
+      EMBEDDING_BINDING: ${LIGHTRAG_EMBEDDING_BINDING:-openai}
+      EMBEDDING_MODEL: ${LIGHTRAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${LIGHTRAG_EMBEDDING_DIM:-1536}
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U clawith"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - rag_storage:/app/data/rag_storage
+      - lightrag_inputs:/app/data/inputs
+    networks:
+      - laboflow
 
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  aippt:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - laboflow
+
+  nginx:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-nginx:${TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-3008}:80"
+    depends_on:
+      - clawith-frontend
+      - clawith-backend
+      - lightrag
+      - aippt
+    networks:
+      - laboflow
 
 volumes:
   pgdata:
-  redis_data:
-  clawith_data:
-  aippt_templates:
+  redisdata:
+  agent_data:
+  rag_storage:
+  lightrag_inputs:
+
+networks:
+  laboflow:
+    driver: bridge
