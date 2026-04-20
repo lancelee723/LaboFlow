@@ -1613,6 +1613,233 @@ AGENT_TOOLS = [
             },
         },
     },
+    # ── Playwright Browser (built-in) ─────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_navigate",
+            "description": "Navigate the built-in headless browser to a URL. Raises an error for local filesystem URLs and internal Docker services. After this call, use playwright_browser_snapshot to see the page structure; do NOT call navigate again just to screenshot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Absolute https:// or http:// URL"},
+                    "wait_until": {"type": "string", "enum": ["load", "domcontentloaded", "networkidle"], "default": "load"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_snapshot",
+            "description": "Return a text accessibility tree of the current page, with each interactive element tagged [ref=eN]. Use these refs to click/type/select. Refs are invalidated after the next snapshot or navigation.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_click",
+            "description": "Click an element by ref (from playwright_browser_snapshot). Do NOT call navigate after clicking — the page may have already navigated; call snapshot or screenshot instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string", "description": "Element ref from snapshot, e.g. e12"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_type",
+            "description": "Type text into an input/textarea identified by ref. Set submit=true to press Enter after typing (common for search boxes).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {"type": "string"},
+                    "text": {"type": "string"},
+                    "submit": {"type": "boolean", "default": False},
+                },
+                "required": ["ref", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_select",
+            "description": "Select one or more options in a <select> element by ref.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {"type": "string"},
+                    "values": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["ref", "values"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_hover",
+            "description": "Hover the mouse over an element by ref (triggers tooltips / hover menus).",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_screenshot",
+            "description": "Take a PNG screenshot of the current page. Use only when accessibility snapshot is insufficient (canvas, SVG, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "full_page": {"type": "boolean", "default": False},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_click_xy",
+            "description": "Fallback: click at pixel coordinates. Use only when ref-based click fails.",
+            "parameters": {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+                "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_type_xy",
+            "description": "Fallback: click at (x,y) then type text. Use only when ref-based type fails.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"}, "y": {"type": "integer"}, "text": {"type": "string"},
+                },
+                "required": ["x", "y", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_wait_for",
+            "description": "Wait for a selector to appear, for text to appear, or for network idle. Exactly one of selector/text may be provided; empty defaults to network-idle wait.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "default": ""},
+                    "text": {"type": "string", "default": ""},
+                    "timeout_ms": {"type": "integer", "default": 10000},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_eval",
+            "description": "Evaluate a JavaScript expression in the page context and return the result. Arbitrary JS runs in the browser sandbox.",
+            "parameters": {
+                "type": "object",
+                "properties": {"expression": {"type": "string"}},
+                "required": ["expression"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_get_text",
+            "description": "Extract visible text from an element (by ref) or the entire page body (ref empty). Prefer doc_read for downloaded files.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ref": {"type": "string", "default": ""}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_back",
+            "description": "Navigate back in browser history.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_close_tab",
+            "description": "Close the current tab and open a fresh blank one in the same session.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_download",
+            "description": "Click an element by ref expected to trigger a file download, save it under this session's download dir, and return {file_id, filename, size, mime}. If file exceeds 100 MB, returns success=false with download_url so you can tell the user to download it manually.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ref": {"type": "string"},
+                    "timeout_ms": {"type": "integer", "default": 30000},
+                },
+                "required": ["ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "playwright_browser_list_downloads",
+            "description": "List files already downloaded by this ChatSession. Returns [{filename, size, file_id}].",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    # ── Document parsing (cross-source) ────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "doc_read",
+            "description": "Extract plaintext from a document file (pdf/docx/xlsx/pptx/md/txt/csv). file_id_or_path is either a file_id returned by playwright_browser_download or an absolute path. Returns {text, truncated, format, page_count}. max_chars caps output (hard limit 200,000).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_id_or_path": {"type": "string"},
+                    "page_range": {"type": "string", "default": "", "description": "e.g. '1-3' or '1,3,5'. Empty = all pages. PDF/PPTX only."},
+                    "max_chars": {"type": "integer", "default": 50000},
+                },
+                "required": ["file_id_or_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "doc_extract_tables",
+            "description": "Extract structured tables from a pdf or xlsx file. Returns {tables: [[[cell, cell, ...], ...], ...]}.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_id_or_path": {"type": "string"},
+                    "page_range": {"type": "string", "default": ""},
+                },
+                "required": ["file_id_or_path"],
+            },
+        },
+    },
 ]
 
 
@@ -2157,6 +2384,10 @@ async def execute_tool(
     if tool_name.startswith("agentbay_"):
         arguments["_session_id"] = session_id
 
+    # Same for built-in Playwright browser / doc tools
+    if tool_name.startswith("playwright_browser_") or tool_name in ("doc_read", "doc_extract_tables"):
+        arguments["_session_id"] = session_id
+
         # Take Control lock: block automatic tool execution while a human
         # is manually controlling the browser/desktop session. This prevents
         # input collisions between human clicks and agent-initiated actions.
@@ -2395,6 +2626,44 @@ async def execute_tool(
             result = await _search_clawhub(agent_id, arguments)
         elif tool_name == "install_skill":
             result = await _install_skill(agent_id, ws, arguments)
+        # ── Playwright Browser (built-in) ──
+        elif tool_name == "playwright_browser_navigate":
+            result = await _playwright_browser_navigate(agent_id, arguments)
+        elif tool_name == "playwright_browser_snapshot":
+            result = await _playwright_browser_snapshot(agent_id, arguments)
+        elif tool_name == "playwright_browser_click":
+            result = await _playwright_browser_click(agent_id, arguments)
+        elif tool_name == "playwright_browser_type":
+            result = await _playwright_browser_type(agent_id, arguments)
+        elif tool_name == "playwright_browser_select":
+            result = await _playwright_browser_select(agent_id, arguments)
+        elif tool_name == "playwright_browser_hover":
+            result = await _playwright_browser_hover(agent_id, arguments)
+        elif tool_name == "playwright_browser_screenshot":
+            result = await _playwright_browser_screenshot(agent_id, arguments)
+        elif tool_name == "playwright_browser_click_xy":
+            result = await _playwright_browser_click_xy(agent_id, arguments)
+        elif tool_name == "playwright_browser_type_xy":
+            result = await _playwright_browser_type_xy(agent_id, arguments)
+        elif tool_name == "playwright_browser_wait_for":
+            result = await _playwright_browser_wait_for(agent_id, arguments)
+        elif tool_name == "playwright_browser_eval":
+            result = await _playwright_browser_eval(agent_id, arguments)
+        elif tool_name == "playwright_browser_get_text":
+            result = await _playwright_browser_get_text(agent_id, arguments)
+        elif tool_name == "playwright_browser_back":
+            result = await _playwright_browser_back(agent_id, arguments)
+        elif tool_name == "playwright_browser_close_tab":
+            result = await _playwright_browser_close_tab(agent_id, arguments)
+        elif tool_name == "playwright_browser_download":
+            result = await _playwright_browser_download(agent_id, arguments)
+        elif tool_name == "playwright_browser_list_downloads":
+            result = await _playwright_browser_list_downloads(agent_id, arguments)
+        # ── Document parsing ──
+        elif tool_name == "doc_read":
+            result = await _doc_read_tool(agent_id, arguments)
+        elif tool_name == "doc_extract_tables":
+            result = await _doc_extract_tables_tool(agent_id, arguments)
         else:
             # Try MCP tool execution
             result = await _execute_mcp_tool(tool_name, arguments, agent_id=agent_id)
@@ -9731,3 +10000,153 @@ async def _agentbay_file_transfer(agent_id: Optional[uuid.UUID], ws: Path, argum
     except Exception as e:
         logger.exception(f"[AgentBay] File transfer failed for agent {agent_id}")
         return f"File transfer failed: {str(e)[:200]}"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Playwright Browser handlers
+# ──────────────────────────────────────────────────────────────────────────
+
+
+async def _get_playwright_client(agent_id, arguments):
+    """Get or create a PlaywrightClient for the given agent+session pair."""
+    from app.services.playwright_client import get_playwright_client_for_session
+    session_id = arguments.pop("_session_id", "") or "default"
+    return await get_playwright_client_for_session(str(agent_id), session_id)
+
+
+def _fmt(result) -> str:
+    """Standard str serialization for tool results."""
+    if isinstance(result, bytes):
+        import base64
+        return f"<{len(result)}-byte binary; base64 head: {base64.b64encode(result[:60]).decode()}...>"
+    import json
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except TypeError:
+        return str(result)
+
+
+async def _playwright_browser_navigate(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_navigate(
+        arguments["url"], wait_until=arguments.get("wait_until", "load")
+    ))
+
+
+async def _playwright_browser_snapshot(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_snapshot())
+
+
+async def _playwright_browser_click(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_click(arguments["ref"]))
+
+
+async def _playwright_browser_type(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_type(
+        arguments["ref"], arguments["text"], submit=arguments.get("submit", False)
+    ))
+
+
+async def _playwright_browser_select(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_select(arguments["ref"], arguments["values"]))
+
+
+async def _playwright_browser_hover(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_hover(arguments["ref"]))
+
+
+async def _playwright_browser_screenshot(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    raw_bytes = await client.browser_screenshot(full_page=arguments.get("full_page", False))
+    from app.services.vision_inject import store_temp_screenshot
+    img_id = store_temp_screenshot(raw_bytes)
+    return (
+        f"Internal screenshot captured for analysis. [ImageID: {img_id}]\n"
+        "NOTE: This screenshot is for YOUR eyes only (LLM vision). "
+        "If the user asked to SEE it, save it to workspace and return the path."
+    )
+
+
+async def _playwright_browser_click_xy(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_click_xy(arguments["x"], arguments["y"]))
+
+
+async def _playwright_browser_type_xy(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_type_xy(
+        arguments["x"], arguments["y"], arguments["text"]
+    ))
+
+
+async def _playwright_browser_wait_for(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_wait_for(
+        selector=arguments.get("selector", ""),
+        text=arguments.get("text", ""),
+        timeout_ms=arguments.get("timeout_ms", 10000),
+    ))
+
+
+async def _playwright_browser_eval(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_eval(arguments["expression"]))
+
+
+async def _playwright_browser_get_text(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_get_text(arguments.get("ref", "")))
+
+
+async def _playwright_browser_back(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_back())
+
+
+async def _playwright_browser_close_tab(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_close_tab())
+
+
+async def _playwright_browser_download(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_download(
+        arguments["ref"], timeout_ms=arguments.get("timeout_ms", 30000)
+    ))
+
+
+async def _playwright_browser_list_downloads(agent_id, arguments):
+    client = await _get_playwright_client(agent_id, arguments)
+    return _fmt(await client.browser_list_downloads())
+
+
+async def _doc_read_tool(agent_id, arguments):
+    arguments.pop("_session_id", None)
+    from app.services.doc_parser import doc_read
+    try:
+        res = doc_read(
+            arguments["file_id_or_path"],
+            page_range=arguments.get("page_range", ""),
+            max_chars=arguments.get("max_chars", 50000),
+        )
+    except Exception as e:
+        return f"doc_read error: {type(e).__name__}: {e}"
+    return _fmt(res)
+
+
+async def _doc_extract_tables_tool(agent_id, arguments):
+    arguments.pop("_session_id", None)
+    from app.services.doc_parser import doc_extract_tables
+    try:
+        res = doc_extract_tables(
+            arguments["file_id_or_path"],
+            page_range=arguments.get("page_range", ""),
+        )
+    except Exception as e:
+        return f"doc_extract_tables error: {type(e).__name__}: {e}"
+    return _fmt(res)
