@@ -64,18 +64,30 @@ _BLOCKED_HOSTNAMES = {
 }
 
 
+# RFC 1918 private ranges — the only ones that can reach internal Docker services.
+# We avoid ip.is_private / ip.is_reserved because Python 3.11+ expanded those to
+# include RFC 2544 (198.18.0.0/15) which DNS filtering services use as sinkholes,
+# causing false-positive blocks on valid public domains.
+_RFC1918 = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+]
+
+
 def _is_private_ip(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return False
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-    )
+    if ip.is_loopback or ip.is_link_local:
+        return True
+    if isinstance(ip, ipaddress.IPv4Address):
+        return any(ip in net for net in _RFC1918)
+    # IPv6: block ULA (fc00::/7) and link-local (already covered above)
+    if isinstance(ip, ipaddress.IPv6Address):
+        return ip in ipaddress.ip_network("fc00::/7")
+    return False
 
 
 def _resolve_host_ips(hostname: str) -> list[str]:
