@@ -279,3 +279,42 @@ class TestAux:
         res = await client.browser_back()
         assert res["success"] is True
         assert client._page.url.endswith("/")
+
+
+class TestDownload:
+    @pytest.mark.asyncio
+    async def test_download_under_limit(
+        self, client, local_http_server, bypass_url_check, tmp_path, monkeypatch
+    ):
+        # Point downloads dir at a tmp path
+        monkeypatch.setattr(
+            "app.services.playwright_client._downloads_root_for_session",
+            lambda agent_id, session_id: tmp_path,
+        )
+        await client.bind_session(agent_id="a-1", session_id="s-1")
+        # Inject a download link directly into the page
+        await client.browser_navigate(f"{local_http_server}/")
+        await client._page.set_content(
+            f'<html><body><a id="dl" href="{local_http_server}/download/1024" download>dl</a></body></html>'
+        )
+        snap = await client.browser_snapshot()
+        import re
+        refs = re.findall(r"\[ref=(\w+)\]", snap["tree"])
+        assert refs, f"No refs in snapshot: {snap['tree']}"
+        result = await client.browser_download(refs[0])
+        assert result["success"] is True
+        assert result["size"] == 1024
+        assert (tmp_path / result["filename"]).exists()
+
+    @pytest.mark.asyncio
+    async def test_list_downloads(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.playwright_client._downloads_root_for_session",
+            lambda agent_id, session_id: tmp_path,
+        )
+        await client.bind_session(agent_id="a-1", session_id="s-3")
+        (tmp_path / "a.txt").write_text("x")
+        (tmp_path / "b.pdf").write_bytes(b"%PDF-")
+        res = await client.browser_list_downloads()
+        names = sorted(f["filename"] for f in res["files"])
+        assert names == ["a.txt", "b.pdf"]

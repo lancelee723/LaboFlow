@@ -126,6 +126,27 @@ def _check_url_safe(url: str) -> None:
             raise URLBlockedError(f"blocked — {host} resolves to private IP {ip}")
 
 
+# ─── Download helpers ──────────────────────────────────────────────────
+
+import os
+import uuid
+import shutil
+from pathlib import Path
+
+from app.config import get_settings
+
+_DOWNLOAD_SIZE_LIMIT_BYTES = 100 * 1024 * 1024  # 100 MB
+_DOWNLOAD_TIMEOUT_MS = 30000
+
+
+def _downloads_root_for_session(agent_id: str, session_id: str) -> Path:
+    """Per-session download directory. Created lazily."""
+    base = Path(get_settings().AGENT_DATA_DIR)
+    path = base / str(agent_id) / "downloads" / str(session_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 # ─── PlaywrightClient ──────────────────────────────────────────────────
 
 import asyncio
@@ -493,3 +514,78 @@ class PlaywrightClient:
         self._page = await self._context.new_page()
         self._ref_registry = {}
         return {"success": True}
+
+    # ─── Session binding ─────────────────────────────────────────────────
+
+    async def bind_session(self, agent_id: str, session_id: str) -> None:
+        """Associate this client with a (agent, session) for download routing."""
+        self._agent_id = agent_id
+        self._session_id = session_id
+
+    # ─── Downloads ──────────────────────────────────────────────────────
+
+    async def browser_download(self, ref: str, timeout_ms: int = _DOWNLOAD_TIMEOUT_MS) -> dict:
+        """Click a ref, wait for a download event, enforce size cap.
+
+        Returns on success:
+            {success: True, filename, size, file_id, mime}
+
+        Returns on size cap exceeded:
+            {success: False, error, download_url, size_mb}
+        """
+        await self.ensure_context()
+        loc = await self._locator_for_ref(ref)
+
+        try:
+            async with self._page.expect_download(timeout=timeout_ms) as dl_info:
+                await loc.click()
+            download = await dl_info.value
+        except Exception as e:
+            if "Timeout" in str(e):
+                raise DownloadTimeoutError(
+                    "No download started within 30 s. The link may open inline."
+                )
+            raise
+
+        url = download.url
+        suggested = download.suggested_filename or f"download-{uuid.uuid4().hex[:8]}.bin"
+        target_dir = _downloads_root_for_session(self._agent_id, self._session_id)
+        target_path = target_dir / suggested
+
+        await download.save_as(str(target_path))
+
+        size = target_path.stat().st_size
+        if size > _DOWNLOAD_SIZE_LIMIT_BYTES:
+            try:
+                target_path.unlink()
+            except OSError:
+                pass
+            return {
+                "success": False,
+                "error": "File exceeds 100MB limit",
+                "download_url": url,
+                "size_mb": size / (1024 * 1024),
+            }
+
+        import mimetypes
+        mime, _ = mimetypes.guess_type(suggested)
+        return {
+            "success": True,
+            "filename": suggested,
+            "size": size,
+            "file_id": str(target_path),
+            "mime": mime or "application/octet-stream",
+        }
+
+    async def browser_list_downloads(self) -> dict:
+        """List files in the current session's download dir."""
+        target_dir = _downloads_root_for_session(self._agent_id, self._session_id)
+        files = []
+        for p in sorted(target_dir.iterdir()):
+            if p.is_file():
+                files.append({
+                    "filename": p.name,
+                    "size": p.stat().st_size,
+                    "file_id": str(p),
+                })
+        return {"success": True, "files": files}
