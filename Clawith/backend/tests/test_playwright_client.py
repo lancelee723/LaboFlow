@@ -251,3 +251,31 @@ class TestFallbackActions:
         await client.browser_type_xy(x, y, "bob")
         value = await client._page.eval_on_selector("#u", "el => el.value")
         assert value == "bob"
+
+
+class TestAux:
+    @pytest.mark.asyncio
+    async def test_wait_for_selector(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        res = await client.browser_wait_for(selector="h1", timeout_ms=5000)
+        assert res["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_eval_returns_result(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        res = await client.browser_eval("2 + 2")
+        assert res["value"] == 4
+
+    @pytest.mark.asyncio
+    async def test_get_text_full_page(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        res = await client.browser_get_text()
+        assert "Hello" in res["text"]
+
+    @pytest.mark.asyncio
+    async def test_back_returns_to_previous(self, client, local_http_server, bypass_url_check):
+        await client.browser_navigate(f"{local_http_server}/")
+        await client.browser_navigate(f"{local_http_server}/form")
+        res = await client.browser_back()
+        assert res["success"] is True
+        assert client._page.url.endswith("/")

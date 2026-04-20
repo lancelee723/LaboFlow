@@ -446,3 +446,50 @@ class PlaywrightClient:
         await self._page.mouse.click(x, y)
         await self._page.keyboard.type(text, delay=10)
         return {"success": True, "x": x, "y": y, "chars": len(text)}
+
+    # ─── Auxiliary actions ──────────────────────────────────────────────
+
+    async def browser_wait_for(
+        self, selector: str = "", text: str = "", timeout_ms: int = 10000
+    ) -> dict:
+        await self.ensure_context()
+        if selector:
+            await self._page.wait_for_selector(selector, timeout=timeout_ms)
+        elif text:
+            await self._page.wait_for_function(
+                f"document.body.innerText.includes({text!r})", timeout=timeout_ms
+            )
+        else:
+            await self._page.wait_for_load_state("networkidle", timeout=timeout_ms)
+        return {"success": True}
+
+    async def browser_eval(self, expression: str) -> dict:
+        """Evaluate a JS expression in the page context.
+
+        No static analysis is performed. See spec §5.3.
+        """
+        await self.ensure_context()
+        value = await self._page.evaluate(expression)
+        return {"success": True, "value": value}
+
+    async def browser_get_text(self, ref: str = "") -> dict:
+        await self.ensure_context()
+        if ref:
+            loc = await self._locator_for_ref(ref)
+            text = await loc.inner_text(timeout=5000)
+        else:
+            text = await self._page.inner_text("body", timeout=5000)
+        return {"success": True, "text": text}
+
+    async def browser_back(self) -> dict:
+        await self.ensure_context()
+        await self._page.go_back(timeout=10000)
+        return {"success": True, "url": self._page.url}
+
+    async def browser_close_tab(self) -> dict:
+        """Close current page and open a fresh one inside the same context."""
+        if self._page is not None:
+            await self._page.close()
+        self._page = await self._context.new_page()
+        self._ref_registry = {}
+        return {"success": True}
