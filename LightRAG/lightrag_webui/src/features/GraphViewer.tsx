@@ -24,6 +24,7 @@ import LegendButton from '@/components/graph/LegendButton'
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
 import { labelColorDarkTheme, labelColorLightTheme } from '@/lib/constants'
+import { cn } from '@/lib/utils'
 
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
@@ -195,6 +196,8 @@ const GraphViewer = () => {
     (): OptionItem | null => (selectedNode ? { type: 'nodes', id: selectedNode } : null),
     [selectedNode]
   )
+  const overlayCardClassName =
+    'border border-[rgba(0,0,0,0.1)] bg-white/92 shadow-[rgba(0,0,0,0.04)_0px_4px_18px,rgba(0,0,0,0.027)_0px_2.025px_7.85px,rgba(0,0,0,0.02)_0px_0.8px_2.93px,rgba(0,0,0,0.01)_0px_0.175px_1.04px] backdrop-blur-xl dark:border-white/10 dark:bg-[#1f1c1a]/92'
 
   // Always render SigmaContainer but control its visibility with CSS
   return (
@@ -210,7 +213,7 @@ const GraphViewer = () => {
 
         <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
 
-        <div className="absolute top-2 left-2 flex items-start gap-2">
+        <div className="absolute top-4 left-4 z-10 flex items-start gap-3">
           <GraphLabels />
           {showNodeSearchBar && !isThemeSwitching && (
             <GraphSearch
@@ -221,7 +224,12 @@ const GraphViewer = () => {
           )}
         </div>
 
-        <div className="bg-background/60 absolute bottom-2 left-2 flex flex-col rounded-xl border-2 backdrop-blur-lg">
+        <div
+          className={cn(
+            overlayCardClassName,
+            'absolute bottom-4 left-4 flex flex-col rounded-[12px] p-1.5'
+          )}
+        >
           <LayoutsControl />
           <ZoomControl />
           <FullScreenControl />
@@ -231,13 +239,13 @@ const GraphViewer = () => {
         </div>
 
         {showPropertyPanel && (
-          <div className="absolute top-2 right-2 z-10">
+          <div className="absolute top-4 right-4 z-10">
             <PropertiesView />
           </div>
         )}
 
         {showLegend && (
-          <div className="absolute bottom-10 right-2 z-0">
+          <div className="absolute right-4 bottom-16 z-0">
             <Legend className="bg-background/60 backdrop-blur-lg" />
           </div>
         )}
@@ -251,10 +259,12 @@ const GraphViewer = () => {
 
       {/* Loading overlay - shown when data is loading or theme is switching */}
       {(isFetching || isThemeSwitching) && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
-          <div className="text-center">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#f6f5f4]/72 backdrop-blur-sm dark:bg-black/45">
+          <div className={cn(overlayCardClassName, 'rounded-[16px] px-6 py-5 text-center')}>
             <div className="mb-2 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
-            <p>{isThemeSwitching ? 'Switching Theme...' : 'Loading Graph Data...'}</p>
+            <p className="text-sm font-medium text-[#615d59] dark:text-white/75">
+              {isThemeSwitching ? 'Switching Theme...' : 'Loading Graph Data...'}
+            </p>
           </div>
         </div>
       )}

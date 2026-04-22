@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback, Component, Er
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { getLocalizedToolDisplayName } from '../utils/toolNames';
 
 import ConfirmModal from '../components/ConfirmModal';
 import type { FileBrowserApi } from '../components/FileBrowser';
@@ -35,6 +36,9 @@ const getCategoryLabels = (t: any): Record<string, string> => ({
     task: t('agent.toolCategories.task'),
     communication: t('agent.toolCategories.communication'),
     search: t('agent.toolCategories.search'),
+    lightrag: t('agent.toolCategories.lightrag', 'LightRAG'),
+    rag: t('agent.toolCategories.rag', 'LightRAG'),
+    graph: t('agent.toolCategories.graph', 'LightRAG'),
     aware: t('agent.toolCategories.aware', 'Aware & Triggers'),
     social: t('agent.toolCategories.social', 'Social'),
     code: t('agent.toolCategories.code', 'Code & Execution'),
@@ -226,9 +230,14 @@ function ToolsManager({ agentId, canManage = false }: { agentId: string; canMana
     const companyTools = tools.filter(t => t.source === 'builtin' || t.source === 'admin');
     const agentInstalledTools = tools.filter(t => t.source === 'agent');
 
+    const getToolGroupKey = (tool: any) => {
+        if (tool?.name?.startsWith('lightrag.')) return 'lightrag';
+        return tool.category || 'general';
+    };
+
     const groupByCategory = (toolList: any[]) =>
         toolList.reduce((acc: Record<string, any[]>, t) => {
-            const cat = t.category || 'general';
+            const cat = getToolGroupKey(t);
             (acc[cat] = acc[cat] || []).push(t);
             return acc;
         }, {});
@@ -289,7 +298,7 @@ function ToolsManager({ agentId, canManage = false }: { agentId: string; canMana
                                     <span style={{ fontSize: '18px' }}>{tool.icon}</span>
                                     <div style={{ minWidth: 0 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            <span style={{ fontWeight: 500, fontSize: '13px' }}>{tool.display_name}</span>
+                                            <span style={{ fontWeight: 500, fontSize: '13px' }}>{getLocalizedToolDisplayName(tool)}</span>
                                             {tool.type === 'mcp' && (
                                                 <span style={{ fontSize: '10px', background: 'var(--primary)', color: '#fff', borderRadius: '4px', padding: '1px 5px' }}>MCP</span>
                                             )}
@@ -317,7 +326,7 @@ function ToolsManager({ agentId, canManage = false }: { agentId: string; canMana
                                     {canManage && tool.source === 'agent' && tool.agent_tool_id && (
                                         <button
                                             onClick={async () => {
-                                                if (!confirm(t('agent.tools.confirmDelete', `Remove "${tool.display_name}" from this agent?`))) return;
+                                                if (!confirm(t('agent.tools.confirmDelete', `Remove "${getLocalizedToolDisplayName(tool)}" from this agent?`))) return;
                                                 setDeletingToolId(tool.id);
                                                 try {
                                                     const token = localStorage.getItem('token');
@@ -419,7 +428,7 @@ function ToolsManager({ agentId, canManage = false }: { agentId: string; canMana
             {(configTool || configCategory) && (() => {
                 const target = configTool || CATEGORY_CONFIG_SCHEMAS[configCategory!];
                 const fields = configTool ? (configTool.config_schema?.fields || []) : (target.fields || []);
-                const title = configTool ? configTool.display_name : target.title;
+                const title = configTool ? getLocalizedToolDisplayName(configTool) : target.title;
                 const isCat = !!configCategory;
                 return (
                     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}

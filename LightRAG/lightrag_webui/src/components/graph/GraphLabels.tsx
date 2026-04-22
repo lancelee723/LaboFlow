@@ -240,14 +240,14 @@ const GraphLabels = () => {
   }, [reloadPopularLabels, bumpDropdownData])
 
   return (
-    <div className="flex items-center">
+    <div className="flex items-center rounded-[22px] border border-black/10 bg-white/88 p-1.5 shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)] backdrop-blur-xl dark:border-white/10 dark:bg-[#1f1c1a]/88">
       {/* Always show refresh button */}
       <Button
         size="icon"
         variant={controlButtonVariant}
         onClick={handleRefresh}
         tooltip={getRefreshTooltip()}
-        className="mr-2"
+        className="mr-2 h-10 w-10 rounded-2xl border border-black/10 bg-white/92 text-[#615d59] shadow-none hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/80 dark:hover:bg-white/12"
         disabled={isRefreshing}
       >
         <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -256,8 +256,8 @@ const GraphLabels = () => {
         <AsyncSelect<string>
           key={selectKey} // Force re-render when data changes
           className="min-w-[300px]"
-          triggerClassName="max-h-8 w-full overflow-hidden"
-          searchInputClassName="max-h-8"
+          triggerClassName="h-11 w-full overflow-hidden rounded-[18px] border-0 bg-transparent px-3 shadow-none hover:bg-[#f6f5f4] dark:hover:bg-white/10"
+          searchInputClassName="h-10"
           triggerTooltip={t('graphPanel.graphLabels.selectTooltip')}
           fetcher={fetchData}
           onBeforeOpen={handleDropdownBeforeOpen}

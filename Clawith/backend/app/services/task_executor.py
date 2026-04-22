@@ -49,7 +49,7 @@ async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
         task_type = task.type  # 'todo' or 'supervision'
         supervision_target = task.supervision_target_name or ""
 
-    # Step 2: Load agent + model
+    # Step 2: Load agent
     async with async_session() as db:
         agent_result = await db.execute(select(Agent).where(Agent.id == agent_id))
         agent = agent_result.scalar_one_or_none()
@@ -77,7 +77,6 @@ async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
             return
 
         agent_name = agent.name
-        creator_id = agent.creator_id
 
     # Step 3: Build full agent context (same as chat dialog)
     from app.services.agent_context import build_agent_context
@@ -98,6 +97,7 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
 - Do NOT ask the user follow-up questions — take initiative and complete the task autonomously.
 """
     dynamic_prompt += task_addendum
+    system_prompt = f"{static_prompt}\n\n{dynamic_prompt}"
 
     # Build user prompt
     if task_type == 'supervision':
@@ -149,64 +149,17 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
 
     try:
         logger.info(f"[TaskExec] Calling LLM with tools for task: {task_title}")
-        reply = ""
 
-        # Tool-calling loop (max 50 rounds for task execution)
-        for round_i in range(50):
-            try:
-                response = await client.complete(
-                    messages=messages,
-                    tools=tools_for_llm if tools_for_llm else None,
-                    temperature=model.temperature,
-                    max_tokens=get_max_tokens(model.provider, model.model, getattr(model, 'max_output_tokens', None)),
-                )
-            except LLMError as e:
-                await _log_error(task_id, f"LLM 错误: {e}")
-                if task_type == 'supervision':
-                    await _restore_supervision_status(task_id)
-                return
-            except Exception as e:
-                await _log_error(task_id, f"调用模型失败: {str(e)[:200]}")
-                if task_type == 'supervision':
-                    await _restore_supervision_status(task_id)
-                return
+        async with async_session() as db:
+            reply = await call_agent_llm_with_tools(
+                db=db,
+                agent_id=agent_id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_rounds=50,
+                session_id=str(task_id),
+            )
 
-            if response.tool_calls:
-                # Add assistant message with tool calls
-                messages.append(LLMMessage(
-                    role="assistant",
-                    content=response.content or None,
-                    tool_calls=[{
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": tc["function"],
-                    } for tc in response.tool_calls],
-                    reasoning_content=response.reasoning_content,
-                ))
-
-                for tc in response.tool_calls:
-                    fn = tc["function"]
-                    tool_name = fn["name"]
-                    raw_args = fn.get("arguments", "{}")
-                    logger.info(f"[TaskExec] Round {round_i+1} calling tool: {tool_name}({json.dumps(raw_args, ensure_ascii=False)[:100]})")
-                    try:
-                        args = json.loads(raw_args) if raw_args else {}
-                    except Exception:
-                        args = {}
-
-                    tool_result = await execute_tool(tool_name, args, agent_id, creator_id)
-                    messages.append(LLMMessage(
-                        role="tool",
-                        tool_call_id=tc["id"],
-                        content=str(tool_result),
-                    ))
-            else:
-                reply = response.content or ""
-                break
-        else:
-            reply = "(已达到最大工具调用轮数)"
-
-        await client.close()
         logger.info(f"[TaskExec] LLM reply: {reply[:80]}")
     except Exception as e:
         error_msg = str(e) or repr(e)

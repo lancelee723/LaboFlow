@@ -50,8 +50,12 @@ const PropertiesView = () => {
   if (!currentElement) {
     return <></>
   }
+
+  const panelClassName =
+    'max-w-sm rounded-[24px] border border-black/10 bg-white/92 p-3 text-xs shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)] backdrop-blur-xl dark:border-white/10 dark:bg-[#1f1c1a]/92'
+
   return (
-    <div className="bg-background/80 max-w-xs rounded-lg border-2 p-2 text-xs backdrop-blur-lg">
+    <div className={panelClassName}>
       {currentType == 'node' ? (
         <NodePropertiesView node={currentElement as any} />
       ) : (
@@ -232,13 +236,13 @@ const PropertyRow = ({
 
   // For non-editable fields, use the regular Text component
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-primary/60 tracking-wide whitespace-nowrap">
+    <div className="flex items-start gap-2 rounded-xl px-1 py-1">
+      <span className="min-w-[5rem] whitespace-nowrap text-[11px] font-semibold tracking-[0.08em] text-[#8a847e] uppercase dark:text-white/50">
         {getPropertyNameTranslation(name)}
         {name === 'source_id' && truncate && <sup className="text-red-500">†</sup>}
       </span>:
       <Text
-        className="hover:bg-primary/20 rounded p-1 overflow-hidden text-ellipsis"
+        className="min-w-0 flex-1 overflow-hidden rounded-xl px-2 py-1 text-ellipsis text-[#31302e] hover:bg-black/4 dark:text-white/85 dark:hover:bg-white/8"
         tooltipClassName="max-w-96 -translate-x-13"
         text={formattedValue}
         tooltip={formattedTooltip}
@@ -251,6 +255,10 @@ const PropertyRow = ({
 
 const NodePropertiesView = ({ node }: { node: NodeType }) => {
   const { t } = useTranslation()
+  const sectionClassName =
+    'max-h-80 overflow-auto rounded-2xl border border-black/8 bg-[#faf8f5] p-2 dark:border-white/8 dark:bg-white/4'
+  const actionButtonClassName =
+    'h-8 w-8 rounded-xl border border-black/10 bg-white text-[#766f69] hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/70 dark:hover:bg-white/12 dark:hover:text-white'
 
   const handleExpandNode = () => {
     useGraphStore.getState().triggerNodeExpand(node.id)
@@ -263,29 +271,29 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-between items-center">
-        <h3 className="text-md pl-1 font-bold tracking-wide text-blue-700">{t('graphPanel.propertiesView.node.title')}</h3>
+        <h3 className="pl-1 text-[13px] font-semibold tracking-[0.12em] text-[#097fe8] uppercase">{t('graphPanel.propertiesView.node.title')}</h3>
         <div className="flex gap-3">
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7 border border-gray-400 hover:bg-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
+            className={actionButtonClassName}
             onClick={handleExpandNode}
             tooltip={t('graphPanel.propertiesView.node.expandNode')}
           >
-            <GitBranchPlus className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+            <GitBranchPlus className="h-4 w-4" />
           </Button>
           <Button
             size="icon"
             variant="ghost"
-            className="h-7 w-7 border border-gray-400 hover:bg-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
+            className={actionButtonClassName}
             onClick={handlePruneNode}
             tooltip={t('graphPanel.propertiesView.node.pruneNode')}
           >
-            <Scissors className="h-4 w-4 text-gray-900 dark:text-gray-300" />
+            <Scissors className="h-4 w-4" />
           </Button>
         </div>
       </div>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <div className={sectionClassName}>
         <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
         <PropertyRow
           name={t('graphPanel.propertiesView.node.labels')}
@@ -296,8 +304,8 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
         />
         <PropertyRow name={t('graphPanel.propertiesView.node.degree')} value={node.degree} />
       </div>
-      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.node.properties')}</h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <h3 className="pl-1 text-[13px] font-semibold tracking-[0.12em] text-[#8a847e] uppercase dark:text-white/55">{t('graphPanel.propertiesView.node.properties')}</h3>
+      <div className={sectionClassName}>
         {Object.keys(node.properties)
           .sort()
           .map((name) => {
@@ -318,10 +326,10 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
       </div>
       {node.relationships.length > 0 && (
         <>
-          <h3 className="text-md pl-1 font-bold tracking-wide text-emerald-700">
+          <h3 className="pl-1 text-[13px] font-semibold tracking-[0.12em] text-[#2a9d99] uppercase">
             {t('graphPanel.propertiesView.node.relationships')}
           </h3>
-          <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+          <div className={sectionClassName}>
             {node.relationships.map(({ type, id, label }) => {
               return (
                 <PropertyRow
@@ -343,10 +351,12 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
 
 const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
   const { t } = useTranslation()
+  const sectionClassName =
+    'max-h-80 overflow-auto rounded-2xl border border-black/8 bg-[#faf8f5] p-2 dark:border-white/8 dark:bg-white/4'
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-md pl-1 font-bold tracking-wide text-violet-700">{t('graphPanel.propertiesView.edge.title')}</h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <h3 className="pl-1 text-[13px] font-semibold tracking-[0.12em] text-[#391c57] uppercase dark:text-[#c58dff]">{t('graphPanel.propertiesView.edge.title')}</h3>
+      <div className={sectionClassName}>
         <PropertyRow name={t('graphPanel.propertiesView.edge.id')} value={edge.id} />
         {edge.type && <PropertyRow name={t('graphPanel.propertiesView.edge.type')} value={edge.type} />}
         <PropertyRow
@@ -364,8 +374,8 @@ const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
           }}
         />
       </div>
-      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.edge.properties')}</h3>
-      <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
+      <h3 className="pl-1 text-[13px] font-semibold tracking-[0.12em] text-[#8a847e] uppercase dark:text-white/55">{t('graphPanel.propertiesView.edge.properties')}</h3>
+      <div className={sectionClassName}>
         {Object.keys(edge.properties)
           .sort()
           .map((name) => {

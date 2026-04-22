@@ -129,6 +129,7 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
         from app.database import async_session
         from app.models.agent import Agent
         from app.models.llm import LLMModel
+        from app.services.llm import get_model_api_key
 
         # ── Phase 1: Read all context from DB (short transaction) ──
         agent_name = ""

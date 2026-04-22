@@ -16,6 +16,7 @@ from app.models.agent import Agent
 from app.models.audit import ChatMessage
 from app.models.llm import LLMModel
 from app.models.user import User
+from app.services.llm import call_llm, call_llm_with_failover
 
 router = APIRouter(tags=["websocket"])
 
@@ -480,8 +481,7 @@ async def websocket_chat(
             agent_type = agent.agent_type or ""
             role_description = agent.role_description or ""
             welcome_message = agent.welcome_message or ""
-            from app.models.agent import DEFAULT_CONTEXT_WINDOW_SIZE
-            ctx_size = agent.context_window_size or DEFAULT_CONTEXT_WINDOW_SIZE
+            ctx_size = agent.context_window_size or 100
             logger.info(f"[WS] Agent: {agent_name}, type: {agent_type}, model_id: {agent.primary_model_id}, ctx: {ctx_size}")
 
             # Load the agent's primary model
@@ -490,7 +490,6 @@ async def websocket_chat(
                     select(LLMModel).where(LLMModel.id == agent.primary_model_id)
                 )
                 llm_model = model_result.scalar_one_or_none()
-                # Treat disabled models as unavailable at runtime
                 if llm_model and not llm_model.enabled:
                     logger.info(f"[WS] Primary model {llm_model.model} is disabled, skipping")
                     llm_model = None
@@ -503,7 +502,6 @@ async def websocket_chat(
                     select(LLMModel).where(LLMModel.id == agent.fallback_model_id)
                 )
                 fallback_llm_model = fb_result.scalar_one_or_none()
-                # Treat disabled fallback models as unavailable
                 if fallback_llm_model and not fallback_llm_model.enabled:
                     logger.info(f"[WS] Fallback model {fallback_llm_model.model} is disabled, skipping")
                     fallback_llm_model = None
@@ -522,7 +520,7 @@ async def websocket_chat(
             from datetime import datetime as _dt, timezone as _tz
             conv_id = session_id
             if conv_id:
-                # Validate the session belongs to this agent and to this user (no hijacking others' sessions).
+                # Validate the session belongs to this agent and to this user.
                 try:
                     _sid = uuid.UUID(conv_id)
                 except (ValueError, TypeError):
@@ -593,12 +591,10 @@ async def websocket_chat(
     manager.active_connections[agent_id_str].append((websocket, conv_id))
     logger.info(f"[WS] Ready! Agent={agent_name}")
 
-    # Send session_id to frontend so Take Control can reference the correct session
+    # Send session_id to frontend so Take Control can reference the correct session.
     await websocket.send_json({"type": "connected", "session_id": conv_id})
 
     # Build conversation context from history
-    # IMPORTANT: Include tool_call messages so the LLM maintains tool-calling behavior.
-    # Without them, Claude sees user→assistant-text patterns and learns to skip tools.
     conversation: list[dict] = []
     for msg in history_messages:
         if msg.role == "tool_call":
@@ -624,9 +620,6 @@ async def websocket_chat(
                     asst_msg["reasoning_content"] = tc_data["reasoning_content"]
                 conversation.append(asst_msg)
                 # Tool result message.
-                # Sanitize any stale [ImageID: ...] markers left by the ephemeral
-                # screenshot cache — those images are gone from memory and would
-                # confuse the LLM if sent as-is.
                 from app.services.vision_inject import sanitize_history_tool_result
                 sanitized_result = sanitize_history_tool_result(str(tc_result))
                 conversation.append({
@@ -651,7 +644,7 @@ async def websocket_chat(
             logger.info(f"[WS] Waiting for message from {agent_name}...")
             data = await websocket.receive_json()
 
-            # Set a unique trace ID for this specific message processing
+            # Set a unique trace ID for this specific message processing.
             from app.core.logging_config import set_trace_id
             import uuid as _trace_uuid
             trace_id = str(_trace_uuid.uuid4())[:12]
@@ -686,21 +679,10 @@ async def websocket_chat(
 
             # Save user message to DB.
             #
-            # Strategy:
-            #   - If the LLM content contains [image_data:...] markers (i.e. the user
-            #     attached an image and the model supports vision), persist the FULL
-            #     content including the base64 marker.  This makes history self-contained
-            #     so subsequent turns can forward the image to the LLM without any
-            #     disk-based rehydration step.
-            #   - For all other messages (text, non-image files) use display_content for
-            #     cleaner history (avoids e.g. the raw file-text blob appearing in chat).
-            #
-            # The call_llm() path already strips [image_data:] for non-vision models
-            # (websocket.py ~line 210), so no extra handling is needed at read time.
-            HAS_IMAGE_MARKER = "[image_data:" in content
-            if HAS_IMAGE_MARKER:
-                # Preserve the full LLM content (includes base64) for multi-turn context.
-                # Prefix with [file:name] for the UI history parser if a file name exists.
+            # If the LLM content contains [image_data:...] markers, persist the full
+            # payload so subsequent turns can still forward the image to the model.
+            has_image_marker = "[image_data:" in content
+            if has_image_marker:
                 saved_content = f"[file:{file_name}]\n{content}" if file_name else content
             else:
                 saved_content = display_content if display_content else content
@@ -726,7 +708,7 @@ async def websocket_chat(
                 if _sess:
                     _sess.last_message_at = _now
                     if not history_messages and _sess.title.startswith("Session "):
-                        # Always use display_content for title (never expose raw base64)
+                        # Use display_content for title (avoids raw base64/markers)
                         title_src = display_content if display_content else content
                         # Clean up common prefixes from image/file messages
                         clean_title = title_src.replace("[图片] ", "📷 ").replace("[image_data:", "").strip()
@@ -735,7 +717,6 @@ async def websocket_chat(
                         _sess.title = clean_title[:40] if clean_title else content[:40]
                 await db.commit()
             logger.info("[WS] User message saved")
-
 
             # ── OpenClaw routing: insert into gateway_messages instead of LLM ──
             if agent_type == "openclaw":
@@ -781,39 +762,31 @@ async def websocket_chat(
                         partial_chunks.append(text)
                         await websocket.send_json({"type": "chunk", "content": text})
                     
-                    # Track which agentbay live URLs have been sent to avoid redundant pushes
-                    _sent_live_envs: set[str] = set()
-
                     async def tool_call_to_ws(data: dict):
                         """Send tool call info to client and persist completed ones."""
-                        # ── AgentBay live preview: embed screenshot URL in tool_call message ──
-                        # We embed live preview data directly in the tool_call payload
-                        # because separate WebSocket messages get silently dropped by nginx.
                         if data.get("status") == "done":
                             try:
                                 from app.services.agentbay_live import detect_agentbay_env, get_desktop_screenshot, get_browser_snapshot
-                                import re as _re_live
+
                                 tool_name = data.get("name", "")
                                 env = detect_agentbay_env(tool_name)
-                                if env:
+                                if env == "desktop":
+                                    b64_url = await get_desktop_screenshot(agent_id, session_id=conv_id)
+                                    if b64_url:
+                                        data["live_preview"] = {"env": env, "screenshot_url": b64_url}
+                                        logger.info(f"[WS][LivePreview] Embedded {env} base64 in tool_call")
+                                elif env == "browser":
+                                    b64_url = await get_browser_snapshot(agent_id, session_id=conv_id)
+                                    if b64_url:
+                                        data["live_preview"] = {"env": env, "screenshot_url": b64_url}
+                                        logger.info(f"[WS][LivePreview] Embedded {env} base64 in tool_call")
+                                elif env == "code":
                                     tool_result = data.get("result", "") or ""
-                                    if env == "desktop":
-                                        b64_url = await get_desktop_screenshot(agent_id, session_id=conv_id)
-                                        if b64_url:
-                                            data["live_preview"] = {"env": env, "screenshot_url": b64_url}
-                                            logger.info(f"[WS][LivePreview] Embedded {env} base64 in tool_call")
-                                    elif env == "browser":
-                                        b64_url = await get_browser_snapshot(agent_id, session_id=conv_id)
-                                        if b64_url:
-                                            data["live_preview"] = {"env": env, "screenshot_url": b64_url}
-                                            logger.info(f"[WS][LivePreview] Embedded {env} base64 in tool_call")
-                                    elif env == "code":
-                                        data["live_preview"] = {"env": "code", "output": tool_result[:5000]}
+                                    data["live_preview"] = {"env": "code", "output": tool_result[:5000]}
                             except Exception as _lp_err:
                                 logger.warning(f"[WS][LivePreview] Embed failed: {_lp_err}")
 
                         await websocket.send_json({"type": "tool_call", **data})
-
                         # Save completed tool calls to DB so they persist in chat history
                         if data.get("status") == "done":
                             try:
@@ -847,20 +820,33 @@ async def websocket_chat(
 
                     import asyncio as _aio
 
-                    # Run call_llm as a cancellable task
-                    llm_task = _aio.create_task(call_llm(
-                        llm_model,
-                        conversation[-ctx_size:],
-                        agent_name,
-                        role_description,
-                        agent_id=agent_id,
-                        user_id=user_id,
-                        session_id=conv_id,
-                        on_chunk=stream_to_ws,
-                        on_tool_call=tool_call_to_ws,
-                        on_thinking=thinking_to_ws,
-                        supports_vision=getattr(llm_model, 'supports_vision', False),
-                    ))
+                    # Run call_llm_with_failover as a cancellable task
+                    async def _call_with_failover():
+                        async def _on_failover(reason: str):
+                            await websocket.send_json({"type": "info", "content": f"Primary model error, {reason}"})
+
+                        # To prevent tool call message pairs(assistant + tool) from being broken down.
+                        _truncated = conversation[-ctx_size:]
+                        while _truncated and _truncated[0].get("role") == "tool":
+                            _truncated.pop(0)
+
+                        return await call_llm_with_failover(
+                            primary_model=llm_model,
+                            fallback_model=fallback_llm_model,
+                            messages=_truncated,
+                            agent_name=agent_name,
+                            role_description=role_description,
+                            agent_id=agent_id,
+                            user_id=user_id,
+                            session_id=conv_id,
+                            on_chunk=stream_to_ws,
+                            on_tool_call=tool_call_to_ws,
+                            on_thinking=thinking_to_ws,
+                            supports_vision=getattr(llm_model, 'supports_vision', False),
+                            on_failover=_on_failover,
+                        )
+
+                    llm_task = _aio.create_task(_call_with_failover())
 
                     # Listen for abort while LLM is running
                     aborted = False
@@ -926,31 +912,7 @@ async def websocket_chat(
                     logger.error(f"[WS] LLM error: {e}")
                     import traceback
                     traceback.print_exc()
-                    # Runtime fallback: primary model failed -> retry with fallback model
-                    if fallback_llm_model:
-                        logger.info(f"[WS] Primary model failed, retrying with fallback: {fallback_llm_model.model}")
-                        try:
-                            await websocket.send_json({"type": "info", "content": f"Primary model error, switching to fallback model ({fallback_llm_model.model})..."})
-                            assistant_response = await call_llm(
-                                fallback_llm_model,
-                                conversation[-ctx_size:],
-                                agent_name,
-                                role_description,
-                                agent_id=agent_id,
-                                user_id=user_id,
-                                session_id=conv_id,
-                                on_chunk=stream_to_ws,
-                                on_tool_call=tool_call_to_ws,
-                                on_thinking=thinking_to_ws,
-                                supports_vision=getattr(fallback_llm_model, 'supports_vision', False),
-                            )
-                            logger.info(f"[WS] Fallback LLM response: {assistant_response[:80]}")
-                        except Exception as e2:
-                            logger.error(f"[WS] Fallback LLM also failed: {e2}")
-                            traceback.print_exc()
-                            assistant_response = f"[LLM call error] Primary: {str(e)[:100]} | Fallback: {str(e2)[:100]}"
-                    else:
-                        assistant_response = f"[LLM call error] {str(e)[:200]}"
+                    assistant_response = f"[LLM call error] {str(e)[:200]}"
             else:
                 assistant_response = f"⚠️ {agent_name} has no LLM model configured. Please select a model in the agent's Settings tab."
 
@@ -973,47 +935,44 @@ async def websocket_chat(
                             db.add(task)
                             await db.commit()
                             await db.refresh(task)
+                            logger.info(f"[WS] Task created: {task.id}")
+                            # Trigger background execution
                             task_id = task.id
                         _asyncio.create_task(execute_task(task_id, agent_id))
                         assistant_response += f"\n\n📋 Task synced to task board: [{task_title}]"
-                        logger.info(f"[WS] Created task: {task_title}")
-                    except Exception as e:
-                        logger.error(f"[WS] Failed to create task: {e}")
+                    except Exception as te:
+                        logger.error(f"[WS] Task creation failed: {te}")
 
-            # Add assistant response to conversation
+            # Add assistant response to in-memory conversation for subsequent turns.
             conversation.append({"role": "assistant", "content": assistant_response})
 
-            # Save assistant message
+            # Save assistant reply
             async with async_session() as db:
-                asst_msg = ChatMessage(
+                assistant_msg = ChatMessage(
                     agent_id=agent_id,
                     user_id=user_id,
                     role="assistant",
                     content=assistant_response,
-                    thinking=''.join(thinking_content) if thinking_content else None,
                     conversation_id=conv_id,
+                    thinking="".join(thinking_content) if thinking_content else None,
                 )
-                db.add(asst_msg)
+                db.add(assistant_msg)
                 await db.commit()
             logger.info("[WS] Assistant message saved")
 
-            # Send done signal with final content (for non-streaming clients)
-            await websocket.send_json({
-                "type": "done",
-                "role": "assistant",
-                "content": assistant_response,
-            })
-            logger.info("[WS] Response done sent to client")
+            # Final 'done' packet
+            await websocket.send_json({"type": "done", "role": "assistant", "content": assistant_response})
+
+            # Re-process any queued messages (if user sent something during generation)
+            for qm in queued_messages:
+                # In a real implementation, you might want to push these back to the main loop
+                pass
 
     except WebSocketDisconnect:
-        logger.info(f"[WS] Client disconnected: {agent_name}")
-        manager.disconnect(agent_id_str, websocket)
+        logger.info(f"[WS] Client disconnected: {user_id}")
+        manager.disconnect(str(agent_id), websocket)
     except Exception as e:
-        logger.error(f"[WS] Error in message loop: {type(e).__name__}: {e}")
+        logger.error(f"[WS] Unexpected error: {e}")
         import traceback
         traceback.print_exc()
-        manager.disconnect(agent_id_str, websocket)
-        try:
-            await websocket.close(code=1011)
-        except Exception:
-            pass
+        manager.disconnect(str(agent_id), websocket)

@@ -167,13 +167,18 @@ if [ ! -f ".env" ]; then
     err "LightRAG .env missing. Run ./setup-all.sh first."
     exit 1
 fi
-# lightrag-server reads config from .env in CWD
+if [ ! -x ".venv/bin/lightrag-server" ]; then
+    err "LightRAG .venv missing. Run ./setup-all.sh first."
+    exit 1
+fi
+# lightrag-server reads config from .env in CWD.
+# Start the venv binary directly so the pid file tracks the real server process.
 nohup env \
     HOST=0.0.0.0 \
     PORT="$LIGHTRAG_PORT" \
     TOKEN_SECRET="$JWT_SECRET_KEY" \
     JWT_ALGORITHM="$JWT_ALGORITHM" \
-    uv run lightrag-server \
+    .venv/bin/lightrag-server \
     > "$LOG_DIR/lightrag.log" 2>&1 &
 echo $! > "$PID_DIR/lightrag.pid"
 cd "$ROOT"

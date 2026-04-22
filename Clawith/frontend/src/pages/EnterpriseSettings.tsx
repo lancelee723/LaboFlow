@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { enterpriseApi, skillApi } from '../services/api';
+import { getLocalizedToolDisplayName } from '../utils/toolNames';
+import { useAuthStore } from '../stores';
 import PromptModal from '../components/PromptModal';
 import FileBrowser from '../components/FileBrowser';
 import type { FileBrowserApi } from '../components/FileBrowser';
 import { saveAccentColor, getSavedAccentColor, resetAccentColor, PRESET_COLORS } from '../utils/theme';
-import { useAuthStore } from '../stores';
 import UserManagement from './UserManagement';
 import InvitationCodes from './InvitationCodes';
 import LinearCopyButton from '../components/LinearCopyButton';
@@ -1609,29 +1610,34 @@ const COMMON_TIMEZONES = [
 
 function CompanyTimezoneEditor() {
     const { t } = useTranslation();
-    const tenantId = localStorage.getItem('current_tenant_id') || '';
+    const user = useAuthStore((s) => s.user);
+    const tenantId = user?.tenant_id || localStorage.getItem('current_tenant_id') || '';
     const [timezone, setTimezone] = useState('UTC');
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [error, setError] = useState('');
 
     useEffect(() => {
         if (!tenantId) return;
         fetchJson<any>(`/tenants/${tenantId}`)
             .then(d => { if (d?.timezone) setTimezone(d.timezone); })
-            .catch(() => { });
+            .catch((e: any) => setError(e.message || 'Failed to load timezone'));
     }, [tenantId]);
 
     const handleSave = async (tz: string) => {
         if (!tenantId) return;
         setTimezone(tz);
         setSaving(true);
+        setError('');
         try {
             await fetchJson(`/tenants/${tenantId}`, {
                 method: 'PUT', body: JSON.stringify({ timezone: tz }),
             });
             setSaved(true);
             setTimeout(() => setSaved(false), 2000);
-        } catch (e) { }
+        } catch (e: any) {
+            setError(e.message || 'Failed to save timezone');
+        }
         setSaving(false);
     };
 
@@ -1643,13 +1649,23 @@ function CompanyTimezoneEditor() {
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                         {t('enterprise.timezone.description', 'Default timezone for all agents. Agents can override individually.')}
                     </div>
+                    {error && (
+                        <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '4px' }}>
+                            ⚠ {error}
+                        </div>
+                    )}
+                    {!tenantId && (
+                        <div style={{ fontSize: '11px', color: 'var(--error)', marginTop: '4px' }}>
+                            ⚠ {t('enterprise.timezone.noTenant', 'No company selected. Please refresh the page or contact support.')}
+                        </div>
+                    )}
                 </div>
                 <select
                     className="form-input"
                     value={timezone}
                     onChange={e => handleSave(e.target.value)}
                     style={{ width: '220px', fontSize: '13px' }}
-                    disabled={saving}
+                    disabled={saving || !tenantId}
                 >
                     {COMMON_TIMEZONES.map(tz => (
                         <option key={tz} value={tz}>{tz}</option>
@@ -2375,6 +2391,9 @@ export default function EnterpriseSettings() {
         task: t('agent.toolCategories.task'),
         communication: t('agent.toolCategories.communication'),
         search: t('agent.toolCategories.search'),
+        lightrag: t('agent.toolCategories.lightrag', 'LightRAG'),
+        rag: t('agent.toolCategories.rag', 'LightRAG'),
+        graph: t('agent.toolCategories.graph', 'LightRAG'),
         aware: t('agent.toolCategories.aware', 'Aware & Triggers'),
         social: t('agent.toolCategories.social', 'Social'),
         code: t('agent.toolCategories.code', 'Code & Execution'),
@@ -2387,6 +2406,11 @@ export default function EnterpriseSettings() {
     };
     const [toolsView, setToolsView] = useState<'global' | 'agent-installed'>('global');
     const [agentInstalledTools, setAgentInstalledTools] = useState<any[]>([]);
+    const getToolGroupKey = (tool: any) => {
+        if (tool?.name?.startsWith('lightrag.')) return 'lightrag';
+        return tool.category || 'general';
+    };
+
     const loadAllTools = async () => {
         const tid = selectedTenantId;
         const data = await fetchJson<any[]>(`/tools${tid ? `?tenant_id=${tid}` : ''}`);
@@ -3453,7 +3477,7 @@ export default function EnterpriseSettings() {
                             {(() => {
                                 // Group tools by category (same pattern as AgentDetail.tsx)
                                 const grouped = allTools.reduce((acc: Record<string, any[]>, tool: any) => {
-                                    const cat = tool.category || 'general';
+                                    const cat = getToolGroupKey(tool);
                                     (acc[cat] = acc[cat] || []).push(tool);
                                     return acc;
                                 }, {} as Record<string, any[]>);
@@ -3536,13 +3560,13 @@ export default function EnterpriseSettings() {
                                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
                                                                                     <span style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>·</span>
                                                                                     <div style={{ minWidth: 0 }}>
-                                                                                        <div style={{ fontWeight: 500, fontSize: '13px' }}>{tool.display_name}</div>
+                                                                                        <div style={{ fontWeight: 500, fontSize: '13px' }}>{getLocalizedToolDisplayName(tool)}</div>
                                                                                         <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tool.description?.slice(0, 90)}</div>
                                                                                     </div>
                                                                                 </div>
                                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                                                                                     <button className="btn btn-danger" style={{ padding: '3px 7px', fontSize: '10px' }} onClick={async () => {
-                                                                                        if (!confirm(`${t('common.delete')} ${tool.display_name}?`)) return;
+                                                                                        if (!confirm(`${t('common.delete')} ${getLocalizedToolDisplayName(tool)}?`)) return;
                                                                                         await fetchJson(`/tools/${tool.id}`, { method: 'DELETE' });
                                                                                         await loadAllTools();
                                                                                     }}>{t('common.delete')}</button>
@@ -3572,7 +3596,7 @@ export default function EnterpriseSettings() {
                                                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
                                                                                         <span style={{ fontSize: '18px' }}>{tool.icon}</span>
                                                                                         <div style={{ minWidth: 0 }}>
-                                                                                            <div style={{ fontWeight: 500, fontSize: '13px' }}>{tool.display_name}</div>
+                                                                                            <div style={{ fontWeight: 500, fontSize: '13px' }}>{getLocalizedToolDisplayName(tool)}</div>
                                                                                             <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tool.description?.slice(0, 80)}</div>
                                                                                         </div>
                                                                                     </div>
@@ -3581,7 +3605,7 @@ export default function EnterpriseSettings() {
                                                                                             <button style={{ background: 'none', border: '1px solid var(--border-subtle)', borderRadius: '6px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', color: 'var(--text-secondary)' }} onClick={() => { setEditingToolId(tool.id); setEditingConfig({ ...tool.config }); }}>Configure</button>
                                                                                         )}
                                                                                         <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={async () => {
-                                                                                            if (!confirm(`${t('common.delete')} ${tool.display_name}?`)) return;
+                                                                                            if (!confirm(`${t('common.delete')} ${getLocalizedToolDisplayName(tool)}?`)) return;
                                                                                             await fetchJson(`/tools/${tool.id}`, { method: 'DELETE' });
                                                                                             loadAllTools();
                                                                                         }}>{t('common.delete')}</button>
@@ -3669,7 +3693,7 @@ export default function EnterpriseSettings() {
                                                                             <span style={{ fontSize: '18px' }}>{tool.icon}</span>
                                                                             <div style={{ minWidth: 0 }}>
                                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                                                    <span style={{ fontWeight: 500, fontSize: '13px' }}>{tool.display_name}</span>
+                                                                                    <span style={{ fontWeight: 500, fontSize: '13px' }}>{getLocalizedToolDisplayName(tool)}</span>
                                                                                     <span style={{ fontSize: '10px', background: tool.type === 'mcp' ? 'var(--primary)' : 'var(--bg-tertiary)', color: tool.type === 'mcp' ? '#fff' : 'var(--text-secondary)', borderRadius: '4px', padding: '1px 5px' }}>
                                                                                         {tool.type === 'mcp' ? 'MCP' : 'Built-in'}
                                                                                     </span>
@@ -3712,7 +3736,7 @@ export default function EnterpriseSettings() {
                                                                             {/* Delete (non-builtin only) */}
                                                                             {tool.type !== 'builtin' && (
                                                                                 <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={async () => {
-                                                                                    if (!confirm(`${t('common.delete')} ${tool.display_name}?`)) return;
+                                                                                    if (!confirm(`${t('common.delete')} ${getLocalizedToolDisplayName(tool)}?`)) return;
                                                                                     await fetchJson(`/tools/${tool.id}`, { method: 'DELETE' });
                                                                                     loadAllTools();
                                                                                     loadAgentInstalledTools();
@@ -3830,7 +3854,7 @@ export default function EnterpriseSettings() {
                                         <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-primary)', borderRadius: '12px', padding: '24px', width: '480px', maxWidth: '95vw', maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                                                 <div>
-                                                    <h3 style={{ margin: 0 }}>⚙️ {tool.display_name}</h3>
+                                                    <h3 style={{ margin: 0 }}>⚙️ {getLocalizedToolDisplayName(tool)}</h3>
                                                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>Global configuration used by all agents</div>
                                                 </div>
                                                 <button onClick={() => setEditingToolId(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: 'var(--text-secondary)' }}>✕</button>

@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lightrag import LightRAG
 from lightrag.base import DeletionResult, DocProcessingStatus, DocStatus
+from lightrag.kg.json_kv_impl import JsonKVStorage
 from lightrag.utils import (
     generate_track_id,
     compute_mdhash_id,
@@ -86,6 +87,16 @@ router = APIRouter(
 temp_prefix = "__tmp__"
 UNKNOWN_FILE_SOURCE = "unknown_source"
 LEGACY_EMPTY_FILE_PATH_SENTINELS = {"", "no-file-path"}
+FOLDER_NAMESPACE = "folders"
+ALL_FOLDERS_FILTER = "__all_folders__"
+UNASSIGNED_FOLDERS_FILTER = "__unassigned_folders__"
+ALL_DOC_STATUSES = [
+    DocStatus.PENDING,
+    DocStatus.PROCESSING,
+    DocStatus.PREPROCESSED,
+    DocStatus.PROCESSED,
+    DocStatus.FAILED,
+]
 
 
 def normalize_file_path(file_path: str | None) -> str:
@@ -98,6 +109,101 @@ def normalize_file_path(file_path: str | None) -> str:
         return UNKNOWN_FILE_SOURCE
 
     return normalized
+
+
+def normalize_folder_id(folder_id: str | None) -> str | None:
+    """Normalize folder filters and ids.
+
+    Returns None for empty values and the front-end's "all folders" sentinel.
+    """
+    if folder_id is None:
+        return None
+
+    normalized = folder_id.strip()
+    if not normalized or normalized == ALL_FOLDERS_FILTER:
+        return None
+
+    return normalized
+
+
+def get_doc_folder_id(metadata: dict[str, Any] | None) -> str | None:
+    """Extract a normalized folder id from document metadata."""
+    if not isinstance(metadata, dict):
+        return None
+
+    raw_folder_id = metadata.get("folder_id") or metadata.get("folderId")
+    if not isinstance(raw_folder_id, str):
+        return None
+
+    normalized = raw_folder_id.strip()
+    return normalized or None
+
+
+def matches_folder_filter(
+    metadata: dict[str, Any] | None, folder_filter: str | None
+) -> bool:
+    """Return whether a document metadata object matches the requested folder filter."""
+    normalized_filter = normalize_folder_id(folder_filter)
+    if normalized_filter is None:
+        return True
+
+    folder_id = get_doc_folder_id(metadata)
+    if normalized_filter == UNASSIGNED_FOLDERS_FILTER:
+        return folder_id is None
+
+    return folder_id == normalized_filter
+
+
+def build_doc_status_response(doc_id: str, doc: DocProcessingStatus) -> "DocStatusResponse":
+    """Convert DocProcessingStatus to the API response shape."""
+    return DocStatusResponse(
+        id=doc_id,
+        content_summary=doc.content_summary,
+        content_length=doc.content_length,
+        status=doc.status,
+        created_at=format_datetime(doc.created_at),
+        updated_at=format_datetime(doc.updated_at),
+        track_id=doc.track_id,
+        chunks_count=doc.chunks_count,
+        error_msg=doc.error_msg,
+        metadata=doc.metadata,
+        file_path=normalize_file_path(doc.file_path),
+    )
+
+
+def sort_documents_with_ids(
+    documents_with_ids: list[tuple[str, DocProcessingStatus]],
+    sort_field: str,
+    sort_direction: str,
+) -> list[tuple[str, DocProcessingStatus]]:
+    """Sort document tuples using the same semantics as doc_status storages."""
+    if sort_field not in {"created_at", "updated_at", "id", "file_path"}:
+        sort_field = "updated_at"
+
+    reverse_sort = sort_direction.lower() == "desc"
+
+    def _sort_key(item: tuple[str, DocProcessingStatus]):
+        doc_id, doc = item
+        if sort_field == "id":
+            return doc_id
+        if sort_field == "file_path":
+            return get_pinyin_sort_key(normalize_file_path(doc.file_path))
+        return format_datetime(getattr(doc, sort_field, None)) or ""
+
+    return sorted(documents_with_ids, key=_sort_key, reverse=reverse_sort)
+
+
+def build_status_counts_for_documents(
+    documents_with_ids: list[tuple[str, DocProcessingStatus]],
+) -> dict[str, int]:
+    """Build status counts for an already filtered document set."""
+    counts = {status.value: 0 for status in DocStatus}
+    for _, doc in documents_with_ids:
+        status_key = doc.status.value if isinstance(doc.status, DocStatus) else str(doc.status)
+        counts[status_key] = counts.get(status_key, 0) + 1
+
+    counts["all"] = len(documents_with_ids)
+    return counts
 
 
 def sanitize_filename(filename: str, input_dir: Path) -> str:
@@ -622,6 +728,12 @@ class DocumentsRequest(BaseModel):
     status_filter: Optional[DocStatus] = Field(
         default=None, description="Filter by document status, None for all statuses"
     )
+    folder_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Filter by folder id. Use '__unassigned_folders__' for documents without a folder."
+        ),
+    )
     page: int = Field(default=1, ge=1, description="Page number (1-based)")
     page_size: int = Field(
         default=50, ge=10, le=200, description="Number of documents per page (10-200)"
@@ -633,10 +745,16 @@ class DocumentsRequest(BaseModel):
         default="desc", description="Sort direction"
     )
 
+    @field_validator("folder_id", mode="before")
+    @classmethod
+    def normalize_folder_id_before(cls, folder_id: Optional[str]) -> Optional[str]:
+        return normalize_folder_id(folder_id)
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "status_filter": "PROCESSED",
+                "folder_id": "folder_123",
                 "page": 1,
                 "page_size": 50,
                 "sort_field": "updated_at",
@@ -644,6 +762,79 @@ class DocumentsRequest(BaseModel):
             }
         }
     )
+
+
+class FolderResponse(BaseModel):
+    """Response model for a document folder."""
+
+    id: str = Field(description="Folder identifier")
+    name: str = Field(description="Folder name")
+    create_time: Optional[int] = Field(
+        default=None, description="Unix timestamp when the folder was created"
+    )
+    update_time: Optional[int] = Field(
+        default=None, description="Unix timestamp when the folder was last updated"
+    )
+
+
+class CreateFolderRequest(BaseModel):
+    """Request model for creating a document folder."""
+
+    name: str = Field(min_length=1, description="Folder name")
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def strip_name_after(cls, name: str) -> str:
+        stripped_name = name.strip()
+        if not stripped_name:
+            raise ValueError("Folder name cannot be empty")
+        return stripped_name
+
+
+class MoveDocumentsRequest(BaseModel):
+    """Request model for moving documents into or out of a folder."""
+
+    doc_ids: List[str] = Field(..., description="The IDs of the documents to move.")
+    folder_id: Optional[str] = Field(
+        default=None,
+        description="Target folder id. Null clears the folder assignment.",
+    )
+
+    @field_validator("doc_ids", mode="after")
+    @classmethod
+    def validate_doc_ids(cls, doc_ids: List[str]) -> List[str]:
+        if not doc_ids:
+            raise ValueError("Document IDs list cannot be empty")
+
+        validated_ids = []
+        for doc_id in doc_ids:
+            if not doc_id or not doc_id.strip():
+                raise ValueError("Document ID cannot be empty")
+            validated_ids.append(doc_id.strip())
+
+        if len(validated_ids) != len(set(validated_ids)):
+            raise ValueError("Document IDs must be unique")
+
+        return validated_ids
+
+    @field_validator("folder_id", mode="before")
+    @classmethod
+    def normalize_target_folder_id_before(
+        cls, folder_id: Optional[str]
+    ) -> Optional[str]:
+        normalized = normalize_folder_id(folder_id)
+        if normalized == UNASSIGNED_FOLDERS_FILTER:
+            return None
+        return normalized
+
+
+class FolderActionResponse(BaseModel):
+    """Response model for folder actions."""
+
+    status: Literal["success", "partial_success", "failure"] = Field(
+        description="Status of the folder operation"
+    )
+    message: str = Field(description="Message describing the operation result")
 
 
 class PaginationInfo(BaseModel):
@@ -2089,6 +2280,219 @@ def create_document_routes(
 ):
     # Create combined auth dependency for document routes
     combined_auth = get_combined_auth_dependency(api_key)
+    folders_store = JsonKVStorage(
+        namespace=FOLDER_NAMESPACE,
+        workspace=rag.workspace,
+        global_config={"working_dir": rag.working_dir},
+        embedding_func=rag.embedding_func,
+    )
+    folders_store_initialized = False
+    folders_store_init_lock = asyncio.Lock()
+
+    async def ensure_folders_store() -> None:
+        nonlocal folders_store_initialized
+        if folders_store_initialized:
+            return
+
+        async with folders_store_init_lock:
+            if folders_store_initialized:
+                return
+            await folders_store.initialize()
+            folders_store_initialized = True
+
+    async def list_folder_records() -> dict[str, dict[str, Any]]:
+        from lightrag.kg.shared_storage import get_namespace_data
+
+        await ensure_folders_store()
+        folder_records = await get_namespace_data(
+            FOLDER_NAMESPACE, workspace=rag.workspace
+        )
+        return dict(folder_records or {})
+
+    async def persist_folder_upsert(data: dict[str, dict[str, Any]]) -> None:
+        await ensure_folders_store()
+        await folders_store.upsert(data)
+        await folders_store.index_done_callback()
+
+    async def persist_folder_delete(folder_ids: list[str]) -> None:
+        await ensure_folders_store()
+        await folders_store.delete(folder_ids)
+        await folders_store.index_done_callback()
+
+    async def get_folder_filtered_paginated_documents(
+        request: DocumentsRequest,
+    ) -> tuple[list[tuple[str, DocProcessingStatus]], int, dict[str, int]]:
+        all_documents_by_id = await rag.doc_status.get_docs_by_statuses(ALL_DOC_STATUSES)
+        folder_filtered_documents = [
+            (doc_id, doc)
+            for doc_id, doc in all_documents_by_id.items()
+            if matches_folder_filter(doc.metadata, request.folder_id)
+        ]
+
+        status_counts = build_status_counts_for_documents(folder_filtered_documents)
+
+        visible_documents = folder_filtered_documents
+        if request.status_filter is not None:
+            visible_documents = [
+                (doc_id, doc)
+                for doc_id, doc in folder_filtered_documents
+                if doc.status == request.status_filter
+            ]
+
+        sorted_documents = sort_documents_with_ids(
+            visible_documents, request.sort_field, request.sort_direction
+        )
+        total_count = len(sorted_documents)
+        start_idx = (request.page - 1) * request.page_size
+        end_idx = start_idx + request.page_size
+        return sorted_documents[start_idx:end_idx], total_count, status_counts
+
+    @router.get(
+        "/folders",
+        response_model=List[FolderResponse],
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_folders_route() -> List[FolderResponse]:
+        """List all document folders for the current workspace."""
+        folder_records = await list_folder_records()
+        folders = [
+            FolderResponse(
+                id=folder_id,
+                name=str(folder_data.get("name") or folder_id),
+                create_time=folder_data.get("create_time"),
+                update_time=folder_data.get("update_time"),
+            )
+            for folder_id, folder_data in folder_records.items()
+        ]
+        folders.sort(key=lambda folder: get_pinyin_sort_key(folder.name))
+        return folders
+
+    @router.post(
+        "/folders",
+        response_model=FolderResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def create_folder_route(request: CreateFolderRequest) -> FolderResponse:
+        """Create a new document folder."""
+        folder_records = await list_folder_records()
+        requested_name = request.name.casefold()
+        for folder_data in folder_records.values():
+            folder_name = str(folder_data.get("name") or "").strip()
+            if folder_name.casefold() == requested_name:
+                raise HTTPException(status_code=409, detail="Folder already exists")
+
+        folder_id = uuid4().hex
+        await persist_folder_upsert({folder_id: {"name": request.name}})
+        created_folder = await folders_store.get_by_id(folder_id)
+
+        return FolderResponse(
+            id=folder_id,
+            name=request.name,
+            create_time=(created_folder or {}).get("create_time"),
+            update_time=(created_folder or {}).get("update_time"),
+        )
+
+    @router.delete(
+        "/folders/{folder_id}",
+        response_model=FolderActionResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def delete_folder_route(
+        folder_id: str, clear_docs: bool = True
+    ) -> FolderActionResponse:
+        """Delete a folder and optionally clear its assignment from documents."""
+        normalized_folder_id = normalize_folder_id(folder_id)
+        if not normalized_folder_id or normalized_folder_id == UNASSIGNED_FOLDERS_FILTER:
+            raise HTTPException(status_code=400, detail="Invalid folder id")
+
+        folder_records = await list_folder_records()
+        if normalized_folder_id not in folder_records:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+        await persist_folder_delete([normalized_folder_id])
+
+        cleared_count = 0
+        if clear_docs:
+            documents_by_id = await rag.doc_status.get_docs_by_statuses(ALL_DOC_STATUSES)
+            docs_to_update: dict[str, dict[str, Any]] = {}
+            for doc_id, doc in documents_by_id.items():
+                if get_doc_folder_id(doc.metadata) != normalized_folder_id:
+                    continue
+
+                raw_doc = await rag.doc_status.get_by_id(doc_id)
+                if raw_doc is None:
+                    continue
+
+                metadata = dict(raw_doc.get("metadata") or {})
+                metadata.pop("folder_id", None)
+                raw_doc["metadata"] = metadata
+                docs_to_update[doc_id] = raw_doc
+
+            if docs_to_update:
+                await rag.doc_status.upsert(docs_to_update)
+                cleared_count = len(docs_to_update)
+
+        return FolderActionResponse(
+            status="success",
+            message=(
+                f"Folder deleted successfully. Cleared folder assignment from {cleared_count} documents."
+            ),
+        )
+
+    @router.post(
+        "/move",
+        response_model=FolderActionResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def move_documents_route(
+        request: MoveDocumentsRequest,
+    ) -> FolderActionResponse:
+        """Move documents to a folder or clear their folder assignment."""
+        target_folder_id = request.folder_id
+        if target_folder_id is not None:
+            folder_records = await list_folder_records()
+            if target_folder_id not in folder_records:
+                raise HTTPException(status_code=404, detail="Folder not found")
+
+        docs_to_update: dict[str, dict[str, Any]] = {}
+        missing_doc_ids: list[str] = []
+
+        for doc_id in request.doc_ids:
+            raw_doc = await rag.doc_status.get_by_id(doc_id)
+            if raw_doc is None:
+                missing_doc_ids.append(doc_id)
+                continue
+
+            metadata = dict(raw_doc.get("metadata") or {})
+            if target_folder_id is None:
+                metadata.pop("folder_id", None)
+            else:
+                metadata["folder_id"] = target_folder_id
+
+            raw_doc["metadata"] = metadata
+            docs_to_update[doc_id] = raw_doc
+
+        if docs_to_update:
+            await rag.doc_status.upsert(docs_to_update)
+
+        if missing_doc_ids and docs_to_update:
+            return FolderActionResponse(
+                status="partial_success",
+                message=(
+                    f"Updated {len(docs_to_update)} documents. Missing {len(missing_doc_ids)} documents."
+                ),
+            )
+
+        if missing_doc_ids:
+            return FolderActionResponse(
+                status="failure",
+                message=f"No documents updated. Missing {len(missing_doc_ids)} documents.",
+            )
+
+        return FolderActionResponse(
+            status="success",
+            message=f"Updated {len(docs_to_update)} documents.",
+        )
 
     @router.post(
         "/scan", response_model=ScanResponse, dependencies=[Depends(combined_auth)]
@@ -3143,10 +3547,11 @@ def create_document_routes(
         )
 
         performance_timing_log(
-            "[documents/paginated][%s] Request start workspace=%s status_filter=%s page=%s page_size=%s sort_field=%s sort_direction=%s",
+            "[documents/paginated][%s] Request start workspace=%s status_filter=%s folder_filter=%s page=%s page_size=%s sort_field=%s sort_direction=%s",
             trace_id,
             rag.workspace,
             status_filter_value,
+            request.folder_id,
             request.page,
             request.page_size,
             request.sort_field,
@@ -3184,24 +3589,33 @@ def create_document_routes(
                 return result
 
             query_task_create_start = time.perf_counter()
-            docs_task = asyncio.create_task(
-                _timed_call(
-                    "get_docs_paginated",
-                    rag.doc_status.get_docs_paginated(
-                        status_filter=request.status_filter,
-                        page=request.page,
-                        page_size=request.page_size,
-                        sort_field=request.sort_field,
-                        sort_direction=request.sort_direction,
-                    ),
+            if request.folder_id is None:
+                docs_task = asyncio.create_task(
+                    _timed_call(
+                        "get_docs_paginated",
+                        rag.doc_status.get_docs_paginated(
+                            status_filter=request.status_filter,
+                            page=request.page,
+                            page_size=request.page_size,
+                            sort_field=request.sort_field,
+                            sort_direction=request.sort_direction,
+                        ),
+                    )
                 )
-            )
-            status_counts_task = asyncio.create_task(
-                _timed_call(
-                    "get_all_status_counts",
-                    rag.doc_status.get_all_status_counts(),
+                status_counts_task = asyncio.create_task(
+                    _timed_call(
+                        "get_all_status_counts",
+                        rag.doc_status.get_all_status_counts(),
+                    )
                 )
-            )
+            else:
+                docs_task = asyncio.create_task(
+                    _timed_call(
+                        "get_docs_paginated_with_folder_filter",
+                        get_folder_filtered_paginated_documents(request),
+                    )
+                )
+                status_counts_task = None
             query_task_create_elapsed = time.perf_counter() - query_task_create_start
             performance_timing_log(
                 "[documents/paginated][%s] Query tasks created in %.4fs",
@@ -3210,9 +3624,12 @@ def create_document_routes(
             )
 
             query_await_start = time.perf_counter()
-            (documents_with_ids, total_count), status_counts = await asyncio.gather(
-                docs_task, status_counts_task
-            )
+            if status_counts_task is not None:
+                (documents_with_ids, total_count), status_counts = await asyncio.gather(
+                    docs_task, status_counts_task
+                )
+            else:
+                documents_with_ids, total_count, status_counts = await docs_task
             query_await_elapsed = time.perf_counter() - query_await_start
             performance_timing_log(
                 "[documents/paginated][%s] Query tasks awaited in %.4fs",
@@ -3222,23 +3639,10 @@ def create_document_routes(
 
             # Convert documents to response format
             response_assembly_start = time.perf_counter()
-            doc_responses = []
-            for doc_id, doc in documents_with_ids:
-                doc_responses.append(
-                    DocStatusResponse(
-                        id=doc_id,
-                        content_summary=doc.content_summary,
-                        content_length=doc.content_length,
-                        status=doc.status,
-                        created_at=format_datetime(doc.created_at),
-                        updated_at=format_datetime(doc.updated_at),
-                        track_id=doc.track_id,
-                        chunks_count=doc.chunks_count,
-                        error_msg=doc.error_msg,
-                        metadata=doc.metadata,
-                        file_path=normalize_file_path(doc.file_path),
-                    )
-                )
+            doc_responses = [
+                build_doc_status_response(doc_id, doc)
+                for doc_id, doc in documents_with_ids
+            ]
 
             # Calculate pagination info
             total_pages = (total_count + request.page_size - 1) // request.page_size

@@ -31,10 +31,9 @@ async def _execute_schedule(schedule_id: uuid.UUID, agent_id: uuid.UUID, instruc
     try:
         from app.database import async_session
         from app.models.agent import Agent
-        from app.models.llm import LLMModel
 
         async with async_session() as db:
-            # Load agent + model
+            # Load agent
             result = await db.execute(select(Agent).where(Agent.id == agent_id))
             agent = result.scalar_one_or_none()
             if not agent:
@@ -50,18 +49,7 @@ async def _execute_schedule(schedule_id: uuid.UUID, agent_id: uuid.UUID, instruc
                 logger.info(f"Schedule {schedule_id}: agent {agent.name} has expired, skipping")
                 return
 
-            model_id = agent.primary_model_id or agent.fallback_model_id
-            if not model_id:
-                logger.warning(f"Schedule {schedule_id}: agent {agent.name} has no LLM model")
-                return
-
-            model_result = await db.execute(select(LLMModel).where(LLMModel.id == model_id))
-            model = model_result.scalar_one_or_none()
-            if not model:
-                logger.warning(f"Schedule {schedule_id}: LLM model {model_id} not found")
-                return
-
-            # Build context and call LLM
+            # Build context and call LLM with failover support
             from app.services.agent_context import build_agent_context
             from app.services.agent_tools import execute_tool, get_agent_tools_for_llm
             from app.services.llm_utils import create_llm_client, get_max_tokens, LLMMessage, LLMError, get_model_api_key

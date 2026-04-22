@@ -19,6 +19,39 @@
       "switchToDark": "切换到深色主题"
     }
   },
+  "shell": {
+    "brandBadge": "AI 知识工作台",
+    "workspaceBadge": "现代化控制台",
+    "workspaceTitle": "统一知识工作区",
+    "workspaceDescription": "在同一个安静、清晰的界面里完成文档整理、知识图谱浏览和知识库问答。",
+    "sidebarLabel": "工作区",
+    "activeBadge": "当前",
+    "systemLabel": "系统",
+    "systemStatus": "后端状态",
+    "pipelineStatus": "流水线",
+    "pipelineBusy": "繁忙",
+    "pipelineIdle": "空闲",
+    "statusHealthy": "正常",
+    "statusUnavailable": "离线",
+    "versionLabel": "版本",
+    "footerHint": "主题、语言和项目入口",
+    "memberLabel": "工作区成员",
+    "learnMore": "项目仓库",
+    "sections": {
+      "documents": {
+        "title": "文档",
+        "description": "上传、整理并按文件夹管理源文档，再交给 LightRAG 建立索引。"
+      },
+      "knowledgeGraph": {
+        "title": "知识图谱",
+        "description": "查看抽取得到的实体与关系，理解知识网络的结构和连接。"
+      },
+      "retrieval": {
+        "title": "知识库问答",
+        "description": "围绕当前知识库提问，快速验证检索结果与生成回答的质量。"
+      }
+    }
+  },
   "login": {
     "description": "请输入您的账号和密码登录系统",
     "username": "用户名",
@@ -35,6 +68,7 @@
   },
   "common": {
     "cancel": "取消",
+    "delete": "删除",
     "save": "保存",
     "saving": "保存中...",
     "saveFailed": "保存失败"
@@ -81,6 +115,37 @@
     "selectDocuments": {
       "selectCurrentPage": "全选当前页 ({{count}})",
       "deselectAll": "取消全选 ({{count}})"
+    },
+    "folders": {
+      "column": "文件夹",
+      "filterLabel": "文件夹",
+      "filterAll": "全部文档",
+      "unassigned": "未分配",
+      "manageButton": "新建文件夹",
+      "manageTooltip": "管理文件夹",
+      "manageTitle": "新建文件夹",
+      "manageDescription": "创建或删除文档文件夹。删除文件夹会清空文档的文件夹归属。",
+      "createPlaceholder": "文件夹名称",
+      "createAction": "新建",
+      "createSuccess": "已创建文件夹：{{name}}",
+      "createError": "创建文件夹失败\n{{error}}",
+      "deleteTooltip": "删除文件夹",
+      "deleteTitle": "删除文件夹",
+      "deleteConfirm": "确定删除文件夹 \"{{name}}\" 吗？该文件夹中的文档会被移出文件夹。",
+      "deleteClearDocs": "同时取消所有文档的文件夹归属",
+      "deleteSuccess": "已删除文件夹：{{name}}",
+      "deleteError": "删除文件夹失败\n{{error}}",
+      "empty": "还没有创建任何文件夹",
+      "allDocuments": "全部文档",
+      "moveButton": "移动到文件夹",
+      "moveTooltip": "将所选文档移动到文件夹",
+      "moveTitle": "移动文档到文件夹",
+      "moveDescription": "将 {{count}} 个文档移动到目标文件夹，或清空其文件夹归属。",
+      "movePlaceholder": "选择目标文件夹",
+      "selectedFolder": "目标文件夹",
+      "moveSuccess": "已更新 {{count}} 个文档的文件夹",
+      "moveError": "移动文档失败\n{{error}}",
+      "loadError": "加载文件夹失败\n{{error}}"
     },
     "uploadDocuments": {
       "button": "上传",

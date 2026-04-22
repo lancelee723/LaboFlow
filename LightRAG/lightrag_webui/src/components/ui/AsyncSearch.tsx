@@ -170,15 +170,18 @@ export function AsyncSearch<T>({
   return (
     <div
       ref={containerRef}
-      className={cn(disabled && 'cursor-not-allowed opacity-50', className)}
+      className={cn('relative', disabled && 'cursor-not-allowed opacity-50', className)}
       onMouseDown={handleMouseDown}
     >
-      <Command shouldFilter={false} className="bg-transparent">
+      <Command
+        shouldFilter={false}
+        className="rounded-[20px] border border-black/10 bg-white/88 shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)] backdrop-blur-xl dark:border-white/10 dark:bg-[#1f1c1a]/88 [&_[cmdk-input-wrapper]]:h-11 [&_[cmdk-input-wrapper]]:border-b [&_[cmdk-input-wrapper]]:border-black/6 [&_[cmdk-input-wrapper]]:px-3.5 dark:[&_[cmdk-input-wrapper]]:border-white/10 [&_[cmdk-input-wrapper]_svg]:text-[#8a847e] dark:[&_[cmdk-input-wrapper]_svg]:text-white/50"
+      >
         <div>
           <CommandInput
             placeholder={placeholder}
             value={searchTerm}
-            className="max-h-8"
+            className="h-11 border-0 bg-transparent text-sm placeholder:text-[#a39e98] dark:placeholder:text-white/40"
             aria-label={ariaLabel}
             onFocus={handleFocus}
             onValueChange={(value) => {
@@ -192,7 +195,7 @@ export function AsyncSearch<T>({
             </div>
           )}
         </div>
-        <CommandList hidden={!open}>
+        <CommandList hidden={!open} className="max-h-[320px] px-1 pb-1 pt-1">
           {error && <div className="text-destructive p-4 text-center">{error}</div>}
           {loading && options.length === 0 && (loadingSkeleton || <DefaultLoadingSkeleton />)}
           {!loading &&
@@ -209,12 +212,12 @@ export function AsyncSearch<T>({
                   value={getOptionValue(option)}
                   onSelect={handleSelect}
                   onMouseMove={() => onFocus(getOptionValue(option))}
-                  className="truncate cmd-item"
+                  className="truncate cmd-item rounded-[14px] px-3 py-2 text-sm text-[#31302e] data-[selected=true]:bg-[#f6f5f4] data-[selected=true]:text-[#1f1e1c] dark:text-white/80 dark:data-[selected=true]:bg-white/8 dark:data-[selected=true]:text-white"
                 >
                   {renderOption(option)}
                 </CommandItem>
                 {idx !== options.length - 1 && (
-                  <div key={`divider-${idx}`} className="bg-foreground/10 h-[1px]" />
+                  <div key={`divider-${idx}`} className="mx-2 h-[1px] bg-black/6 dark:bg-white/8" />
                 )}
               </React.Fragment>
             ))}

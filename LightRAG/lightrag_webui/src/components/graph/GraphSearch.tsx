@@ -35,7 +35,7 @@ const NodeOption = ({ id }: { id: string }) => {
 
   // Custom node display component that doesn't rely on @react-sigma/graph-search
   return (
-    <div className="flex items-center gap-2 p-2 text-sm">
+    <div className="flex items-center gap-2 rounded-xl px-1 py-1.5 text-sm text-[#31302e] dark:text-white/85">
       <div
         className="rounded-full flex-shrink-0"
         style={{
@@ -204,7 +204,7 @@ export const GraphSearchInput = ({
 
   return (
     <AsyncSearch
-      className="bg-background/60 w-24 rounded-xl border-1 opacity-60 backdrop-blur-lg transition-all hover:w-fit hover:opacity-100 w-full"
+      className="min-w-[260px] max-w-[340px]"
       fetcher={loadOptions}
       renderOption={OptionComponent}
       getOptionValue={(item) => item.id}

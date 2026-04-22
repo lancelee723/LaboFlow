@@ -125,6 +125,8 @@ export default function DocumentManager() {
   // ── Folder state ──────────────────────────────────────────────────────────
   const [folders, setFolders] = useState<Folder[]>([])
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
+  const activeFolderIdRef = useRef<string | null>(null)
+  const [globalDocCount, setGlobalDocCount] = useState(0)
 
   const loadFolders = useCallback(async () => {
     try {
@@ -152,8 +154,8 @@ export default function DocumentManager() {
   })
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({ all: 0 })
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [sortField, setSortField] = useState<SortField>('updated_at')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const sortField: SortField = 'updated_at'
+  const sortDirection: SortDirection = 'desc'
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [pageByStatus, setPageByStatus] = useState<Record<StatusFilter, number>>({
     all: 1, processed: 1, preprocessed: 1, processing: 1, pending: 1, failed: 1
@@ -174,10 +176,10 @@ export default function DocumentManager() {
 
   // ── Folder doc counts for the tree ────────────────────────────────────────
   const folderDocCounts = useMemo<Record<string, number>>(() => {
-    const counts: Record<string, number> = { __all__: statusCounts.all ?? 0 }
+    const counts: Record<string, number> = { __all__: globalDocCount }
     folders.forEach((f) => { counts[f.id] = 0 })
     return counts
-  }, [folders, statusCounts.all])
+  }, [folders, globalDocCount])
 
   const handleDocumentSelect = useCallback((docId: string, checked: boolean) => {
     setSelectedDocIds(prev => checked ? [...prev, docId] : prev.filter(id => id !== docId))
@@ -233,6 +235,9 @@ export default function DocumentManager() {
     setPagination(response.pagination)
     setCurrentPageDocs(response.documents)
     setStatusCounts(response.status_counts)
+    if (activeFolderIdRef.current === null) {
+      setGlobalDocCount(response.status_counts?.all ?? 0)
+    }
     const legacyDocs: DocsStatusesResponse = {
       statuses: {
         processed: response.documents.filter((d: DocStatusResponse) => d.status === 'processed'),
@@ -431,6 +436,7 @@ export default function DocumentManager() {
   }, [statusFilter, pagination.page, pageByStatus])
 
   const handleFolderSelect = useCallback((folderId: string | null) => {
+    activeFolderIdRef.current = folderId
     setActiveFolderId(folderId)
     setSelectedDocIds([])
     setPagination(prev => ({ ...prev, page: 1 }))
@@ -490,13 +496,9 @@ export default function DocumentManager() {
 
   useEffect(() => {
     if (currentTab === 'documents') fetchPaginatedDocuments(pagination.page, pagination.page_size, statusFilter)
-  }, [currentTab, pagination.page, pagination.page_size, statusFilter, sortField, sortDirection, fetchPaginatedDocuments])
+  }, [currentTab, pagination.page, pagination.page_size, statusFilter, sortField, sortDirection, activeFolderId, fetchPaginatedDocuments])
 
   useEffect(() => { setSelectedDocIds([]) }, [pagination.page, statusFilter, sortField, sortDirection])
-
-  // Suppress unused-variable lint warnings for sort setters that are kept for future sort UI
-  void setSortField
-  void setSortDirection
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -609,7 +611,7 @@ export default function DocumentManager() {
       {/* Body: FolderTree + DocList */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Folder tree */}
-        <div className="w-[168px] shrink-0 border-r border-[rgba(0,0,0,0.1)] overflow-hidden">
+        <div className="w-[200px] shrink-0 border-r border-[rgba(0,0,0,0.1)] overflow-hidden">
           <FolderTree
             folders={folders}
             activeFolderId={activeFolderId}

@@ -12,6 +12,8 @@ const ZoomControl = () => {
   const { zoomIn, zoomOut, reset } = useCamera({ duration: 200, factor: 1.5 })
   const sigma = useSigma()
   const { t } = useTranslation();
+  const controlButtonClassName =
+    'h-10 w-10 rounded-2xl border border-black/10 bg-white/92 text-[#615d59] shadow-none hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/80 dark:hover:bg-white/12'
 
   const handleZoomIn = useCallback(() => zoomIn(), [zoomIn])
   const handleZoomOut = useCallback(() => zoomOut(), [zoomOut])
@@ -77,6 +79,7 @@ const ZoomControl = () => {
         onClick={handleRotate}
         tooltip={t('graphPanel.sideBar.zoomControl.rotateCamera')}
         size="icon"
+        className={controlButtonClassName}
       >
         <RotateCwIcon />
       </Button>
@@ -85,6 +88,7 @@ const ZoomControl = () => {
         onClick={handleRotateCounterClockwise}
         tooltip={t('graphPanel.sideBar.zoomControl.rotateCameraCounterClockwise')}
         size="icon"
+        className={controlButtonClassName}
       >
         <RotateCcwIcon />
       </Button>
@@ -93,13 +97,26 @@ const ZoomControl = () => {
         onClick={handleResetZoom}
         tooltip={t('graphPanel.sideBar.zoomControl.resetZoom')}
         size="icon"
+        className={controlButtonClassName}
       >
         <FullscreenIcon />
       </Button>
-      <Button variant={controlButtonVariant} onClick={handleZoomIn} tooltip={t('graphPanel.sideBar.zoomControl.zoomIn')} size="icon">
+      <Button
+        variant={controlButtonVariant}
+        onClick={handleZoomIn}
+        tooltip={t('graphPanel.sideBar.zoomControl.zoomIn')}
+        size="icon"
+        className={controlButtonClassName}
+      >
         <ZoomInIcon />
       </Button>
-      <Button variant={controlButtonVariant} onClick={handleZoomOut} tooltip={t('graphPanel.sideBar.zoomControl.zoomOut')} size="icon">
+      <Button
+        variant={controlButtonVariant}
+        onClick={handleZoomOut}
+        tooltip={t('graphPanel.sideBar.zoomControl.zoomOut')}
+        size="icon"
+        className={controlButtonClassName}
+      >
         <ZoomOutIcon />
       </Button>
     </>
