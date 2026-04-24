@@ -215,6 +215,15 @@ async def _tick():
 async def start_scheduler():
     """Start the background scheduler loop. Call from FastAPI startup."""
     logger.info("🕐 Agent scheduler started (30s interval)")
+    _tick_count = 0
     while True:
         await _tick()
+        _tick_count += 1
+        # Clean up idle Playwright sessions every ~60 seconds (every 2 ticks)
+        if _tick_count % 2 == 0:
+            try:
+                from app.services.playwright_client import cleanup_playwright_sessions
+                await cleanup_playwright_sessions()
+            except Exception as _pw_err:
+                logger.warning(f"Playwright session cleanup error: {_pw_err}")
         await asyncio.sleep(30)
