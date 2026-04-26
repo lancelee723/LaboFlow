@@ -19,39 +19,6 @@
       "switchToDark": "切换到深色主题"
     }
   },
-  "shell": {
-    "brandBadge": "AI 知识工作台",
-    "workspaceBadge": "现代化控制台",
-    "workspaceTitle": "统一知识工作区",
-    "workspaceDescription": "在同一个安静、清晰的界面里完成文档整理、知识图谱浏览和知识库问答。",
-    "sidebarLabel": "工作区",
-    "activeBadge": "当前",
-    "systemLabel": "系统",
-    "systemStatus": "后端状态",
-    "pipelineStatus": "流水线",
-    "pipelineBusy": "繁忙",
-    "pipelineIdle": "空闲",
-    "statusHealthy": "正常",
-    "statusUnavailable": "离线",
-    "versionLabel": "版本",
-    "footerHint": "主题、语言和项目入口",
-    "memberLabel": "工作区成员",
-    "learnMore": "项目仓库",
-    "sections": {
-      "documents": {
-        "title": "文档",
-        "description": "上传、整理并按文件夹管理源文档，再交给 LightRAG 建立索引。"
-      },
-      "knowledgeGraph": {
-        "title": "知识图谱",
-        "description": "查看抽取得到的实体与关系，理解知识网络的结构和连接。"
-      },
-      "retrieval": {
-        "title": "知识库问答",
-        "description": "围绕当前知识库提问，快速验证检索结果与生成回答的质量。"
-      }
-    }
-  },
   "login": {
     "description": "请输入您的账号和密码登录系统",
     "username": "用户名",
@@ -68,7 +35,6 @@
   },
   "common": {
     "cancel": "取消",
-    "delete": "删除",
     "save": "保存",
     "saving": "保存中...",
     "saveFailed": "保存失败"
@@ -115,37 +81,6 @@
     "selectDocuments": {
       "selectCurrentPage": "全选当前页 ({{count}})",
       "deselectAll": "取消全选 ({{count}})"
-    },
-    "folders": {
-      "column": "文件夹",
-      "filterLabel": "文件夹",
-      "filterAll": "全部文档",
-      "unassigned": "未分配",
-      "manageButton": "新建文件夹",
-      "manageTooltip": "管理文件夹",
-      "manageTitle": "新建文件夹",
-      "manageDescription": "创建或删除文档文件夹。删除文件夹会清空文档的文件夹归属。",
-      "createPlaceholder": "文件夹名称",
-      "createAction": "新建",
-      "createSuccess": "已创建文件夹：{{name}}",
-      "createError": "创建文件夹失败\n{{error}}",
-      "deleteTooltip": "删除文件夹",
-      "deleteTitle": "删除文件夹",
-      "deleteConfirm": "确定删除文件夹 \"{{name}}\" 吗？该文件夹中的文档会被移出文件夹。",
-      "deleteClearDocs": "同时取消所有文档的文件夹归属",
-      "deleteSuccess": "已删除文件夹：{{name}}",
-      "deleteError": "删除文件夹失败\n{{error}}",
-      "empty": "还没有创建任何文件夹",
-      "allDocuments": "全部文档",
-      "moveButton": "移动到文件夹",
-      "moveTooltip": "将所选文档移动到文件夹",
-      "moveTitle": "移动文档到文件夹",
-      "moveDescription": "将 {{count}} 个文档移动到目标文件夹，或清空其文件夹归属。",
-      "movePlaceholder": "选择目标文件夹",
-      "selectedFolder": "目标文件夹",
-      "moveSuccess": "已更新 {{count}} 个文档的文件夹",
-      "moveError": "移动文档失败\n{{error}}",
-      "loadError": "加载文件夹失败\n{{error}}"
     },
     "uploadDocuments": {
       "button": "上传",
@@ -526,37 +461,5 @@
     "prevPage": "上一页",
     "nextPage": "下一页",
     "lastPage": "末页"
-  },
-  "llmConfig": {
-    "buttonTooltip": "LLM 提供商设置",
-    "title": "LLM 提供商设置",
-    "description": "配置 LLM、嵌入和重排模型。大多数更改立即生效（热切换），更改嵌入模型需要清空索引数据并重启服务。",
-    "tabLLM": "LLM",
-    "tabEmbedding": "嵌入",
-    "tabRerank": "重排",
-    "binding": "绑定",
-    "provider": "提供商",
-    "baseUrl": "接口地址",
-    "model": "模型",
-    "apiKey": "API 密钥",
-    "apiKeyPlaceholder": "留空保留当前密钥",
-    "maxTokens": "最大 Token 数",
-    "temperature": "温度",
-    "maxAsync": "最大并发数",
-    "timeout": "超时（秒）",
-    "embeddingDim": "嵌入维度",
-    "tokenLimit": "Token 限制",
-    "rerankEnabled": "启用重排",
-    "embeddingRebuildWarning": "⚠ 更改绑定、模型或维度需要清空所有索引数据并重启服务器。",
-    "destructiveTitle": "破坏性变更 — 清空索引数据？",
-    "destructiveDescription": "嵌入绑定、模型或维度已更改，使用新模型前必须清空所有索引数据。",
-    "willDelete": "以下文件将被永久删除：",
-    "restartNote": "清空后，需要重启 LightRAG 服务器以应用新的嵌入配置。",
-    "confirmClear": "清空并保存",
-    "cancel": "取消",
-    "save": "保存",
-    "staleConfig": "配置已在其他地方更新，请重新检查后再试。",
-    "restartRequiredTitle": "需要重启",
-    "restartRequiredMessage": "索引数据已清空，请重启 LightRAG 服务器以应用新的嵌入配置。"
   }
 }

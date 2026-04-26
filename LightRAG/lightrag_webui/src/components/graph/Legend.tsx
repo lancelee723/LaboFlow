@@ -17,17 +17,17 @@ const Legend: React.FC<LegendProps> = ({ className }) => {
   }
 
   return (
-    <Card className={`max-w-xs rounded-[22px] border-black/10 p-3 shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)] ${className}`}>
-      <h3 className="mb-3 text-[13px] font-semibold tracking-[0.12em] text-[#8a847e] uppercase dark:text-white/55">{t('graphPanel.legend')}</h3>
+    <Card className={`p-2 max-w-xs ${className}`}>
+      <h3 className="text-sm font-medium mb-2">{t('graphPanel.legend')}</h3>
       <ScrollArea className="max-h-80">
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1">
           {Array.from(typeColorMap.entries()).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-3 rounded-xl border border-black/6 bg-[#faf8f5] px-3 py-2 dark:border-white/8 dark:bg-white/4">
+            <div key={type} className="flex items-center gap-2">
               <div
-                className="h-4 w-4 rounded-full"
+                className="w-4 h-4 rounded-full"
                 style={{ backgroundColor: color }}
               />
-              <span className="truncate text-xs text-[#31302e] dark:text-white/85" title={type}>
+              <span className="text-xs truncate" title={type}>
                 {t(`graphPanel.nodeTypes.${type.toLowerCase().replace(/\s+/g, '')}`, type)}
               </span>
             </div>

@@ -93,6 +93,7 @@
   "pnpm": {
     "overrides": {
       "echarts": "5.5.1"
-    }
+    },
+    "onlyBuiltDependencies": ["@parcel/watcher", "core-js", "esbuild", "nx", "vue-demi"]
   }
 }

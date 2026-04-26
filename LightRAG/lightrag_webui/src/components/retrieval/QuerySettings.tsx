@@ -25,10 +25,10 @@ const ResetButton = ({ onClick, title }: { onClick: () => void; title: string })
         <button
           type="button"
           onClick={onClick}
-          className="mr-1 flex h-9 w-9 items-center justify-center rounded-xl border border-black/10 bg-white text-[#766f69] transition-colors hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/65 dark:hover:bg-white/12 dark:hover:text-white"
+          className="mr-1 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           title={title}
         >
-          <RotateCcw className="h-3.5 w-3.5" />
+          <RotateCcw className="h-3 w-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="left">
@@ -42,12 +42,6 @@ export default function QuerySettings() {
   const { t } = useTranslation()
   const querySettings = useSettingsStore((state) => state.querySettings)
   const userPromptHistory = useSettingsStore((state) => state.userPromptHistory)
-  const fieldLabelClassName =
-    'ml-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8a847e] dark:text-white/55'
-  const numericInputClassName =
-    'h-10 flex-1 rounded-xl border-black/10 bg-white/90 pr-2 shadow-none dark:border-white/10 dark:bg-white/8 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]'
-  const toggleRowClassName =
-    'flex items-center gap-2 rounded-xl border border-black/6 bg-[#faf8f5] px-3 py-2 dark:border-white/8 dark:bg-white/4'
 
   const handleChange = useCallback((key: keyof QueryRequest, value: any) => {
     useSettingsStore.getState().updateQuerySettings({ [key]: value })
@@ -78,20 +72,20 @@ export default function QuerySettings() {
   }, [handleChange, defaultValues])
 
   return (
-    <Card className="flex w-[320px] shrink-0 flex-col overflow-hidden rounded-[24px] border-black/10 bg-white/92 shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)] dark:border-white/10 dark:bg-[#1f1c1a]/92">
-      <CardHeader className="border-b border-black/6 px-5 pb-4 pt-5 dark:border-white/8">
-        <CardTitle className="text-[18px] font-bold tracking-[-0.25px] text-[#1f1e1c] dark:text-white">{t('retrievePanel.querySettings.parametersTitle')}</CardTitle>
+    <Card className="flex shrink-0 flex-col w-[280px]">
+      <CardHeader className="px-4 pt-4 pb-2">
+        <CardTitle>{t('retrievePanel.querySettings.parametersTitle')}</CardTitle>
         <CardDescription className="sr-only">{t('retrievePanel.querySettings.parametersDescription')}</CardDescription>
       </CardHeader>
       <CardContent className="m-0 flex grow flex-col p-0 text-xs">
         <div className="relative size-full">
-          <div className="absolute inset-0 flex flex-col gap-3 overflow-auto px-4 py-4">
+          <div className="absolute inset-0 flex flex-col gap-2 overflow-auto px-2 pr-2">
             {/* User Prompt - Moved to top for better dropdown space */}
             <>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="user_prompt" className={fieldLabelClassName}>
+                    <label htmlFor="user_prompt" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.userPrompt')}
                     </label>
                   </TooltipTrigger>
@@ -109,7 +103,7 @@ export default function QuerySettings() {
                   onDeleteFromHistory={handleDeleteFromHistory}
                   history={userPromptHistory}
                   placeholder={t('retrievePanel.querySettings.userPromptPlaceholder')}
-                  className="h-10 rounded-xl border-black/10 bg-white/90 shadow-none dark:border-white/10 dark:bg-white/8"
+                  className="h-9"
                 />
               </div>
             </>
@@ -119,7 +113,7 @@ export default function QuerySettings() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="query_mode_select" className={fieldLabelClassName}>
+                    <label htmlFor="query_mode_select" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.queryMode')}
                     </label>
                   </TooltipTrigger>
@@ -135,7 +129,7 @@ export default function QuerySettings() {
                 >
                   <SelectTrigger
                     id="query_mode_select"
-                    className="h-10 flex-1 cursor-pointer rounded-xl border-black/10 bg-white/90 text-left shadow-none hover:bg-[#f6f5f4] focus:ring-0 focus:ring-offset-0 focus:outline-0 active:right-0 dark:border-white/10 dark:bg-white/8 dark:hover:bg-white/12 [&>span]:break-all [&>span]:line-clamp-1"
+                    className="hover:bg-primary/5 h-9 cursor-pointer focus:ring-0 focus:ring-offset-0 focus:outline-0 active:right-0 flex-1 text-left [&>span]:break-all [&>span]:line-clamp-1"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -162,7 +156,7 @@ export default function QuerySettings() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="top_k" className={fieldLabelClassName}>
+                    <label htmlFor="top_k" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.topK')}
                     </label>
                   </TooltipTrigger>
@@ -188,7 +182,7 @@ export default function QuerySettings() {
                   }}
                   min={1}
                   placeholder={t('retrievePanel.querySettings.topKPlaceholder')}
-                  className={numericInputClassName}
+                  className="h-9 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                 />
                 <ResetButton
                   onClick={() => handleReset('top_k')}
@@ -202,7 +196,7 @@ export default function QuerySettings() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="chunk_top_k" className={fieldLabelClassName}>
+                    <label htmlFor="chunk_top_k" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.chunkTopK')}
                     </label>
                   </TooltipTrigger>
@@ -228,7 +222,7 @@ export default function QuerySettings() {
                   }}
                   min={1}
                   placeholder={t('retrievePanel.querySettings.chunkTopKPlaceholder')}
-                  className={numericInputClassName}
+                  className="h-9 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                 />
                 <ResetButton
                   onClick={() => handleReset('chunk_top_k')}
@@ -242,7 +236,7 @@ export default function QuerySettings() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="max_entity_tokens" className={fieldLabelClassName}>
+                    <label htmlFor="max_entity_tokens" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.maxEntityTokens')}
                     </label>
                   </TooltipTrigger>
@@ -268,7 +262,7 @@ export default function QuerySettings() {
                   }}
                   min={1}
                   placeholder={t('retrievePanel.querySettings.maxEntityTokensPlaceholder')}
-                  className={numericInputClassName}
+                  className="h-9 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                 />
                 <ResetButton
                   onClick={() => handleReset('max_entity_tokens')}
@@ -282,7 +276,7 @@ export default function QuerySettings() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="max_relation_tokens" className={fieldLabelClassName}>
+                    <label htmlFor="max_relation_tokens" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.maxRelationTokens')}
                     </label>
                   </TooltipTrigger>
@@ -308,7 +302,7 @@ export default function QuerySettings() {
                   }}
                   min={1}
                   placeholder={t('retrievePanel.querySettings.maxRelationTokensPlaceholder')}
-                  className={numericInputClassName}
+                  className="h-9 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                 />
                 <ResetButton
                   onClick={() => handleReset('max_relation_tokens')}
@@ -322,7 +316,7 @@ export default function QuerySettings() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <label htmlFor="max_total_tokens" className={fieldLabelClassName}>
+                    <label htmlFor="max_total_tokens" className="ml-1 cursor-help">
                       {t('retrievePanel.querySettings.maxTotalTokens')}
                     </label>
                   </TooltipTrigger>
@@ -348,7 +342,7 @@ export default function QuerySettings() {
                   }}
                   min={1}
                   placeholder={t('retrievePanel.querySettings.maxTotalTokensPlaceholder')}
-                  className={numericInputClassName}
+                  className="h-9 flex-1 pr-2 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
                 />
                 <ResetButton
                   onClick={() => handleReset('max_total_tokens')}
@@ -359,11 +353,11 @@ export default function QuerySettings() {
 
             {/* Toggle Options */}
             <>
-              <div className={toggleRowClassName}>
+              <div className="flex items-center gap-2">
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <label htmlFor="enable_rerank" className="flex-1 text-[13px] font-medium text-[#31302e] dark:text-white/85">
+                      <label htmlFor="enable_rerank" className="flex-1 ml-1 cursor-help">
                         {t('retrievePanel.querySettings.enableRerank')}
                       </label>
                     </TooltipTrigger>
@@ -373,18 +367,18 @@ export default function QuerySettings() {
                   </Tooltip>
                 </TooltipProvider>
                 <Checkbox
-                  className="cursor-pointer rounded-[6px] border-black/15 data-[state=checked]:bg-[#097fe8] data-[state=checked]:text-white dark:border-white/20"
+                  className="mr-10 cursor-pointer"
                   id="enable_rerank"
                   checked={querySettings.enable_rerank}
                   onCheckedChange={(checked) => handleChange('enable_rerank', checked)}
                 />
               </div>
 
-              <div className={toggleRowClassName}>
+              <div className="flex items-center gap-2">
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <label htmlFor="only_need_context" className="flex-1 text-[13px] font-medium text-[#31302e] dark:text-white/85">
+                      <label htmlFor="only_need_context" className="flex-1 ml-1 cursor-help">
                         {t('retrievePanel.querySettings.onlyNeedContext')}
                       </label>
                     </TooltipTrigger>
@@ -394,7 +388,7 @@ export default function QuerySettings() {
                   </Tooltip>
                 </TooltipProvider>
                 <Checkbox
-                  className="cursor-pointer rounded-[6px] border-black/15 data-[state=checked]:bg-[#097fe8] data-[state=checked]:text-white dark:border-white/20"
+                  className="mr-10 cursor-pointer"
                   id="only_need_context"
                   checked={querySettings.only_need_context}
                   onCheckedChange={(checked) => {
@@ -406,11 +400,11 @@ export default function QuerySettings() {
                 />
               </div>
 
-              <div className={toggleRowClassName}>
+              <div className="flex items-center gap-2">
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <label htmlFor="only_need_prompt" className="flex-1 text-[13px] font-medium text-[#31302e] dark:text-white/85">
+                      <label htmlFor="only_need_prompt" className="flex-1 ml-1 cursor-help">
                         {t('retrievePanel.querySettings.onlyNeedPrompt')}
                       </label>
                     </TooltipTrigger>
@@ -420,7 +414,7 @@ export default function QuerySettings() {
                   </Tooltip>
                 </TooltipProvider>
                 <Checkbox
-                  className="cursor-pointer rounded-[6px] border-black/15 data-[state=checked]:bg-[#097fe8] data-[state=checked]:text-white dark:border-white/20"
+                  className="mr-10 cursor-pointer"
                   id="only_need_prompt"
                   checked={querySettings.only_need_prompt}
                   onCheckedChange={(checked) => {
@@ -432,11 +426,11 @@ export default function QuerySettings() {
                 />
               </div>
 
-              <div className={toggleRowClassName}>
+              <div className="flex items-center gap-2">
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <label htmlFor="stream" className="flex-1 text-[13px] font-medium text-[#31302e] dark:text-white/85">
+                      <label htmlFor="stream" className="flex-1 ml-1 cursor-help">
                         {t('retrievePanel.querySettings.streamResponse')}
                       </label>
                     </TooltipTrigger>
@@ -446,7 +440,7 @@ export default function QuerySettings() {
                   </Tooltip>
                 </TooltipProvider>
                 <Checkbox
-                  className="cursor-pointer rounded-[6px] border-black/15 data-[state=checked]:bg-[#097fe8] data-[state=checked]:text-white dark:border-white/20"
+                  className="mr-10 cursor-pointer"
                   id="stream"
                   checked={querySettings.stream}
                   onCheckedChange={(checked) => handleChange('stream', checked)}

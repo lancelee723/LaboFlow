@@ -19,39 +19,6 @@
       "switchToDark": "Switch to dark theme"
     }
   },
-  "shell": {
-    "brandBadge": "AI Knowledge Workspace",
-    "workspaceBadge": "Modern Console",
-    "workspaceTitle": "Unified Knowledge Workspace",
-    "workspaceDescription": "Organize documents, inspect the graph, and query your knowledge base from one calm interface.",
-    "sidebarLabel": "Workspace",
-    "activeBadge": "Active",
-    "systemLabel": "System",
-    "systemStatus": "Backend",
-    "pipelineStatus": "Pipeline",
-    "pipelineBusy": "Busy",
-    "pipelineIdle": "Ready",
-    "statusHealthy": "Healthy",
-    "statusUnavailable": "Offline",
-    "versionLabel": "Version",
-    "footerHint": "Theme, language, and project shortcuts",
-    "memberLabel": "Workspace member",
-    "learnMore": "Project repository",
-    "sections": {
-      "documents": {
-        "title": "Documents",
-        "description": "Upload, organize, and group source files into folders before LightRAG indexes them."
-      },
-      "knowledgeGraph": {
-        "title": "Knowledge Graph",
-        "description": "Inspect extracted entities and relations to understand how your knowledge network is connected."
-      },
-      "retrieval": {
-        "title": "Knowledge Q&A",
-        "description": "Ask grounded questions against the current knowledge base and verify answer quality quickly."
-      }
-    }
-  },
   "login": {
     "description": "Please enter your account and password to log in to the system",
     "username": "Username",
@@ -68,7 +35,6 @@
   },
   "common": {
     "cancel": "Cancel",
-    "delete": "Delete",
     "save": "Save",
     "saving": "Saving...",
     "saveFailed": "Save failed"
@@ -115,37 +81,6 @@
     "selectDocuments": {
       "selectCurrentPage": "Select Current Page ({{count}})",
       "deselectAll": "Deselect All ({{count}})"
-    },
-    "folders": {
-      "column": "Folder",
-      "filterLabel": "Folders",
-      "filterAll": "All Documents",
-      "unassigned": "Unassigned",
-      "manageButton": "New Folder",
-      "manageTooltip": "Manage folders",
-      "manageTitle": "New Folder",
-      "manageDescription": "Create or delete document folders.",
-      "createPlaceholder": "Folder name",
-      "createAction": "Create",
-      "createSuccess": "Created folder: {{name}}",
-      "createError": "Failed to create folder\n{{error}}",
-      "deleteTooltip": "Delete folder",
-      "deleteTitle": "Delete Folder",
-      "deleteConfirm": "Delete folder \"{{name}}\"? Documents in it will be moved out of the folder.",
-      "deleteClearDocs": "Remove folder assignment from all documents",
-      "deleteSuccess": "Deleted folder: {{name}}",
-      "deleteError": "Failed to delete folder\n{{error}}",
-      "empty": "No folders yet",
-      "allDocuments": "All Documents",
-      "moveButton": "Move to folder",
-      "moveTooltip": "Move selected documents to a folder",
-      "moveTitle": "Move documents to folder",
-      "moveDescription": "Move {{count}} document(s) into a target folder, or clear their folder assignment.",
-      "movePlaceholder": "Select a folder",
-      "selectedFolder": "Target folder",
-      "moveSuccess": "Updated folder for {{count}} document(s)",
-      "moveError": "Failed to move documents\n{{error}}",
-      "loadError": "Failed to load folders\n{{error}}"
     },
     "uploadDocuments": {
       "button": "Upload",
@@ -526,37 +461,5 @@
     "prevPage": "Previous Page",
     "nextPage": "Next Page",
     "lastPage": "Last Page"
-  },
-  "llmConfig": {
-    "buttonTooltip": "LLM Provider Settings",
-    "title": "LLM Provider Settings",
-    "description": "Configure LLM, Embedding, and Rerank providers. Changes take effect immediately (hot-swap) or after a restart for embedding model changes.",
-    "tabLLM": "LLM",
-    "tabEmbedding": "Embedding",
-    "tabRerank": "Rerank",
-    "binding": "Binding",
-    "provider": "Provider",
-    "baseUrl": "Base URL",
-    "model": "Model",
-    "apiKey": "API Key",
-    "apiKeyPlaceholder": "Leave blank to keep current key",
-    "maxTokens": "Max Tokens",
-    "temperature": "Temperature",
-    "maxAsync": "Max Concurrent",
-    "timeout": "Timeout (s)",
-    "embeddingDim": "Embedding Dim",
-    "tokenLimit": "Token Limit",
-    "rerankEnabled": "Enable Reranking",
-    "embeddingRebuildWarning": "⚠ Changing binding, model, or dimension requires clearing all indexed data and a server restart.",
-    "destructiveTitle": "Destructive Change — Clear Indexed Data?",
-    "destructiveDescription": "The embedding binding, model, or dimension has changed. All indexed data must be erased before the new model can be used.",
-    "willDelete": "The following files will be permanently deleted:",
-    "restartNote": "After clearing, the server must be restarted to apply the new embedding configuration.",
-    "confirmClear": "Clear and Save",
-    "cancel": "Cancel",
-    "save": "Save",
-    "staleConfig": "Configuration has been updated elsewhere. Please review and retry.",
-    "restartRequiredTitle": "Restart Required",
-    "restartRequiredMessage": "Indexed data has been cleared. Restart the LightRAG server to apply the new embedding configuration."
   }
 }

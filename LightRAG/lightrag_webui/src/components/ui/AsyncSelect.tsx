@@ -218,7 +218,7 @@ export function AsyncSelect<T>({
           aria-expanded={open}
           aria-label={ariaLabel}
           className={cn(
-            'h-11 justify-between rounded-[18px] border-0 bg-transparent px-3.5 text-[#1f1e1c] shadow-none hover:bg-[#f6f5f4] dark:text-white dark:hover:bg-white/10',
+            'justify-between',
             disabled && 'cursor-not-allowed opacity-50',
             triggerClassName
           )}
@@ -231,20 +231,14 @@ export function AsyncSelect<T>({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className={cn(
-          'rounded-[20px] border border-black/10 bg-[#fffdfb] p-1 shadow-[0_14px_28px_rgba(0,0,0,0.04),0_7px_15px_rgba(0,0,0,0.02),0_3px_7px_rgba(0,0,0,0.02),0_1px_3px_rgba(0,0,0,0.01)] dark:border-white/10 dark:bg-[#201d1a]',
-          className
-        )}
+        className={cn('p-0', className)}
         onCloseAutoFocus={(e) => e.preventDefault()}
         align="start"
         sideOffset={8}
         collisionPadding={5}
       >
-        <Command
-          shouldFilter={false}
-          className="rounded-[18px] bg-transparent [&_[cmdk-input-wrapper]]:h-11 [&_[cmdk-input-wrapper]]:border-b [&_[cmdk-input-wrapper]]:border-black/6 [&_[cmdk-input-wrapper]]:px-3.5 dark:[&_[cmdk-input-wrapper]]:border-white/10 [&_[cmdk-input-wrapper]_svg]:text-[#8a847e] dark:[&_[cmdk-input-wrapper]_svg]:text-white/50"
-        >
-          <div className="relative w-full">
+        <Command shouldFilter={false}>
+          <div className="relative w-full border-b">
             <CommandInput
               placeholder={searchPlaceholder || 'Search...'}
               value={searchTerm}
@@ -259,7 +253,7 @@ export function AsyncSelect<T>({
               </div>
             )}
           </div>
-          <CommandList className="max-h-[300px] px-1 pb-1 pt-1">
+          <CommandList>
             {error && <div className="text-destructive p-4 text-center">{error}</div>}
             {loading && options.length === 0 && (loadingSkeleton || <DefaultLoadingSkeleton />)}
             {!loading &&
@@ -284,7 +278,7 @@ export function AsyncSelect<T>({
                     onSelect={() => {
                       handleSelect(optionValue);
                     }}
-                    className="truncate rounded-[14px] px-3 py-2 text-sm text-[#31302e] data-[selected=true]:bg-[#f6f5f4] data-[selected=true]:text-[#1f1e1c] dark:text-white/80 dark:data-[selected=true]:bg-white/8 dark:data-[selected=true]:text-white"
+                    className="truncate"
                   >
                     {renderOption(option)}
                     <Check

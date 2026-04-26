@@ -14,9 +14,11 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from app.api.gateway import _get_agent_by_key
@@ -31,6 +33,37 @@ from app.services.local_agent.session_dispatcher import dispatcher
 
 
 router = APIRouter(tags=["bridge-ws"])
+
+
+# Public wheel download endpoint used by the one-click installer script.
+# The wheel itself is not sensitive — the installer bakes the agent's
+# API key into the generated shell script, not into the wheel. See
+# installer_templates.py for the consumer side.
+_BRIDGE_STATIC_DIR = (
+    Path(__file__).resolve().parent.parent / "static" / "bridge"
+)
+
+
+@router.get("/api/bridge/wheel", tags=["bridge-assets"])
+async def download_bridge_wheel() -> FileResponse:
+    """Return the bundled clawith_bridge wheel for the installer to pip-install."""
+    wheels = sorted(_BRIDGE_STATIC_DIR.glob("clawith_bridge-*-py3-none-any.whl"))
+    if not wheels:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "clawith_bridge wheel is not built. Run: "
+                "`cd Clawith/bridge && uv build --wheel && "
+                "cp dist/clawith_bridge-*.whl ../backend/app/static/bridge/`."
+            ),
+        )
+    # Latest filename wins (lexicographic order happens to match semver for us).
+    wheel = wheels[-1]
+    return FileResponse(
+        wheel,
+        media_type="application/octet-stream",
+        filename=wheel.name,
+    )
 
 
 PING_INTERVAL_SEC = 30

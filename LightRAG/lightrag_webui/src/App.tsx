@@ -1,47 +1,31 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import {
-  ActivityIcon,
-  FileTextIcon,
-  GithubIcon,
-  LogOutIcon,
-  MessageSquareTextIcon,
-  Share2Icon,
-  ZapIcon
-} from 'lucide-react'
-
-import { getAuthStatus, InvalidApiKeyError, RequireApiKeError } from '@/api/lightrag'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import ThemeProvider from '@/components/ThemeProvider'
+import TabVisibilityProvider from '@/contexts/TabVisibilityProvider'
 import ApiKeyAlert from '@/components/ApiKeyAlert'
-import AppSettings from '@/components/AppSettings'
 import StatusIndicator from '@/components/status/StatusIndicator'
-import Button from '@/components/ui/Button'
-import DocumentManager from '@/features/DocumentManager'
-import GraphViewer from '@/features/GraphViewer'
-import RetrievalTesting from '@/features/RetrievalTesting'
 import { SiteInfo, webuiPrefix } from '@/lib/constants'
-import { cn } from '@/lib/utils'
-import { navigationService } from '@/services/navigation'
 import { useBackendState, useAuthStore } from '@/stores/state'
 import { useSettingsStore } from '@/stores/settings'
+import { getAuthStatus } from '@/api/lightrag'
+import SiteHeader from '@/features/SiteHeader'
+import { InvalidApiKeyError, RequireApiKeError } from '@/api/lightrag'
+import { ZapIcon } from 'lucide-react'
 
-type WorkspaceTab = 'documents' | 'knowledge-graph' | 'retrieval'
+import GraphViewer from '@/features/GraphViewer'
+import DocumentManager from '@/features/DocumentManager'
+import RetrievalTesting from '@/features/RetrievalTesting'
+import ApiSite from '@/features/ApiSite'
 
-const surfaceShadow =
-  'shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)]'
+import { Tabs, TabsContent } from '@/components/ui/Tabs'
 
 function App() {
-  const { t } = useTranslation()
   const message = useBackendState.use.message()
-  const pipelineBusy = useBackendState.use.pipelineBusy()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
   const currentTab = useSettingsStore.use.currentTab()
-  const setCurrentTab = useSettingsStore.use.setCurrentTab()
-  const { isGuestMode, coreVersion, apiVersion, username } = useAuthStore()
-
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
-  const [initializing, setInitializing] = useState(true)
-  const versionCheckRef = useRef(false)
-  const isMountedRef = useRef(true)
+  const [initializing, setInitializing] = useState(true) // Add initializing state
+  const versionCheckRef = useRef(false); // Prevent duplicate calls in Vite dev mode
+  const healthCheckInitializedRef = useRef(false); // Prevent duplicate health checks in Vite dev mode
 
   const handleApiKeyAlertOpenChange = useCallback((open: boolean) => {
     setApiKeyAlertOpen(open)
@@ -50,380 +34,201 @@ function App() {
     }
   }, [])
 
-  const handleLogout = useCallback(() => {
-    navigationService.navigateToLogin()
-  }, [])
+  // Track component mount status with useRef
+  const isMountedRef = useRef(true);
 
-  const handleTabChange = useCallback(
-    (tab: WorkspaceTab) => {
-      setCurrentTab(tab)
-    },
-    [setCurrentTab]
-  )
-
+  // Set up mount/unmount status tracking
   useEffect(() => {
-    isMountedRef.current = true
+    isMountedRef.current = true;
 
+    // Handle page reload/unload
     const handleBeforeUnload = () => {
-      isMountedRef.current = false
-    }
+      isMountedRef.current = false;
+    };
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      isMountedRef.current = false
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
-  }, [])
+      isMountedRef.current = false;
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
 
+  // Health check - can be disabled
   useEffect(() => {
+    // Health check function
     const performHealthCheck = async () => {
       try {
+        // Only perform health check if component is still mounted
         if (isMountedRef.current) {
-          await useBackendState.getState().check()
+          await useBackendState.getState().check();
         }
       } catch (error) {
-        console.error('Health check error:', error)
+        console.error('Health check error:', error);
       }
-    }
+    };
 
-    useBackendState.getState().setHealthCheckFunction(performHealthCheck)
+    // Set health check function in the store
+    useBackendState.getState().setHealthCheckFunction(performHealthCheck);
 
     if (!enableHealthCheck || apiKeyAlertOpen) {
-      useBackendState.getState().clearHealthCheckTimer()
-      return
+      useBackendState.getState().clearHealthCheckTimer();
+      return;
     }
 
-    useBackendState.getState().resetHealthCheckTimer()
+    // On first mount or when enableHealthCheck becomes true and apiKeyAlertOpen is false,
+    // perform an immediate health check and start the timer
+    if (!healthCheckInitializedRef.current) {
+      healthCheckInitializedRef.current = true;
+    }
 
+    // Start/reset the health check timer using the store
+    useBackendState.getState().resetHealthCheckTimer();
+
+    // Component unmount cleanup
     return () => {
-      useBackendState.getState().clearHealthCheckTimer()
-    }
-  }, [enableHealthCheck, apiKeyAlertOpen])
+      useBackendState.getState().clearHealthCheckTimer();
+    };
+  }, [enableHealthCheck, apiKeyAlertOpen]);
 
+  // Version check - independent and executed only once
   useEffect(() => {
     const checkVersion = async () => {
-      if (versionCheckRef.current) {
-        return
-      }
-      versionCheckRef.current = true
+      // Prevent duplicate calls in Vite dev mode
+      if (versionCheckRef.current) return;
+      versionCheckRef.current = true;
 
-      const versionCheckedFromLogin = sessionStorage.getItem('VERSION_CHECKED_FROM_LOGIN') === 'true'
+      // Check if version info was already obtained in login page
+      const versionCheckedFromLogin = sessionStorage.getItem('VERSION_CHECKED_FROM_LOGIN') === 'true';
       if (versionCheckedFromLogin) {
-        setInitializing(false)
-        return
+        setInitializing(false); // Skip initialization if already checked
+        return;
       }
 
       try {
-        setInitializing(true)
+        setInitializing(true); // Start initialization
 
-        const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
-        const status = await getAuthStatus()
+        // Get version info
+        const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+        const status = await getAuthStatus();
 
+        // If auth is not configured and a new token is returned, use the new token
         if (!status.auth_configured && status.access_token) {
-          const currentState = useAuthStore.getState()
-
-          if (token && currentState.isAuthenticated && !currentState.isGuestMode) {
-            useAuthStore.getState().login(
-              token,
-              false,
-              status.core_version,
-              status.api_version,
-              status.webui_title || null,
-              status.webui_description || null
-            )
-          } else {
-            useAuthStore.getState().login(
-              status.access_token,
-              true,
-              status.core_version,
-              status.api_version,
-              status.webui_title || null,
-              status.webui_description || null
-            )
-          }
-        } else if (
-          token &&
-          (status.core_version ||
-            status.api_version ||
-            status.webui_title ||
-            status.webui_description)
-        ) {
-          const nextGuestMode =
-            status.auth_mode === 'disabled' || useAuthStore.getState().isGuestMode
-
           useAuthStore.getState().login(
-            token,
-            nextGuestMode,
+            status.access_token, // Use the new token
+            true, // Guest mode
             status.core_version,
             status.api_version,
             status.webui_title || null,
             status.webui_description || null
-          )
+          );
+        } else if (token && (status.core_version || status.api_version || status.webui_title || status.webui_description)) {
+          // Otherwise use the old token (if it exists)
+          const isGuestMode = status.auth_mode === 'disabled' || useAuthStore.getState().isGuestMode;
+          useAuthStore.getState().login(
+            token,
+            isGuestMode,
+            status.core_version,
+            status.api_version,
+            status.webui_title || null,
+            status.webui_description || null
+          );
         }
 
-        sessionStorage.setItem('VERSION_CHECKED_FROM_LOGIN', 'true')
+        // Set flag to indicate version info has been checked
+        sessionStorage.setItem('VERSION_CHECKED_FROM_LOGIN', 'true');
       } catch (error) {
-        console.error('Failed to get version info:', error)
+        console.error('Failed to get version info:', error);
       } finally {
-        setInitializing(false)
+        // Ensure initializing is set to false even if there's an error
+        setInitializing(false);
       }
-    }
+    };
 
-    checkVersion()
-  }, [])
+    // Execute version check
+    checkVersion();
+  }, []); // Empty dependency array ensures it only runs once on mount
+
+  const handleTabChange = useCallback(
+    (tab: string) => useSettingsStore.getState().setCurrentTab(tab as any),
+    []
+  )
 
   useEffect(() => {
-    if (currentTab === 'api') {
-      useSettingsStore.getState().setCurrentTab('documents')
-    }
-  }, [currentTab])
-
-  useEffect(() => {
-    if (message && (message.includes(InvalidApiKeyError) || message.includes(RequireApiKeError))) {
-      setApiKeyAlertOpen(true)
+    if (message) {
+      if (message.includes(InvalidApiKeyError) || message.includes(RequireApiKeError)) {
+        setApiKeyAlertOpen(true)
+      }
     }
   }, [message])
 
-  const activeTab: WorkspaceTab =
-    currentTab === 'knowledge-graph' || currentTab === 'retrieval'
-      ? currentTab
-      : 'documents'
-
-  const versionDisplay = coreVersion && apiVersion ? `${coreVersion}/${apiVersion}` : null
-
-  const workspaceSections = useMemo(
-    () => [
-      {
-        id: 'documents' as const,
-        title: t('shell.sections.documents.title'),
-        description: t('shell.sections.documents.description'),
-        icon: FileTextIcon
-      },
-      {
-        id: 'knowledge-graph' as const,
-        title: t('shell.sections.knowledgeGraph.title'),
-        description: t('shell.sections.knowledgeGraph.description'),
-        icon: Share2Icon
-      },
-      {
-        id: 'retrieval' as const,
-        title: t('shell.sections.retrieval.title'),
-        description: t('shell.sections.retrieval.description'),
-        icon: MessageSquareTextIcon
-      }
-    ],
-    [t]
-  )
-
-  const renderWorkspace = () => {
-    switch (activeTab) {
-      case 'knowledge-graph':
-        return <GraphViewer />
-      case 'retrieval':
-        return <RetrievalTesting />
-      case 'documents':
-      default:
-        return <DocumentManager />
-    }
-  }
-
-  if (initializing) {
-    return (
-      <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground lg:flex-row">
-        <aside className="w-full shrink-0 border-b border-black/10 bg-white lg:w-[240px] lg:border-r lg:border-b-0">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 lg:p-5">
-            <div className="shell-sidebar-scroll flex-1 overflow-x-hidden overflow-y-scroll pr-2">
-              <div className="flex min-h-full flex-col gap-5">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-11 items-center justify-center rounded-[10px] bg-[#0075de] text-white">
-                    <ZapIcon className="size-5" aria-hidden="true" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-3 w-24 animate-pulse rounded-full bg-[#d9d3cd]" />
-                    <div className="h-6 w-32 animate-pulse rounded-full bg-[#ece8e3]" />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <div key={index} className="rounded-[12px] border border-black/8 bg-white/70 p-3.5">
-                      <div className="h-4 w-20 animate-pulse rounded-full bg-[#ece8e3]" />
-                      <div className="mt-3 h-9 animate-pulse rounded-2xl bg-[#f4f1ed]" />
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-auto space-y-3 pb-1">
-                  <div className="rounded-[12px] border border-black/10 bg-white/80 p-3.5">
-                    <div className="h-4 w-28 animate-pulse rounded-full bg-[#ece8e3]" />
-                    <div className="mt-4 h-16 animate-pulse rounded-2xl bg-[#f4f1ed]" />
-                  </div>
-                  <div className="rounded-[12px] border border-black/10 bg-white/80 p-3.5">
-                    <div className="h-4 w-24 animate-pulse rounded-full bg-[#ece8e3]" />
-                    <div className="mt-3 h-10 animate-pulse rounded-2xl bg-[#f4f1ed]" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <div className="min-h-0 flex-1 p-4 lg:p-6">
-            <div className={cn('h-full min-h-0 rounded-[16px] border border-black/10 bg-white', surfaceShadow)} />
-          </div>
-        </main>
-      </div>
-    )
-  }
-
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground lg:flex-row">
-      <aside className="w-full shrink-0 border-b border-black/10 bg-white lg:w-[240px] lg:border-r lg:border-b-0">
-        <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 lg:p-5">
-          <div className="shell-sidebar-scroll flex-1 overflow-x-hidden overflow-y-scroll pr-2">
-            <div className="flex min-h-full flex-col gap-5">
-              <a href={webuiPrefix} className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-[10px] bg-[#0075de] text-white shadow-[0_8px_20px_rgba(0,117,222,0.22)]">
-                  <ZapIcon className="size-5" aria-hidden="true" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#097fe8]">
-                    {t('shell.brandBadge')}
-                  </div>
-                  <div className="truncate text-[24px] font-bold tracking-[-0.625px] text-[#1f1e1c]">
-                    {SiteInfo.name}
-                  </div>
-                </div>
-              </a>
-
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8a847e]">
-                  {t('shell.sidebarLabel')}
-                </div>
-                <nav className="space-y-2">
-                  {workspaceSections.map((section) => {
-                    const Icon = section.icon
-                    const isActive = section.id === activeTab
-
-                    return (
-                      <button
-                        key={section.id}
-                        type="button"
-                        aria-current={isActive ? 'page' : undefined}
-                        onClick={() => handleTabChange(section.id)}
-                        className={cn(
-                          'flex w-full items-start gap-2.5 rounded-[8px] border px-3.5 py-3 text-left transition-all duration-200',
-                          isActive
-                            ? `border-[#0075de]/20 bg-white ${surfaceShadow}`
-                            : 'border-transparent bg-transparent hover:border-black/10 hover:bg-white/65'
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            'mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
-                            isActive
-                              ? 'border-[#0075de]/15 bg-[#f2f9ff] text-[#097fe8]'
-                              : 'border-black/8 bg-white/80 text-[#615d59]'
-                          )}
-                        >
-                          <Icon className="size-4.5" aria-hidden="true" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-[#1f1e1c]">{section.title}</span>
-                            {isActive && (
-                              <span className="rounded-full bg-[#f2f9ff] px-2 py-0.5 text-[11px] font-semibold tracking-[0.125px] text-[#097fe8]">
-                                {t('shell.activeBadge')}
-                              </span>
-                            )}
-                          </div>
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#766f69]">{section.description}</p>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </nav>
+    <ThemeProvider>
+      <TabVisibilityProvider>
+        {initializing ? (
+          // Loading state while initializing with simplified header
+          <div className="flex h-screen w-screen flex-col">
+            {/* Simplified header during initialization - matches SiteHeader structure */}
+            <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex h-10 w-full border-b px-4 backdrop-blur">
+              <div className="min-w-[200px] w-auto flex items-center">
+                <a href={webuiPrefix} className="flex items-center gap-2">
+                  <ZapIcon className="size-4 text-emerald-400" aria-hidden="true" />
+                  <span className="font-bold md:inline-block">{SiteInfo.name}</span>
+                </a>
               </div>
 
-              <div className="mt-auto space-y-3 pb-1">
-                <div className={cn('rounded-[12px] border border-black/10 bg-white/82 p-3.5', surfaceShadow)}>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8a847e]">
-                    {t('shell.systemLabel')}
-                  </div>
-                  <div className="mt-2.5 space-y-2.5 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-[#615d59]">{t('shell.pipelineStatus')}</span>
-                      <span
-                        className={cn(
-                          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-[0.125px]',
-                          pipelineBusy ? 'bg-[#fff3ef] text-[#c2571a]' : 'bg-[#f2f9ff] text-[#097fe8]'
-                        )}
-                      >
-                        <ActivityIcon className="size-3.5" aria-hidden="true" />
-                        {pipelineBusy ? t('shell.pipelineBusy') : t('shell.pipelineIdle')}
-                      </span>
-                    </div>
+              {/* Empty middle section to maintain layout */}
+              <div className="flex h-10 flex-1 items-center justify-center">
+              </div>
 
-                    {versionDisplay && (
-                      <div className="flex items-center justify-between gap-3 text-[#766f69]">
-                        <span>{t('shell.versionLabel')}</span>
-                        <span className="font-medium text-[#1f1e1c]">v{versionDisplay}</span>
-                      </div>
-                    )}
+              {/* Empty right section to maintain layout */}
+              <nav className="w-[200px] flex items-center justify-end">
+              </nav>
+            </header>
 
-                    <div className="flex items-center justify-between gap-3">
-                      <StatusIndicator variant="inline" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className={cn('flex items-center justify-between gap-3 rounded-[12px] border border-black/10 bg-white/82 px-3 py-2.5', surfaceShadow)}>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-[#1f1e1c]">
-                      {isGuestMode ? t('login.guestMode') : username || t('shell.memberLabel')}
-                    </div>
-                    <div className="text-xs text-[#766f69]">{t('shell.footerHint')}</div>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <Button asChild variant="ghost" size="icon" side="bottom" tooltip={t('header.projectRepository')}>
-                      <a href={SiteInfo.github} target="_blank" rel="noopener noreferrer">
-                        <GithubIcon className="size-4" aria-hidden="true" />
-                      </a>
-                    </Button>
-                    <AppSettings className="rounded-[6px] hover:bg-[#f6f5f4]" />
-                    {!isGuestMode && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        side="bottom"
-                        tooltip={`${t('header.logout')} (${username || t('shell.memberLabel')})`}
-                        onClick={handleLogout}
-                      >
-                        <LogOutIcon className="size-4" aria-hidden="true" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
+            {/* Loading indicator in content area */}
+            <div className="flex flex-1 items-center justify-center">
+              <div className="text-center">
+                <div className="mb-2 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
+                <p>Initializing...</p>
               </div>
             </div>
           </div>
-        </div>
-      </aside>
-
-      <main className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <div className="min-h-0 flex-1 p-4 lg:p-6">
-          <div className={cn('flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[16px] border border-black/10 bg-white', surfaceShadow)}>
-            {renderWorkspace()}
-          </div>
-        </div>
-
-        <ApiKeyAlert open={apiKeyAlertOpen} onOpenChange={handleApiKeyAlertOpenChange} />
-      </main>
-    </div>
+        ) : (
+          // Main content after initialization
+          <main className="flex h-screen w-screen overflow-hidden">
+            {/* Force-generate utility classes used by customized panels under Tailwind v4 pruning. */}
+            <div
+              className="hidden justify-between gap-1 rounded-md min-h-0 h-full flex-1 flex-none flex-col mb-2 ml-1 ml-2 mt-1 p-0 px-6 px-4 py-2 text-xs text-sm text-lg text-gray-500 text-green-600 text-blue-600 text-purple-600 text-red-600 text-yellow-600 bg-card/95 bg-background border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 shadow-sm select-none sticky top-0 z-10 max-w-xs w-full w-4 h-4 w-16 truncate overflow-visible overflow-hidden overflow-auto items-center cursor-pointer inset-0 supports-[backdrop-filter]:bg-card/75"
+              aria-hidden="true"
+            />
+            <Tabs
+              defaultValue={currentTab}
+              className="!m-0 flex grow flex-col !p-0 overflow-hidden"
+              onValueChange={handleTabChange}
+            >
+              <SiteHeader />
+              <div className="relative grow">
+                <TabsContent value="documents" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                  <DocumentManager />
+                </TabsContent>
+                <TabsContent value="knowledge-graph" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                  <GraphViewer />
+                </TabsContent>
+                <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                  <RetrievalTesting />
+                </TabsContent>
+                <TabsContent value="api" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                  <ApiSite />
+                </TabsContent>
+              </div>
+            </Tabs>
+            {enableHealthCheck && <StatusIndicator />}
+            <ApiKeyAlert open={apiKeyAlertOpen} onOpenChange={handleApiKeyAlertOpenChange} />
+          </main>
+        )}
+      </TabVisibilityProvider>
+    </ThemeProvider>
   )
 }
 

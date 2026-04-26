@@ -110,7 +110,9 @@ class NetworkXStorage(BaseGraphStorage):
 
     async def node_degree(self, node_id: str) -> int:
         graph = await self._get_graph()
-        return graph.degree(node_id)
+        if graph.has_node(node_id):
+            return graph.degree(node_id)
+        return 0
 
     async def edge_degree(self, src_id: str, tgt_id: str) -> int:
         graph = await self._get_graph()
@@ -151,6 +153,25 @@ class NetworkXStorage(BaseGraphStorage):
         """
         graph = await self._get_graph()
         graph.add_edge(source_node_id, target_node_id, **edge_data)
+
+    async def upsert_nodes_batch(self, nodes: list[tuple[str, dict[str, str]]]) -> None:
+        """Batch insert/update multiple nodes in a single call."""
+        graph = await self._get_graph()
+        for node_id, node_data in nodes:
+            graph.add_node(node_id, **node_data)
+
+    async def has_nodes_batch(self, node_ids: list[str]) -> set[str]:
+        """Check existence of multiple nodes in a single call."""
+        graph = await self._get_graph()
+        return {node_id for node_id in node_ids if graph.has_node(node_id)}
+
+    async def upsert_edges_batch(
+        self, edges: list[tuple[str, str, dict[str, str]]]
+    ) -> None:
+        """Batch insert/update multiple edges in a single call."""
+        graph = await self._get_graph()
+        for src_id, tgt_id, edge_data in edges:
+            graph.add_edge(src_id, tgt_id, **edge_data)
 
     async def delete_node(self, node_id: str) -> None:
         """

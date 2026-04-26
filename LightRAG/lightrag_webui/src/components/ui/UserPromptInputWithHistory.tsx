@@ -144,22 +144,18 @@ export default function UserPromptInputWithHistory({
           onClick={handleInputClick}
           placeholder={placeholder}
           autoComplete="off"
-          className={cn(
-            isHovered && history.length > 0 ? 'pr-8' : 'pr-3',
-            'w-full rounded-xl border-black/10 bg-white/90 shadow-none dark:border-white/10 dark:bg-white/8',
-            className
-          )}
+          className={cn(isHovered && history.length > 0 ? 'pr-5' : 'pr-2', 'w-full', className)}
         />
         {isHovered && history.length > 0 && (
           <button
             type="button"
             onClick={handleInputClick}
-            className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[#8a847e] hover:bg-[#f2efea] hover:text-[#1f1e1c] transition-colors dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-0 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             tabIndex={-1}
           >
             <ChevronDown
               className={cn(
-                'h-3 w-3 transition-transform duration-200',
+                'h-3 w-3 transition-transform duration-200 text-gray-500',
                 isOpen && 'rotate-180'
               )}
             />
@@ -169,22 +165,21 @@ export default function UserPromptInputWithHistory({
 
       {/* Dropdown */}
       {isOpen && history.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-96 min-w-0 overflow-auto rounded-[18px] border border-black/10 bg-[#fffdfb] p-1 shadow-[0_14px_28px_rgba(0,0,0,0.04),0_7px_15px_rgba(0,0,0,0.02),0_3px_7px_rgba(0,0,0,0.02),0_1px_3px_rgba(0,0,0,0.01)] dark:border-white/10 dark:bg-[#201d1a]">
+        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md shadow-lg max-h-96 overflow-auto min-w-0">
           {history.map((prompt, index) => (
             <div
               key={index}
               className={cn(
-                'flex items-center justify-between rounded-xl pl-3 pr-1 py-2 text-sm transition-colors',
-                'border-b border-black/6 dark:border-white/8 last:border-b-0',
-                'hover:bg-[#f6f5f4] dark:hover:bg-white/8',
-                'focus-within:bg-[#f6f5f4] dark:focus-within:bg-white/8',
-                selectedIndex === index && 'bg-[#f6f5f4] dark:bg-white/8'
+                'flex items-center justify-between pl-3 pr-1 py-2 text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors',
+                'border-b border-gray-100 dark:border-gray-700 last:border-b-0',
+                'focus-within:bg-gray-100 dark:focus-within:bg-gray-700',
+                selectedIndex === index && 'bg-gray-100 dark:bg-gray-700'
               )}
             >
               <button
                 type="button"
                 onClick={() => handleDropdownItemClick(prompt)}
-                className="mr-0 flex-1 truncate text-left text-[#31302e] focus:outline-none dark:text-white/85"
+                className="flex-1 text-left truncate focus:outline-none mr-0"
                 title={prompt}
               >
                 {prompt}
@@ -193,10 +188,10 @@ export default function UserPromptInputWithHistory({
                 <button
                   type="button"
                   onClick={(e) => handleDeleteHistoryItem(index, e)}
-                  className="ml-auto flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-colors hover:bg-red-100 hover:text-red-600 focus:outline-none dark:hover:bg-red-900/40 dark:hover:text-red-300"
+                  className="flex-shrink-0 p-0 rounded hover:bg-red-100 dark:hover:bg-red-900 transition-colors focus:outline-none ml-auto"
                   title="Delete this history item"
                 >
-                  <X className="h-3 w-3 text-[#a39e98]" />
+                  <X className="h-3 w-3 text-gray-400 hover:text-red-500" />
                 </button>
               )}
             </div>

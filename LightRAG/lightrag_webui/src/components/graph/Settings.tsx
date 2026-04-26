@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect} from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import Checkbox from '@/components/ui/Checkbox'
 import Button from '@/components/ui/Button'
@@ -29,16 +29,11 @@ const LabeledCheckBox = ({
   const id = `checkbox-${label.toLowerCase().replace(/\s+/g, '-')}`;
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-black/6 bg-[#faf8f5] px-3 py-2 dark:border-white/8 dark:bg-white/4">
-      <Checkbox
-        id={id}
-        checked={checked}
-        onCheckedChange={onCheckedChange}
-        className="rounded-[6px] border-black/15 data-[state=checked]:bg-[#097fe8] data-[state=checked]:text-white dark:border-white/20"
-      />
+    <div className="flex items-center gap-2">
+      <Checkbox id={id} checked={checked} onCheckedChange={onCheckedChange} />
       <label
         htmlFor={id}
-        className="text-[13px] leading-5 font-medium text-[#31302e] peer-disabled:cursor-not-allowed peer-disabled:opacity-70 dark:text-white/85"
+        className="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
       >
         {label}
       </label>
@@ -69,9 +64,29 @@ const LabeledNumberInput = ({
   // Create unique ID using the label text converted to lowercase with spaces removed
   const id = `input-${label.toLowerCase().replace(/\s+/g, '-')}`;
 
+  // Keep refs in sync so the unmount effect can read the latest values
+  const currentValueRef = useRef(currentValue)
+  const valueRef = useRef(value)
+  const onEditFinishedRef = useRef(onEditFinished)
+  useLayoutEffect(() => {
+    currentValueRef.current = currentValue
+    valueRef.current = value
+    onEditFinishedRef.current = onEditFinished
+  })
+
   useEffect(() => {
     setCurrentValue(value)
   }, [value])
+
+  // Commit any pending change when the component unmounts (e.g. popover closes)
+  useEffect(() => {
+    return () => {
+      const cur = currentValueRef.current
+      if (cur !== null && cur !== valueRef.current) {
+        onEditFinishedRef.current(cur)
+      }
+    }
+  }, [])
 
   const onValueChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -111,7 +126,7 @@ const LabeledNumberInput = ({
     <div className="flex flex-col gap-2">
       <label
         htmlFor={id}
-        className="text-[13px] leading-5 font-medium text-[#31302e] peer-disabled:cursor-not-allowed peer-disabled:opacity-70 dark:text-white/85"
+        className="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
       >
         {label}
       </label>
@@ -121,7 +136,7 @@ const LabeledNumberInput = ({
           type="number"
           value={currentValue === null ? '' : currentValue}
           onChange={onValueChange}
-          className="h-9 w-full min-w-0 rounded-xl border-black/10 bg-white pr-1 shadow-none dark:border-white/10 dark:bg-white/8"
+          className="h-6 w-full min-w-0 pr-1"
           min={min}
           max={max}
           onBlur={onBlur}
@@ -135,7 +150,7 @@ const LabeledNumberInput = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 flex-shrink-0 rounded-xl border border-black/10 bg-white text-[#766f69] hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/65 dark:hover:bg-white/12 dark:hover:text-white"
+            className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
             onClick={handleReset}
             type="button"
             title={t('graphPanel.sideBar.settings.resetToDefault')}
@@ -153,8 +168,6 @@ const LabeledNumberInput = ({
  */
 export default function Settings() {
   const [opened, setOpened] = useState<boolean>(false)
-  const controlButtonClassName =
-    'h-10 w-10 rounded-2xl border border-black/10 bg-white/92 text-[#615d59] shadow-none hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/80 dark:hover:bg-white/12'
 
   const showPropertyPanel = useSettingsStore.use.showPropertyPanel()
   const showNodeSearchBar = useSettingsStore.use.showNodeSearchBar()
@@ -222,11 +235,7 @@ export default function Settings() {
   const setGraphQueryMaxDepth = useCallback((depth: number) => {
     if (depth < 1) return
     useSettingsStore.setState({ graphQueryMaxDepth: depth })
-    const currentLabel = useSettingsStore.getState().queryLabel
-    useSettingsStore.getState().setQueryLabel('')
-    setTimeout(() => {
-      useSettingsStore.getState().setQueryLabel(currentLabel)
-    }, 300)
+    useGraphStore.getState().setGraphDataFetchAttempted(false)
   }, [])
 
   const setGraphMaxNodes = useCallback((nodes: number) => {
@@ -257,7 +266,6 @@ export default function Settings() {
             variant={controlButtonVariant}
             tooltip={t('graphPanel.sideBar.settings.settings')}
             size="icon"
-            className={controlButtonClassName}
           >
             <SettingsIcon />
           </Button>
@@ -267,17 +275,17 @@ export default function Settings() {
           align="end"
           sideOffset={8}
           collisionPadding={5}
-          className="w-[300px] rounded-[22px] border-black/10 bg-[#fffdfb] p-3 shadow-[0_14px_28px_rgba(0,0,0,0.04),0_7px_15px_rgba(0,0,0,0.02),0_3px_7px_rgba(0,0,0,0.02),0_1px_3px_rgba(0,0,0,0.01)] dark:border-white/10 dark:bg-[#201d1a]"
+          className="p-2 max-w-[200px]"
           onCloseAutoFocus={(e) => e.preventDefault()}
         >
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
             <LabeledCheckBox
               checked={enableHealthCheck}
               onCheckedChange={setEnableHealthCheck}
               label={t('graphPanel.sideBar.settings.healthCheck')}
             />
 
-            <Separator className="bg-black/8 dark:bg-white/8" />
+            <Separator />
 
             <LabeledCheckBox
               checked={showPropertyPanel}
@@ -290,7 +298,7 @@ export default function Settings() {
               label={t('graphPanel.sideBar.settings.showSearchBar')}
             />
 
-            <Separator className="bg-black/8 dark:bg-white/8" />
+            <Separator />
 
             <LabeledCheckBox
               checked={showNodeLabel}
@@ -303,7 +311,7 @@ export default function Settings() {
               label={t('graphPanel.sideBar.settings.nodeDraggable')}
             />
 
-            <Separator className="bg-black/8 dark:bg-white/8" />
+            <Separator />
 
             <LabeledCheckBox
               checked={showEdgeLabel}
@@ -321,8 +329,8 @@ export default function Settings() {
               label={t('graphPanel.sideBar.settings.edgeEvents')}
             />
 
-            <div className="flex flex-col gap-2 rounded-xl border border-black/6 bg-[#faf8f5] p-3 dark:border-white/8 dark:bg-white/4">
-              <label htmlFor="edge-size-min" className="text-[13px] leading-5 font-medium text-[#31302e] peer-disabled:cursor-not-allowed peer-disabled:opacity-70 dark:text-white/85">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="edge-size-min" className="text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                 {t('graphPanel.sideBar.settings.edgeSizeRange')}
               </label>
               <div className="flex items-center gap-2">
@@ -336,7 +344,7 @@ export default function Settings() {
                       useSettingsStore.setState({ minEdgeSize: newValue });
                     }
                   }}
-                  className="h-9 w-16 min-w-0 rounded-xl border-black/10 bg-white pr-1 shadow-none dark:border-white/10 dark:bg-white/8"
+                  className="h-6 w-16 min-w-0 pr-1"
                   min={1}
                   max={Math.min(maxEdgeSize, 10)}
                 />
@@ -352,14 +360,14 @@ export default function Settings() {
                         useSettingsStore.setState({ maxEdgeSize: newValue });
                       }
                     }}
-                    className="h-9 w-16 min-w-0 rounded-xl border-black/10 bg-white pr-1 shadow-none dark:border-white/10 dark:bg-white/8"
+                    className="h-6 w-16 min-w-0 pr-1"
                     min={minEdgeSize}
                     max={10}
                   />
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 flex-shrink-0 rounded-xl border border-black/10 bg-white text-[#766f69] hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/65 dark:hover:bg-white/12 dark:hover:text-white"
+                    className="h-6 w-6 flex-shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground"
                     onClick={() => useSettingsStore.setState({ minEdgeSize: 1, maxEdgeSize: 5 })}
                     type="button"
                     title={t('graphPanel.sideBar.settings.resetToDefault')}
@@ -370,7 +378,7 @@ export default function Settings() {
               </div>
             </div>
 
-            <Separator className="bg-black/8 dark:bg-white/8" />
+            <Separator />
             <LabeledNumberInput
               label={t('graphPanel.sideBar.settings.maxQueryDepth')}
               min={1}
@@ -397,31 +405,31 @@ export default function Settings() {
             {/* Development/Testing Section - Only visible in development mode */}
             {import.meta.env.DEV && (
               <>
-                <Separator className="bg-black/8 dark:bg-white/8" />
+                <Separator />
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-[13px] leading-5 font-medium text-[#8a847e] uppercase tracking-[0.08em] dark:text-white/55">
+                  <label className="text-sm leading-none font-medium text-muted-foreground">
                     Dev Options
                   </label>
                   <Button
                     onClick={handleGenerateRandomGraph}
                     variant="outline"
                     size="sm"
-                    className="flex items-center gap-2 border-black/10 bg-white hover:bg-[#f6f5f4] dark:border-white/10 dark:bg-white/8 dark:hover:bg-white/12"
+                    className="flex items-center gap-2"
                   >
                     <Shuffle className="h-3.5 w-3.5" />
                     Gen Random Graph
                   </Button>
                 </div>
 
-                <Separator className="bg-black/8 dark:bg-white/8" />
+                <Separator />
               </>
             )}
             <Button
               onClick={saveSettings}
               variant="outline"
               size="sm"
-              className="ml-auto border-black/10 bg-white px-4 hover:bg-[#f6f5f4] dark:border-white/10 dark:bg-white/8 dark:hover:bg-white/12"
+              className="ml-auto px-4"
             >
               {t('graphPanel.sideBar.settings.save')}
             </Button>

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/state'
 import { useSettingsStore } from '@/stores/settings'
-import { loginToServer, getAuthStatus, ssoLogin } from '@/api/lightrag'
+import { loginToServer, getAuthStatus } from '@/api/lightrag'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardHeader } from '@/components/ui/Card'
@@ -40,29 +40,6 @@ const LoginPage = () => {
         if (isAuthenticated) {
           navigate('/')
           return
-        }
-
-        // Handle SSO token from URL (e.g. ?sso_token=<clawith_jwt>)
-        const urlParams = new URLSearchParams(window.location.search)
-        const ssoToken = urlParams.get('sso_token')
-        if (ssoToken) {
-          try {
-            const response = await ssoLogin(ssoToken)
-            if (response.access_token) {
-              login(response.access_token, false, response.core_version, response.api_version, response.webui_title || null, response.webui_description || null)
-              // Clean URL
-              urlParams.delete('sso_token')
-              const cleanUrl = urlParams.toString()
-                ? `${window.location.pathname}?${urlParams.toString()}`
-                : window.location.pathname
-              window.history.replaceState({}, '', cleanUrl)
-              navigate('/')
-              return
-            }
-          } catch (error) {
-            console.error('SSO login failed:', error)
-            // Fall through to normal login flow
-          }
         }
 
         // Check auth status

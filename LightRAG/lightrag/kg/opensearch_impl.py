@@ -975,6 +975,8 @@ class OpenSearchGraphStorage(BaseGraphStorage):
     _nodes_index: str = field(default="", init=False)
     _edges_index: str = field(default="", init=False)
     _indices_ready: bool = field(default=False, init=False)
+    _nodes_dirty: bool = field(default=False, init=False)
+    _edges_dirty: bool = field(default=False, init=False)
     _ppl_graphlookup_available: bool = field(default=False, init=False)
 
     def __init__(self, namespace, global_config, embedding_func, workspace=None):
@@ -1000,6 +1002,8 @@ class OpenSearchGraphStorage(BaseGraphStorage):
                 self.client = await ClientManager.get_client()
             await self._create_indices_if_not_exist()
             self._indices_ready = True
+            self._nodes_dirty = False
+            self._edges_dirty = False
             await self._detect_ppl_graphlookup()
             logger.debug(
                 f"[{self.workspace}] OpenSearch Graph storage initialized: "
@@ -1021,6 +1025,34 @@ class OpenSearchGraphStorage(BaseGraphStorage):
     def _mark_indices_missing(self):
         """Mark graph indices as unavailable for subsequent read short-circuiting."""
         self._indices_ready = False
+        self._nodes_dirty = False
+        self._edges_dirty = False
+
+    async def _refresh_graph_indices_if_dirty(
+        self, *, refresh_nodes: bool = False, refresh_edges: bool = False
+    ) -> None:
+        """Refresh graph indices only when prior writes made search views stale."""
+        if not self._indices_ready:
+            return
+        if not (
+            (refresh_nodes and self._nodes_dirty)
+            or (refresh_edges and self._edges_dirty)
+        ):
+            return
+
+        try:
+            async with get_data_init_lock():
+                if refresh_nodes and self._nodes_dirty:
+                    await self.client.indices.refresh(index=self._nodes_index)
+                    self._nodes_dirty = False
+                if refresh_edges and self._edges_dirty:
+                    await self.client.indices.refresh(index=self._edges_index)
+                    self._edges_dirty = False
+        except OpenSearchException as e:
+            if _is_missing_index_error(e):
+                self._mark_indices_missing()
+                return
+            raise
 
     async def _detect_ppl_graphlookup(self):
         """Detect whether PPL graphlookup command is available on this cluster."""
@@ -1145,37 +1177,24 @@ class OpenSearchGraphStorage(BaseGraphStorage):
             return False
 
     async def has_edge(self, source_node_id: str, target_node_id: str) -> bool:
-        """Check whether an edge exists between two nodes (bidirectional)."""
+        """Check whether an edge exists between two nodes (bidirectional).
+
+        Uses mget with the two candidate edge IDs so the check is real-time
+        (translog-backed), consistent with has_node().
+        """
         if not self._indices_ready:
             return False
         try:
-            body = {
-                "query": {
-                    "bool": {
-                        "should": [
-                            {
-                                "bool": {
-                                    "must": [
-                                        {"term": {"source_node_id": source_node_id}},
-                                        {"term": {"target_node_id": target_node_id}},
-                                    ]
-                                }
-                            },
-                            {
-                                "bool": {
-                                    "must": [
-                                        {"term": {"source_node_id": target_node_id}},
-                                        {"term": {"target_node_id": source_node_id}},
-                                    ]
-                                }
-                            },
-                        ]
-                    }
-                },
-                "size": 0,
-            }
-            response = await self.client.search(index=self._edges_index, body=body)
-            return response["hits"]["total"]["value"] > 0
+            forward_id = compute_mdhash_id(
+                f"{source_node_id}-{target_node_id}", prefix="edge-"
+            )
+            reverse_id = compute_mdhash_id(
+                f"{target_node_id}-{source_node_id}", prefix="edge-"
+            )
+            response = await self.client.mget(
+                index=self._edges_index, body={"ids": [forward_id, reverse_id]}
+            )
+            return any(doc.get("found") for doc in response.get("docs", []))
         except OpenSearchException as e:
             if _is_missing_index_error(e):
                 self._mark_indices_missing()
@@ -1186,6 +1205,7 @@ class OpenSearchGraphStorage(BaseGraphStorage):
         if not self._indices_ready:
             return 0
         try:
+            await self._refresh_graph_indices_if_dirty(refresh_edges=True)
             response = await self.client.count(
                 index=self._edges_index,
                 body={
@@ -1230,41 +1250,28 @@ class OpenSearchGraphStorage(BaseGraphStorage):
     async def get_edge(
         self, source_node_id: str, target_node_id: str
     ) -> dict[str, str] | None:
-        """Get an edge between two nodes (bidirectional), or None."""
+        """Get an edge between two nodes (bidirectional), or None.
+
+        Uses mget with the two candidate edge IDs so the read is real-time
+        (translog-backed), consistent with get_node().
+        """
         if not self._indices_ready:
             return None
         try:
-            body = {
-                "query": {
-                    "bool": {
-                        "should": [
-                            {
-                                "bool": {
-                                    "must": [
-                                        {"term": {"source_node_id": source_node_id}},
-                                        {"term": {"target_node_id": target_node_id}},
-                                    ]
-                                }
-                            },
-                            {
-                                "bool": {
-                                    "must": [
-                                        {"term": {"source_node_id": target_node_id}},
-                                        {"term": {"target_node_id": source_node_id}},
-                                    ]
-                                }
-                            },
-                        ]
-                    }
-                },
-                "size": 1,
-            }
-            response = await self.client.search(index=self._edges_index, body=body)
-            hits = response["hits"]["hits"]
-            if hits:
-                doc = hits[0]["_source"]
-                doc["_id"] = hits[0]["_id"]
-                return doc
+            forward_id = compute_mdhash_id(
+                f"{source_node_id}-{target_node_id}", prefix="edge-"
+            )
+            reverse_id = compute_mdhash_id(
+                f"{target_node_id}-{source_node_id}", prefix="edge-"
+            )
+            response = await self.client.mget(
+                index=self._edges_index, body={"ids": [forward_id, reverse_id]}
+            )
+            for doc in response.get("docs", []):
+                if doc.get("found"):
+                    result = doc["_source"]
+                    result["_id"] = doc["_id"]
+                    return result
             return None
         except OpenSearchException as e:
             if _is_missing_index_error(e):
@@ -1276,6 +1283,7 @@ class OpenSearchGraphStorage(BaseGraphStorage):
         if not self._indices_ready:
             return None
         try:
+            await self._refresh_graph_indices_if_dirty(refresh_edges=True)
             query = {
                 "bool": {
                     "should": [
@@ -1355,6 +1363,7 @@ class OpenSearchGraphStorage(BaseGraphStorage):
         if not self._indices_ready:
             return {}
         try:
+            await self._refresh_graph_indices_if_dirty(refresh_edges=True)
             # Use a single query with aggregations for both source and target
             body = {
                 "size": 0,
@@ -1407,6 +1416,7 @@ class OpenSearchGraphStorage(BaseGraphStorage):
         if not self._indices_ready:
             return result
         try:
+            await self._refresh_graph_indices_if_dirty(refresh_edges=True)
             query = {
                 "bool": {
                     "should": [
@@ -1469,6 +1479,7 @@ class OpenSearchGraphStorage(BaseGraphStorage):
             # No per-operation refresh: node reads use ID-based mget/exists
             # (translog, real-time). Search visibility after index_done_callback().
             await self.client.index(index=self._nodes_index, id=node_id, body=doc)
+            self._nodes_dirty = True
         except OpenSearchException as e:
             logger.error(f"[{self.workspace}] Error upserting node {node_id}: {e}")
 
@@ -1508,10 +1519,116 @@ class OpenSearchGraphStorage(BaseGraphStorage):
             # Note: has_edge() and get_edge() use the search API, so they may
             # not see this write until the next index_done_callback() refresh.
             await self.client.index(index=self._edges_index, id=edge_id, body=doc)
+            self._edges_dirty = True
         except OpenSearchException as e:
             logger.error(
                 f"[{self.workspace}] Error upserting edge {source_node_id}->{target_node_id}: {e}"
             )
+
+    async def upsert_nodes_batch(self, nodes: list[tuple[str, dict[str, str]]]) -> None:
+        """Batch insert/update multiple nodes using the OpenSearch bulk API."""
+        if not nodes:
+            return
+        try:
+            await self._ensure_indices_ready()
+            actions = []
+            for node_id, node_data in nodes:
+                doc = {k: v for k, v in node_data.items() if k != "_id"}
+                doc["entity_id"] = node_id
+                if node_data.get("source_id", ""):
+                    doc["source_ids"] = node_data["source_id"].split(GRAPH_FIELD_SEP)
+                actions.append(
+                    {
+                        "_op_type": "index",
+                        "_index": self._nodes_index,
+                        "_id": node_id,
+                        "_source": doc,
+                    }
+                )
+            await helpers.async_bulk(self.client, actions)
+            self._nodes_dirty = True
+        except OpenSearchException as e:
+            logger.error(f"[{self.workspace}] Error during batch node upsert: {e}")
+
+    async def has_nodes_batch(self, node_ids: list[str]) -> set[str]:
+        """Check existence of multiple nodes using a single mget request."""
+        if not node_ids:
+            return set()
+        if not self._indices_ready:
+            return set()
+        try:
+            response = await self.client.mget(
+                index=self._nodes_index, body={"ids": node_ids}
+            )
+            return {doc["_id"] for doc in response.get("docs", []) if doc.get("found")}
+        except OpenSearchException as e:
+            if _is_missing_index_error(e):
+                self._mark_indices_missing()
+            return set()
+
+    async def upsert_edges_batch(
+        self, edges: list[tuple[str, str, dict[str, str]]]
+    ) -> None:
+        """Batch insert/update multiple edges using the OpenSearch bulk API."""
+        if not edges:
+            return
+        try:
+            await self._ensure_indices_ready()
+
+            # Ensure all source nodes exist (mirrors upsert_edge behaviour).
+            source_ids = list({src for src, _tgt, _data in edges})
+            existing_sources = await self.has_nodes_batch(source_ids)
+            missing_sources = [
+                (nid, {}) for nid in source_ids if nid not in existing_sources
+            ]
+            if missing_sources:
+                await self.upsert_nodes_batch(missing_sources)
+
+            # Compute forward/reverse IDs and probe reverse docs in one mget.
+            forward_ids = [
+                compute_mdhash_id(f"{src}-{tgt}", prefix="edge-")
+                for src, tgt, _ in edges
+            ]
+            reverse_ids = [
+                compute_mdhash_id(f"{tgt}-{src}", prefix="edge-")
+                for src, tgt, _ in edges
+            ]
+            try:
+                rev_response = await self.client.mget(
+                    index=self._edges_index, body={"ids": reverse_ids}
+                )
+                existing_reverse = {
+                    doc["_id"]
+                    for doc in rev_response.get("docs", [])
+                    if doc.get("found")
+                }
+            except OpenSearchException:
+                existing_reverse = set()
+
+            actions = []
+            reserved_edge_ids = set(existing_reverse)
+            for (src, tgt, edge_data), fwd_id, rev_id in zip(
+                edges, forward_ids, reverse_ids
+            ):
+                edge_id = rev_id if rev_id in reserved_edge_ids else fwd_id
+                reserved_edge_ids.add(edge_id)
+                doc = {k: v for k, v in edge_data.items() if k != "_id"}
+                doc["source_node_id"] = src
+                doc["target_node_id"] = tgt
+                if edge_data.get("source_id", ""):
+                    doc["source_ids"] = edge_data["source_id"].split(GRAPH_FIELD_SEP)
+                actions.append(
+                    {
+                        "_op_type": "index",
+                        "_index": self._edges_index,
+                        "_id": edge_id,
+                        "_source": doc,
+                    }
+                )
+            await helpers.async_bulk(self.client, actions)
+            self._edges_dirty = True
+        except OpenSearchException as e:
+            logger.error(f"[{self.workspace}] Error during batch edge upsert: {e}")
 
     # --- Delete operations ---
 

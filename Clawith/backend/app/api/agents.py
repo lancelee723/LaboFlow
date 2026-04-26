@@ -884,6 +884,7 @@ async def download_bridge_installer(
         payload, filename, content_type = render_installer(
             platform=platform,  # type: ignore[arg-type]
             server_url=ws_url,
+            http_base=http_base,
             api_key=raw_key,
             agent_name=agent.name or str(agent.id),
             adapter=getattr(agent, "bridge_adapter", None) or "claude_code",

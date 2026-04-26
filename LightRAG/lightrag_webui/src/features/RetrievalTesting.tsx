@@ -2,7 +2,7 @@ import Textarea from '@/components/ui/Textarea'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { cn, throttle } from '@/lib/utils'
+import { throttle } from '@/lib/utils'
 import { queryText, queryTextStream } from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
@@ -675,18 +675,13 @@ export default function RetrievalTesting() {
     }
   }, [t])
 
-  const iconButtonClassName =
-    'mb-2 size-8 shrink-0 rounded-[6px] border border-black/10 bg-white/80 text-[#766f69] opacity-80 transition hover:bg-[#f6f5f4] hover:text-[#1f1e1c] hover:opacity-100 dark:border-white/10 dark:bg-white/8 dark:text-white/60 dark:hover:bg-white/12 dark:hover:text-white'
-  const composerFieldClassName =
-    'w-full rounded-[4px] border-[#dddddd] bg-white shadow-none focus-visible:ring-[#097fe8] dark:border-white/10 dark:bg-white/8'
-
   return (
-    <div className="flex size-full gap-4 px-5 py-5 overflow-hidden">
-      <div className="flex grow flex-col gap-4 min-w-0">
+    <div className="flex size-full gap-2 px-2 pb-12 overflow-hidden">
+      <div className="flex grow flex-col gap-4">
         <div className="relative grow">
           <div
             ref={messagesContainerRef}
-            className="absolute inset-0 flex flex-col overflow-auto rounded-[12px] border border-[rgba(0,0,0,0.1)] bg-white p-4 shadow-[rgba(0,0,0,0.04)_0px_4px_18px,rgba(0,0,0,0.027)_0px_2.025px_7.85px,rgba(0,0,0,0.02)_0px_0.8px_2.93px,rgba(0,0,0,0.01)_0px_0.175px_1.04px] dark:border-white/10 dark:bg-[#1f1c1a]/92"
+            className="bg-primary-foreground/60 absolute inset-0 flex flex-col overflow-auto rounded-lg border p-2"
             onClick={() => {
               if (shouldFollowScrollRef.current) {
                 shouldFollowScrollRef.current = false;
@@ -695,7 +690,7 @@ export default function RetrievalTesting() {
           >
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               {messages.length === 0 ? (
-                <div className="flex h-full items-center justify-center rounded-[20px] border border-dashed border-black/8 bg-[#faf8f5] text-lg text-[#766f69] dark:border-white/8 dark:bg-white/4 dark:text-white/55">
+                <div className="text-muted-foreground flex h-full items-center justify-center text-lg">
                   {t('retrievePanel.retrieval.startPrompt')}
                 </div>
               ) : (
@@ -709,7 +704,7 @@ export default function RetrievalTesting() {
                       {message.role === 'user' && (
                         <Button
                           onClick={() => handleCopyMessage(message)}
-                          className={iconButtonClassName}
+                          className="mb-2 size-6 rounded-md opacity-60 transition-opacity hover:opacity-100 shrink-0"
                           tooltip={t('retrievePanel.chatMessage.copyTooltip')}
                           variant="ghost"
                           size="icon"
@@ -721,7 +716,7 @@ export default function RetrievalTesting() {
                       {message.role === 'assistant' && (
                         <Button
                           onClick={() => handleCopyMessage(message)}
-                          className={iconButtonClassName}
+                          className="mb-2 size-6 rounded-md opacity-60 transition-opacity hover:opacity-100 shrink-0"
                           tooltip={t('retrievePanel.chatMessage.copyTooltip')}
                           variant="ghost"
                           size="icon"
@@ -740,7 +735,7 @@ export default function RetrievalTesting() {
 
         <form
           onSubmit={handleSubmit}
-          className="flex shrink-0 items-center gap-3 rounded-[12px] border border-[rgba(0,0,0,0.1)] bg-white p-3 shadow-[rgba(0,0,0,0.04)_0px_4px_18px,rgba(0,0,0,0.027)_0px_2.025px_7.85px,rgba(0,0,0,0.02)_0px_0.8px_2.93px,rgba(0,0,0,0.01)_0px_0.175px_1.04px] dark:border-white/10 dark:bg-[#1f1c1a]/92"
+          className="flex shrink-0 items-center gap-2"
           autoComplete="on"
           method="post"
           action="#"
@@ -754,7 +749,6 @@ export default function RetrievalTesting() {
             onClick={clearMessages}
             disabled={isLoading}
             size="sm"
-            className="rounded-[4px] border-black/10 bg-white hover:bg-[#f6f5f4] dark:border-white/10 dark:bg-white/8 dark:hover:bg-white/12"
           >
             <EraserIcon />
             {t('retrievePanel.retrieval.clear')}
@@ -768,7 +762,7 @@ export default function RetrievalTesting() {
                 ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                 id="query-input"
                 autoComplete="on"
-                className={cn(composerFieldClassName, 'min-h-[44px] max-h-[120px] overflow-y-auto')}
+                className="w-full min-h-[40px] max-h-[120px] overflow-y-auto"
                 value={inputValue}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
@@ -795,7 +789,7 @@ export default function RetrievalTesting() {
                 ref={inputRef as React.RefObject<HTMLInputElement>}
                 id="query-input"
                 autoComplete="on"
-                className={composerFieldClassName}
+                className="w-full"
                 value={inputValue}
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
@@ -809,13 +803,7 @@ export default function RetrievalTesting() {
               <div className="absolute left-0 top-full mt-1 text-xs text-red-500">{inputError}</div>
             )}
           </div>
-          <Button
-            type="submit"
-            variant="default"
-            disabled={isLoading}
-            size="sm"
-            className="rounded-[4px] bg-[#0075de] hover:bg-[#005bab] px-4 shadow-none"
-          >
+          <Button type="submit" variant="default" disabled={isLoading} size="sm">
             <SendIcon />
             {t('retrievePanel.retrieval.send')}
           </Button>

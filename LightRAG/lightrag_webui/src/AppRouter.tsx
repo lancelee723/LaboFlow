@@ -3,7 +3,6 @@ import { HashRouter as Router, Routes, Route, useNavigate } from 'react-router-d
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/state'
 import { navigationService } from '@/services/navigation'
-import { ssoLogin } from '@/api/lightrag'
 import { Toaster } from 'sonner'
 import App from './App'
 import LoginPage from '@/features/LoginPage'
@@ -11,7 +10,7 @@ import ThemeProvider from '@/components/ThemeProvider'
 
 const AppContent = () => {
   const [initializing, setInitializing] = useState(true)
-  const { isAuthenticated, login } = useAuthStore()
+  const { isAuthenticated } = useAuthStore()
   const navigate = useNavigate()
 
   // Set navigate function for navigation service
@@ -24,29 +23,6 @@ const AppContent = () => {
 
     const checkAuth = async () => {
       try {
-        // Handle SSO token from URL (e.g. /kb/?sso_token=<clawith_jwt>)
-        // This is outside the hash, so we read from window.location.search
-        const urlParams = new URLSearchParams(window.location.search)
-        const ssoToken = urlParams.get('sso_token')
-        if (ssoToken) {
-          try {
-            const response = await ssoLogin(ssoToken)
-            if (response.access_token) {
-              login(response.access_token, false, response.core_version, response.api_version, response.webui_title || null, response.webui_description || null)
-              // Clean URL — remove sso_token from search params
-              urlParams.delete('sso_token')
-              const cleanSearch = urlParams.toString() ? `?${urlParams.toString()}` : ''
-              window.history.replaceState({}, '', `${window.location.pathname}${cleanSearch}${window.location.hash}`)
-              setInitializing(false)
-              navigate('/')
-              return
-            }
-          } catch (error) {
-            console.error('SSO login failed:', error)
-            // Fall through to normal auth check
-          }
-        }
-
         const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
 
         if (token && isAuthenticated) {

@@ -168,9 +168,10 @@ def _download_env(monkeypatch):
     # not a freshly-minted one.
     captured: dict = {}
 
-    def fake_render(*, platform, server_url, api_key, agent_name, adapter):
+    def fake_render(*, platform, server_url, http_base, api_key, agent_name, adapter):
         captured["api_key"] = api_key
         captured["adapter"] = adapter
+        captured["http_base"] = http_base
         return (b"payload", "installer.sh", "application/x-sh")
 
     from app.services.local_agent import installer_templates

@@ -27,20 +27,20 @@ interface BackendState {
 
 interface AuthState {
   isAuthenticated: boolean;
-  isGuestMode: boolean;
+  isGuestMode: boolean;  // Add guest mode flag
   coreVersion: string | null;
   apiVersion: string | null;
-  username: string | null;
-  webuiTitle: string | null;
-  webuiDescription: string | null;
-  lastTokenRenewal: string | null;
-  tokenExpiresAt: number | null;
+  username: string | null; // login username
+  webuiTitle: string | null; // Custom title
+  webuiDescription: string | null; // Title description
+  lastTokenRenewal: string | null; // Human-readable local time of last token renewal (for debugging and monitoring)
+  tokenExpiresAt: number | null; // Token expiration timestamp (extracted from JWT)
 
   login: (token: string, isGuest?: boolean, coreVersion?: string | null, apiVersion?: string | null, webuiTitle?: string | null, webuiDescription?: string | null) => void;
   logout: () => void;
   setVersion: (coreVersion: string | null, apiVersion: string | null) => void;
   setCustomTitle: (webuiTitle: string | null, webuiDescription: string | null) => void;
-  setTokenRenewal: (renewalTime: number, expiresAt: number) => void;
+  setTokenRenewal: (renewalTime: number, expiresAt: number) => void; // Track token renewal
 }
 
 const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
@@ -278,6 +278,7 @@ export const useAuthStore = create<AuthState>(set => {
       const now = Date.now();
       const formattedTime = formatTimestampToLocalString(now);
 
+      // Initialize token issuance time with human-readable format
       localStorage.setItem('LIGHTRAG-LAST-TOKEN-RENEWAL', formattedTime);
 
       set({

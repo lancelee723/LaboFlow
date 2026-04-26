@@ -4577,15 +4577,25 @@ class PGGraphStorage(BaseGraphStorage):
         """
         Normalize node ID to ensure special characters are properly handled in Cypher queries.
 
+        Used by write paths that still embed entity IDs in Cypher strings
+        (delete_node, remove_nodes, remove_edges). The upsert paths now use
+        parameterized Cypher in upstream, while this branch keeps current behavior.
+
+        Within a Cypher double-quoted string the only recognised escape
+        sequences are \" and \\. We also strip null bytes which
+        could truncate the string in some PostgreSQL/AGE code paths.
+
         Args:
             node_id: The original node ID
 
         Returns:
-            Normalized node ID suitable for Cypher queries
+            Normalized node ID suitable for embedding in a Cypher double-quoted string
         """
-        # Escape backslashes
-        normalized_id = node_id
+        # Strip null bytes that could truncate the string
+        normalized_id = node_id.replace("\x00", "")
+        # Escape backslashes first (order matters)
         normalized_id = normalized_id.replace("\\", "\\\\")
+        # Escape double quotes
         normalized_id = normalized_id.replace('"', '\\"')
         return normalized_id
 
@@ -4796,13 +4806,17 @@ class PGGraphStorage(BaseGraphStorage):
             str: the properties dictionary as a properly formatted string
         """
         props = []
-        # wrap property key in backticks to escape
+        # Wrap property keys in backticks and escape embedded backticks to
+        # preserve Cypher structure when property names contain specials.
         for k, v in properties.items():
-            prop = f"`{k}`: {json.dumps(v)}"
+            safe_key = str(k).replace("`", "``")
+            prop = f"`{safe_key}`: {json.dumps(v, ensure_ascii=False)}"
             props.append(prop)
         if _id is not None and "id" not in properties:
             props.append(
-                f"id: {json.dumps(_id)}" if isinstance(_id, str) else f"id: {_id}"
+                f"id: {json.dumps(_id, ensure_ascii=False)}"
+                if isinstance(_id, str)
+                else f"id: {_id}"
             )
         return "{" + ", ".join(props) + "}"
 
@@ -4950,11 +4964,13 @@ class PGGraphStorage(BaseGraphStorage):
         result = await self.node_degrees_batch(node_ids=[node_id])
         if result and node_id in result:
             return result[node_id]
+        return 0
 
     async def edge_degree(self, src_id: str, tgt_id: str) -> int:
         result = await self.edge_degrees_batch(edges=[(src_id, tgt_id)])
         if result and (src_id, tgt_id) in result:
             return result[(src_id, tgt_id)]
+        return 0
 
     async def get_edge(
         self, source_node_id: str, target_node_id: str
@@ -5124,6 +5140,29 @@ class PGGraphStorage(BaseGraphStorage):
                 f"[{self.workspace}] POSTGRES, upsert_edge error on edge: `{source_node_id}`-`{target_node_id}`"
             )
             raise
+
+    async def upsert_nodes_batch(self, nodes: list[tuple[str, dict[str, str]]]) -> None:
+        """Batch upsert nodes with last-write-wins semantics."""
+        deduped_nodes: dict[str, dict[str, str]] = {}
+        for node_id, node_data in nodes:
+            deduped_nodes.pop(node_id, None)
+            deduped_nodes[node_id] = node_data
+
+        for node_id, node_data in deduped_nodes.items():
+            await self.upsert_node(node_id, node_data=node_data)
+
+    async def upsert_edges_batch(
+        self, edges: list[tuple[str, str, dict[str, str]]]
+    ) -> None:
+        """Batch upsert edges with last-write-wins semantics for undirected pairs."""
+        deduped_edges: dict[tuple[str, str], tuple[str, str, dict[str, str]]] = {}
+        for src_id, tgt_id, edge_data in edges:
+            edge_key = tuple(sorted((src_id, tgt_id)))
+            deduped_edges.pop(edge_key, None)
+            deduped_edges[edge_key] = (src_id, tgt_id, edge_data)
+
+        for src_id, tgt_id, edge_data in deduped_edges.values():
+            await self.upsert_edge(src_id, tgt_id, edge_data=edge_data)
 
     async def delete_node(self, node_id: str) -> None:
         """

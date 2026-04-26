@@ -14,7 +14,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/Command'
 import { controlButtonVariant } from '@/lib/constants'
 import { useSettingsStore } from '@/stores/settings'
-import { cn } from '@/lib/utils'
 
 import { GripIcon, PlayIcon, PauseIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -31,11 +30,6 @@ type LayoutName =
 interface ExtendedWorkerLayoutControlProps extends WorkerLayoutControlProps {
   mainLayout: LayoutHook;
 }
-
-const controlButtonClassName =
-  'h-10 w-10 rounded-2xl border border-black/10 bg-white/92 text-[#615d59] shadow-none hover:bg-[#f6f5f4] hover:text-[#1f1e1c] dark:border-white/10 dark:bg-white/8 dark:text-white/80 dark:hover:bg-white/12'
-const popoverSurfaceClassName =
-  'rounded-[20px] border border-black/10 bg-[#fffdfb] p-2 shadow-[0_14px_28px_rgba(0,0,0,0.04),0_7px_15px_rgba(0,0,0,0.02),0_3px_7px_rgba(0,0,0,0.02),0_1px_3px_rgba(0,0,0,0.01)] dark:border-white/10 dark:bg-[#201d1a]'
 
 const WorkerLayoutControl = ({ layout, autoRunFor, mainLayout }: ExtendedWorkerLayoutControlProps) => {
   const sigma = useSigma()
@@ -189,7 +183,6 @@ const WorkerLayoutControl = ({ layout, autoRunFor, mainLayout }: ExtendedWorkerL
       onClick={handleClick}
       tooltip={isRunning ? t('graphPanel.sideBar.layoutsControl.stopAnimation') : t('graphPanel.sideBar.layoutsControl.startAnimation')}
       variant={controlButtonVariant}
-      className={controlButtonClassName}
     >
       {isRunning ? <PauseIcon /> : <PlayIcon />}
     </Button>
@@ -296,7 +289,7 @@ const LayoutsControl = () => {
   )
 
   return (
-    <div className="flex flex-col gap-1">
+    <div>
       <div>
         {layouts[layout] && 'worker' in layouts[layout] && (
           <WorkerLayoutControl
@@ -313,7 +306,6 @@ const LayoutsControl = () => {
               variant={controlButtonVariant}
               onClick={() => setOpened((e: boolean) => !e)}
               tooltip={t('graphPanel.sideBar.layoutsControl.layoutGraph')}
-              className={controlButtonClassName}
             >
               <GripIcon />
             </Button>
@@ -324,10 +316,10 @@ const LayoutsControl = () => {
             sideOffset={8}
             collisionPadding={5}
             sticky="always"
-            className={cn(popoverSurfaceClassName, 'min-w-[190px]')}
+            className="p-1 min-w-auto"
           >
-            <Command className="rounded-[18px] bg-transparent [&_[cmdk-group]]:p-1">
-              <CommandList className="max-h-[240px]">
+            <Command>
+              <CommandList>
                 <CommandGroup>
                   {Object.keys(layouts).map((name) => (
                     <CommandItem
@@ -335,7 +327,7 @@ const LayoutsControl = () => {
                         runLayout(name as LayoutName)
                       }}
                       key={name}
-                      className="cursor-pointer rounded-[14px] px-3 py-2 text-sm text-[#615d59] data-[selected=true]:bg-[#f6f5f4] data-[selected=true]:text-[#1f1e1c] dark:text-white/75 dark:data-[selected=true]:bg-white/8 dark:data-[selected=true]:text-white"
+                      className="cursor-pointer text-xs"
                     >
                       {t(`graphPanel.sideBar.layoutsControl.layouts.${name}`)}
                     </CommandItem>

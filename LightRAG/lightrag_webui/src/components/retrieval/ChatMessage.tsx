@@ -75,14 +75,6 @@ export const ChatMessage = ({
   const finalDisplayContent = message.role === 'user'
     ? message.content
     : (displayContent !== undefined ? displayContent : (message.content || ''))
-  const bubbleClassName = cn(
-    'rounded-[22px] px-4 py-3 shadow-[0_4px_18px_rgba(0,0,0,0.04),0_2.025px_7.84688px_rgba(0,0,0,0.027),0_0.8px_2.925px_rgba(0,0,0,0.02),0_0.175px_1.04062px_rgba(0,0,0,0.01)]',
-    message.role === 'user'
-      ? 'max-w-[82%] bg-[#0075de] text-white'
-      : message.isError
-        ? 'w-[95%] border border-[#dd5b00]/20 bg-[#fff3ef] text-[#9c3d12] dark:border-[#ff8f4d]/25 dark:bg-[#321d15] dark:text-[#ffb88f]'
-        : 'w-[95%] border border-black/8 bg-[#faf8f5] text-[#1f1e1c] dark:border-white/8 dark:bg-[#26221f] dark:text-white/90'
-  )
 
   // Load KaTeX rehype plugin dynamically
   // Note: KaTeX extensions (mhchem, copy-tex) are imported statically in main.tsx
@@ -152,7 +144,15 @@ export const ChatMessage = ({
   }), [message.mermaidRendered, message.role]);
 
   return (
-    <div className={bubbleClassName}>
+    <div
+      className={`${
+        message.role === 'user'
+          ? 'max-w-[80%] bg-primary text-primary-foreground'
+          : message.isError
+            ? 'w-[95%] bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400'
+            : 'w-[95%] bg-muted'
+      } rounded-lg px-4 py-2`}
+    >
       {/* Thinking process display - only for assistant messages */}
       {/* Always render to prevent layout shift when switching tabs */}
       {message.role === 'assistant' && (isThinking || thinkingTime !== null) && (
@@ -162,7 +162,7 @@ export const ChatMessage = ({
           !isTabActive && 'opacity-50'
         )}>
           <div
-            className="flex cursor-pointer select-none items-center text-sm text-[#766f69] transition-colors duration-200 hover:text-[#1f1e1c] dark:text-white/55 dark:hover:text-white/85"
+            className="flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200 text-sm cursor-pointer select-none"
             onClick={() => {
               // Allow expansion when there's thinking content, even during thinking process
               if (finalThinkingContent && finalThinkingContent.trim() !== '') {
@@ -184,9 +184,9 @@ export const ChatMessage = ({
           </div>
           {/* Show thinking content when expanded and content exists, even during thinking process */}
           {isThinkingExpanded && finalThinkingContent && finalThinkingContent.trim() !== '' && (
-            <div className="mt-2 rounded-2xl border border-black/6 bg-white/50 px-4 py-3 text-sm text-foreground prose max-w-none break-words dark:border-white/8 dark:bg-white/4 dark:prose-invert prose-p:my-1 prose-headings:my-2 [&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0] [&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0] [&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800 [&_u]:underline [&_del]:line-through [&_ins]:underline [&_ins]:decoration-green-500 [&_.footnotes]:mt-6 [&_.footnotes]:pt-3 [&_.footnotes]:border-t [&_.footnotes]:border-border [&_.footnotes_ol]:text-xs [&_.footnotes_li]:my-0.5 [&_a[href^='#fn']]:text-primary [&_a[href^='#fn']]:no-underline [&_a[href^='#fn']]:hover:underline [&_a[href^='#fnref']]:text-primary [&_a[href^='#fnref']]:no-underline [&_a[href^='#fnref']]:hover:underline">
+            <div className="mt-2 pl-4 border-l-2 border-primary/20 dark:border-primary/40 text-sm prose dark:prose-invert max-w-none break-words prose-p:my-1 prose-headings:my-2 [&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0] [&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0] [&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800 [&_u]:underline [&_del]:line-through [&_ins]:underline [&_ins]:decoration-green-500 [&_.footnotes]:mt-6 [&_.footnotes]:pt-3 [&_.footnotes]:border-t [&_.footnotes]:border-border [&_.footnotes_ol]:text-xs [&_.footnotes_li]:my-0.5 [&_a[href^='#fn']]:text-primary [&_a[href^='#fn']]:no-underline [&_a[href^='#fn']]:hover:underline [&_a[href^='#fnref']]:text-primary [&_a[href^='#fnref']]:no-underline [&_a[href^='#fnref']]:hover:underline text-foreground">
               {isThinking && (
-                <div className="mb-2 text-xs italic text-[#8a847e] dark:text-white/50">
+                <div className="mb-2 text-xs text-gray-400 dark:text-gray-300 italic">
                   {t('retrievePanel.chatMessage.thinkingInProgress', 'Thinking in progress...')}
                 </div>
               )}

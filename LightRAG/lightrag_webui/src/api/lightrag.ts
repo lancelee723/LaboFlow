@@ -212,7 +212,6 @@ export type TrackStatusResponse = {
 
 export type DocumentsRequest = {
   status_filter?: DocStatus | null
-  folder_id?: string | null
   page: number
   page_size: number
   sort_field: 'created_at' | 'updated_at' | 'id' | 'file_path'
@@ -232,18 +231,6 @@ export type PaginatedDocsResponse = {
   documents: DocStatusResponse[]
   pagination: PaginationInfo
   status_counts: Record<string, number>
-}
-
-export type Folder = {
-  id: string
-  name: string
-  create_time?: number
-  update_time?: number
-}
-
-export type MoveDocumentsRequest = {
-  doc_ids: string[]
-  folder_id: string | null
 }
 
 export type StatusCountsResponse = {
@@ -862,38 +849,6 @@ export const deleteDocuments = async (
   return response.data
 }
 
-export const getFolders = async (): Promise<Folder[]> => {
-  const response = await axiosInstance.get('/documents/folders')
-  return response.data
-}
-
-export const createFolder = async (name: string): Promise<Folder> => {
-  const response = await axiosInstance.post('/documents/folders', { name })
-  return response.data
-}
-
-export const deleteFolder = async (
-  folderId: string,
-  clearDocs: boolean = true
-): Promise<DocActionResponse> => {
-  const response = await axiosInstance.delete(`/documents/folders/${encodeURIComponent(folderId)}`, {
-    params: { clear_docs: clearDocs }
-  })
-  return response.data
-}
-
-export const moveDocumentsToFolder = async (
-  docIds: string[],
-  folderId: string | null
-): Promise<DocActionResponse> => {
-  const payload: MoveDocumentsRequest = {
-    doc_ids: docIds,
-    folder_id: folderId
-  }
-  const response = await axiosInstance.post('/documents/move', payload)
-  return response.data
-}
-
 export const getAuthStatus = async (): Promise<AuthStatusResponse> => {
   try {
     // Add a timeout to the request to prevent hanging
@@ -974,13 +929,6 @@ export const loginToServer = async (username: string, password: string): Promise
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
   });
 
-  return response.data;
-}
-
-export const ssoLogin = async (token: string): Promise<LoginResponse> => {
-  const response = await axiosInstance.post('/sso-login', { token }, {
-    headers: { 'Content-Type': 'application/json' }
-  });
   return response.data;
 }
 
@@ -1092,10 +1040,10 @@ const releasePaginatedDocumentSubscriber = (
 const subscribeToPaginatedDocumentsRequest = (
   request: DocumentsRequest
 ): {
-    requestKey: string
-    requestEntry: InFlightPaginatedDocumentRequest
-    release: (abortIfLastSubscriber: boolean) => void
-  } => {
+  requestKey: string
+  requestEntry: InFlightPaginatedDocumentRequest
+  release: (abortIfLastSubscriber: boolean) => void
+} => {
   const requestKey = getPaginatedDocumentsRequestKey(request)
   let requestEntry = inFlightPaginatedDocumentRequests.get(requestKey)
 

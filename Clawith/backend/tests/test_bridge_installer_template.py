@@ -50,6 +50,7 @@ def test_render_installer_linux_only_selected_adapter_enabled(adapter):
     payload, filename, content_type = render_installer(
         platform="linux",
         server_url="ws://localhost:8000",
+        http_base="http://localhost:8000",
         api_key="oc-test-key",
         agent_name="test-agent",
         adapter=adapter,
@@ -77,6 +78,7 @@ def test_render_installer_agent_name_newlines_stripped():
     payload, _, _ = render_installer(
         platform="linux",
         server_url="ws://localhost:8000",
+        http_base="http://localhost:8000",
         api_key="oc-x",
         agent_name="evil\nrm -rf /\r\necho pwned",
         adapter="claude_code",

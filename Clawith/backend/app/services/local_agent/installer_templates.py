@@ -32,9 +32,30 @@ _TRAILER_LEN_BYTES = 4
 
 # Location of the bundled bridge exe. Kept inside the backend package so
 # it ships via the normal Dockerfile `COPY . .` step.
-_BRIDGE_EXE_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "static" / "bridge" / "clawith-bridge.exe"
+_BRIDGE_STATIC_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "static" / "bridge"
 )
+_BRIDGE_EXE_PATH = _BRIDGE_STATIC_DIR / "clawith-bridge.exe"
+
+
+def _current_wheel_filename() -> str:
+    """Return the filename of the bundled clawith_bridge wheel.
+
+    pip needs the PEP-427 filename (NAME-VERSION-PYTHON-ABI-PLATFORM.whl)
+    to parse package metadata at install time, so the installer script
+    has to save the download under the real filename — not a sanitised
+    temp name. We look it up at render time and bake the name into the
+    script.
+    """
+    matches = sorted(_BRIDGE_STATIC_DIR.glob("clawith_bridge-*-py3-none-any.whl"))
+    if not matches:
+        raise FileNotFoundError(
+            f"no clawith_bridge wheel found under {_BRIDGE_STATIC_DIR}. "
+            "Build one via: `cd Clawith/bridge && uv build --wheel && "
+            "cp dist/clawith_bridge-*.whl ../backend/app/static/bridge/`."
+        )
+    # Lexicographic order matches semver for our single-digit 0.x.y versions.
+    return matches[-1].name
 
 
 _UNIX_SH = r"""#!/usr/bin/env bash
@@ -46,28 +67,68 @@ set -euo pipefail
 
 CLAWITH_SERVER="{server_url}"
 CLAWITH_TOKEN="{api_key}"
+# HTTP(S) base of the Clawith server — used to fetch the bridge wheel.
+# The WebSocket URL above is used at bridge *runtime*; this URL is used
+# only during install, so if you relocate the server later, you only
+# need to re-download and re-run the installer.
+CLAWITH_HTTP_BASE="{http_base}"
 
-echo "[clawith-bridge] Checking Python..."
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "[clawith-bridge] ERROR: python3 not found. Install Python 3.10+ first." >&2
+# ── Locate a suitable Python (>=3.10) ─────────────────────
+# We prefer explicitly-named interpreters over the bare `python3` symlink
+# because the latter still resolves to Apple's command-line-tools 3.9 on
+# many Macs. Falling back to `python3` only after the versioned candidates
+# have been ruled out means we won't silently pick a too-old interpreter.
+echo "[clawith-bridge] Locating Python >= 3.10..."
+CANDIDATES=(python3.14 python3.13 python3.12 python3.11 python3.10 python3)
+PY=""
+for c in "${{CANDIDATES[@]}}"; do
+    if command -v "$c" >/dev/null 2>&1; then
+        ver=$("$c" -c 'import sys;print(f"{{sys.version_info.major}}.{{sys.version_info.minor}}")' 2>/dev/null || echo "0.0")
+        major=${{ver%%.*}}; minor=${{ver##*.}}
+        if [ "$major" = "3" ] && [ "$minor" -ge 10 ] 2>/dev/null; then
+            PY=$(command -v "$c")
+            echo "[clawith-bridge]   using $PY (Python $ver)"
+            break
+        fi
+    fi
+done
+if [ -z "$PY" ]; then
+    echo "[clawith-bridge] ERROR: no Python >= 3.10 found in PATH." >&2
+    echo "   macOS:  brew install python@3.12  (or 3.13/3.14)" >&2
+    echo "   Linux:  use your distro's Python 3.10+ package, or pyenv." >&2
     exit 1
 fi
 
-# Check if clawith-bridge is already installed (dev mode or prior install).
-if python3 -c "import clawith_bridge" 2>/dev/null; then
-    echo "[clawith-bridge] Package already installed - skipping pip install"
-else
-    echo "[clawith-bridge] Installing clawith-bridge via pip..."
-    if ! python3 -m pip install --user --upgrade clawith-bridge; then
-        # pip failed (e.g. package not on PyPI yet). Re-check import; if still missing, abort.
-        if ! python3 -c "import clawith_bridge" 2>/dev/null; then
-            echo "[clawith-bridge] ERROR: pip install failed and clawith_bridge is not importable." >&2
-            echo "   If you are testing from a local repo, install it first:" >&2
-            echo "     python3 -m pip install -e <path-to-clawith>/bridge" >&2
-            exit 1
-        fi
-    fi
+# ── Install clawith_bridge into a dedicated venv ─────────
+# A per-bridge venv sidesteps Homebrew/Debian PEP-668 "externally managed"
+# blocks and avoids dirtying the user's site-packages. The venv is
+# disposable — rm -rf ~/.clawith-bridge to uninstall.
+VENV_DIR="$HOME/.clawith-bridge/venv"
+VPY="$VENV_DIR/bin/python3"
+if [ ! -x "$VPY" ]; then
+    echo "[clawith-bridge] Creating venv at $VENV_DIR"
+    "$PY" -m venv "$VENV_DIR"
 fi
+
+echo "[clawith-bridge] Downloading bridge wheel from $CLAWITH_HTTP_BASE"
+# `mktemp -t PREFIX` with a suffix is non-portable (macOS leaves the XXXXXX
+# literal; GNU mktemp refuses templates without X's). Create a temp dir
+# and save under the real PEP-427 wheel filename — pip parses package
+# name/version/tags out of the filename, so it can't be renamed.
+TMP_DIR=$(mktemp -d)
+TMP_WHEEL="$TMP_DIR/{wheel_filename}"
+# shellcheck disable=SC2064 — we want $TMP_DIR expanded now, not at trap time.
+trap "rm -rf '$TMP_DIR'" EXIT
+if ! curl -fsSL "$CLAWITH_HTTP_BASE/api/bridge/wheel" -o "$TMP_WHEEL"; then
+    echo "[clawith-bridge] ERROR: failed to fetch wheel from $CLAWITH_HTTP_BASE/api/bridge/wheel" >&2
+    echo "   Check that the Clawith server is reachable and that its backend was" >&2
+    echo "   started after \`uv build --wheel\` was run in Clawith/bridge/." >&2
+    exit 1
+fi
+
+echo "[clawith-bridge] Installing wheel into venv"
+"$VPY" -m pip install --upgrade pip >/dev/null
+"$VPY" -m pip install --upgrade "$TMP_WHEEL"
 
 CONFIG_PATH="$HOME/.clawith-bridge.toml"
 echo "[clawith-bridge] Writing config to $CONFIG_PATH"
@@ -106,8 +167,7 @@ if [[ "$UNAME" == "Darwin" ]]; then
     <key>Label</key><string>com.clawith.bridge</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>python3</string>
+        <string>$VPY</string>
         <string>-m</string>
         <string>clawith_bridge</string>
     </array>
@@ -137,7 +197,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/clawith-bridge
+ExecStart=$VPY -m clawith_bridge
 Restart=on-failure
 RestartSec=5
 
@@ -162,7 +222,7 @@ EOF
     fi
 else
     echo "[clawith-bridge] Unknown platform: $UNAME — config written, but autostart not configured." >&2
-    echo "   Run manually:  clawith-bridge" >&2
+    echo "   Run manually:  $VPY -m clawith_bridge" >&2
 fi
 
 echo ""
@@ -192,11 +252,18 @@ def render_installer(
     platform: Platform,
     *,
     server_url: str,
+    http_base: str,
     api_key: str,
     agent_name: str,
     adapter: str = "claude_code",
 ) -> tuple[bytes, str, str]:
     """Render a platform-specific installer.
+
+    `server_url` is the bridge's *runtime* WebSocket URL (ws://…/wss://…).
+    `http_base` is the HTTP(S) base used at *install time* to fetch the
+    bundled clawith_bridge wheel (no trailing slash). For the standard
+    LaboFlow/Clawith dev setup these point at the same host via different
+    schemes.
 
     `adapter` picks which bridge adapter the generated TOML (or baked
     trailer, on Windows) enables — one of 'claude_code' | 'openclaw' |
@@ -227,7 +294,9 @@ def render_installer(
     text = _UNIX_SH.format(
         agent_name=safe_name,
         server_url=server_url,
+        http_base=http_base.rstrip("/"),
         api_key=api_key,
+        wheel_filename=_current_wheel_filename(),
         **_adapter_enabled_flags(adapter),
     )
     return (
