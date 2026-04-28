@@ -59,7 +59,7 @@ _BLOCKED_SCHEMES = {
 }
 
 _BLOCKED_HOSTNAMES = {
-    "postgres", "redis", "lightrag", "aippt",
+    "postgres", "redis", "aippt",
     "clawith-backend", "clawith-frontend", "nginx",
 }
 

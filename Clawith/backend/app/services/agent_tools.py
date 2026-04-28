@@ -3588,49 +3588,6 @@ async def _send_file_via_slack(agent_id, config, file_path: Path, member_name: s
 async def _execute_mcp_tool(tool_name: str, arguments: dict, agent_id=None) -> str:
     """Execute a tool via MCP if it exists in the DB as an MCP tool."""
     try:
-        # ── LightRAG native tool support: call configured LightRAG HTTP API
-        # Tools are seeded with names like 'lightrag.query', 'lightrag.documents.texts', etc.
-        if tool_name.startswith("lightrag."):
-            try:
-                from app.models.tool import Tool, AgentTool
-                from app.core.security import decrypt_data
-                from app.services.lightrag_adapter import call_lightrag_endpoint
-
-                async with async_session() as db:
-                    r = await db.execute(select(Tool).where(Tool.name == tool_name))
-                    tool = r.scalar_one_or_none()
-                    if not tool:
-                        logger.warning(f"[LightRAG] Unknown tool: {tool_name}")
-                        return f"Unknown LightRAG tool: {tool_name}"
-
-                    # Load per-agent override
-                    agent_config = {}
-                    if agent_id:
-                        at_r = await db.execute(
-                            select(AgentTool).where(
-                                AgentTool.agent_id == agent_id,
-                                AgentTool.tool_id == tool.id,
-                            )
-                        )
-                        at = at_r.scalar_one_or_none()
-                        agent_config = (at.config or {}) if at else {}
-
-                # Merge and attempt basic decryption of api_key
-                merged = {**(tool.config or {}), **(agent_config or {})}
-                api_key = merged.get("api_key")
-                if isinstance(api_key, str) and api_key:
-                    try:
-                        api_key = decrypt_data(api_key, _settings.SECRET_KEY)
-                    except Exception:
-                        # keep as-is if not encrypted
-                        pass
-
-                base_url = merged.get("base_url") or merged.get("url") or "http://localhost:9621"
-                return await call_lightrag_endpoint(base_url.rstrip("/"), api_key, tool_name, arguments)
-            except Exception as e:
-                logger.exception(f"[LightRAG] Tool execution error: {tool_name}")
-                return f"❌ LightRAG tool execution error: {str(e)[:200]}"
-
         from app.models.tool import Tool, AgentTool
         from app.services.mcp_client import MCPClient
 

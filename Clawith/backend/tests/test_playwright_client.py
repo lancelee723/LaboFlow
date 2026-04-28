@@ -70,10 +70,6 @@ class TestURLBlocklist:
         with pytest.raises(URLBlockedError, match="internal"):
             _check_url_safe("http://postgres:5432/")
 
-    def test_blocks_docker_hostname_lightrag(self):
-        with pytest.raises(URLBlockedError, match="internal"):
-            _check_url_safe("http://lightrag:9621/")
-
     def test_blocks_dns_rebind(self, monkeypatch):
         # Simulate a public hostname that resolves to a private IP
         import socket
