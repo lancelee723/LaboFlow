@@ -124,11 +124,22 @@ else
 fi
 
 # ── 4. RAGFlow ───────────────────────────────────────────────
-step "[4/5] RAGFlow — checking Docker service availability"
+step "[4/5] RAGFlow — starting Docker service"
 : "${RAGFLOW_PORT:=8880}"
-RAGFLOW_TIMEOUT=120
+RAGFLOW_COMPOSE="-f $ROOT/ragflow/docker/docker-compose.yml --profile cpu"
+
+# Start RAGFlow if not already reachable
+if ! curl -s -o /dev/null -m 2 "http://localhost:$RAGFLOW_PORT" 2>/dev/null \
+   && ! (command -v nc &>/dev/null && nc -z 127.0.0.1 "$RAGFLOW_PORT" 2>/dev/null); then
+    warn "RAGFlow not running — starting via docker compose..."
+    docker compose $RAGFLOW_COMPOSE up -d 2>&1 | tail -3 || { warn "docker compose up failed — start RAGFlow manually"; }
+else
+    ok "RAGFlow already running on :$RAGFLOW_PORT"
+fi
+
+# Poll for readiness (RAGFlow stack: MySQL + ES + app = ~2-4 min cold start)
+RAGFLOW_TIMEOUT=240
 ok "Waiting up to ${RAGFLOW_TIMEOUT}s for RAGFlow on :$RAGFLOW_PORT ..."
-warn "If RAGFlow is not running, start it with: docker compose -f ragflow/docker/docker-compose.yml --profile cpu up -d"
 RAGFLOW_READY=false
 for i in $(seq 1 "$RAGFLOW_TIMEOUT"); do
     if curl -s -o /dev/null -m 1 "http://localhost:$RAGFLOW_PORT" 2>/dev/null \
@@ -140,8 +151,8 @@ for i in $(seq 1 "$RAGFLOW_TIMEOUT"); do
     sleep 1
 done
 if [ "$RAGFLOW_READY" = false ]; then
-    warn "RAGFlow did not become available within ${RAGFLOW_TIMEOUT}s — skipping."
-    warn "Start it manually before running ./dev.sh"
+    warn "RAGFlow did not become available within ${RAGFLOW_TIMEOUT}s."
+    warn "Check logs: docker compose $RAGFLOW_COMPOSE logs --tail=30"
 fi
 
 # ── 5. AIPPT ─────────────────────────────────────────────────

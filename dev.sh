@@ -189,7 +189,7 @@ cd "$ROOT"
 log "Waiting for upstream services..."
 wait_port "$CLAWITH_BACKEND_PORT"  "Clawith backend"  30 || true
 wait_port "$CLAWITH_FRONTEND_PORT" "Clawith frontend" 20 || true
-wait_port "$RAGFLOW_PORT"          "RAGFlow"          60 || true
+wait_port "$RAGFLOW_PORT"          "RAGFlow"          180 || true
 wait_port "$AIPPT_PORT"            "AIPPT"            20 || true
 
 # ── 5. NGINX ─────────────────────────────────────────────────
