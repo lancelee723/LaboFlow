@@ -35,27 +35,6 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     return res.json();
 }
 
-async function fetchKbJson<T>(url: string, options?: RequestInit): Promise<T> {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/kb-api${url}`, {
-        ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-    });
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        const detail = body.detail;
-        const msg = typeof detail === 'string' ? detail
-            : Array.isArray(detail) ? detail.map((e: any) => e.msg || JSON.stringify(e)).join('; ')
-            : 'Error';
-        throw new Error(msg);
-    }
-    if (res.status === 204) return undefined as T;
-    return res.json();
-}
-
 interface LLMModel {
     id: string; provider: string; model: string; label: string;
     base_url?: string; api_key_masked?: string; max_tokens_per_day?: number; enabled: boolean; supports_vision?: boolean; max_output_tokens?: number; request_timeout?: number; temperature?: number; created_at: string;
@@ -1773,341 +1752,6 @@ function BroadcastSection() {
 
 // ─── Identity Providers Tab ──────────────────────────
 
-// ─── Knowledge Base (LightRAG) LLM Config Tab ──────────────────────────
-
-interface KbLlmSection {
-    binding: string | null; host: string | null; model: string | null; api_key: string;
-    max_async: number | null; timeout: number | null; temperature: number | null; max_tokens: number | null;
-}
-interface KbEmbeddingSection {
-    binding: string | null; host: string | null; model: string | null; api_key: string;
-    dim: number | null; token_limit: number | null; send_dim: boolean | null; timeout: number | null;
-}
-interface KbRerankSection {
-    enabled: boolean; binding: string | null; host: string | null; model: string | null; api_key: string;
-}
-interface KbProviders {
-    llm_bindings: string[];
-    openai_compatible_presets: { id: string; display_name: string; base_url: string; default_max_tokens: number }[];
-    embedding_bindings: string[];
-    rerank_bindings: string[];
-}
-interface KbConfigOut {
-    generation: number;
-    llm: { binding: string | null; host: string | null; model: string | null; api_key_masked: string; max_async: number | null; timeout: number | null; temperature: number | null; max_tokens: number | null; source: 'overlay' | 'env' };
-    embedding: { binding: string | null; host: string | null; model: string | null; api_key_masked: string; dim: number | null; token_limit: number | null; send_dim: boolean | null; timeout: number | null; source: 'overlay' | 'env' };
-    rerank: { enabled: boolean; binding: string | null; host: string | null; model: string | null; api_key_masked: string; source: 'overlay' | 'env' };
-    providers: KbProviders;
-    has_indexed_data: boolean;
-}
-
-const EMBEDDING_REBUILD_FIELDS: (keyof KbEmbeddingSection)[] = ['binding', 'model', 'dim'];
-function isEmbeddingDestructive(original: KbEmbeddingSection, current: KbEmbeddingSection): boolean {
-    return EMBEDDING_REBUILD_FIELDS.some(f => original[f] !== current[f]);
-}
-
-function KbTab() {
-    const { t } = useTranslation();
-    const [generation, setGeneration] = useState(0);
-    const [providers, setProviders] = useState<KbProviders>({ llm_bindings: [], openai_compatible_presets: [], embedding_bindings: [], rerank_bindings: [] });
-    const [hasIndexedData, setHasIndexedData] = useState(false);
-    const [llmSource, setLlmSource] = useState<'overlay' | 'env'>('env');
-    const [embeddingSource, setEmbeddingSource] = useState<'overlay' | 'env'>('env');
-    const [rerankSource, setRerankSource] = useState<'overlay' | 'env'>('env');
-
-    const [llm, setLlm] = useState<KbLlmSection>({ binding: null, host: null, model: null, api_key: '', max_async: null, timeout: null, temperature: null, max_tokens: null });
-    const [embedding, setEmbedding] = useState<KbEmbeddingSection>({ binding: null, host: null, model: null, api_key: '', dim: null, token_limit: null, send_dim: null, timeout: null });
-    const [rerank, setRerank] = useState<KbRerankSection>({ enabled: false, binding: null, host: null, model: null, api_key: '' });
-    const [origEmbedding, setOrigEmbedding] = useState<KbEmbeddingSection>(embedding);
-
-    const [maskedKeys, setMaskedKeys] = useState({ llm: '', embedding: '', rerank: '' });
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [successMsg, setSuccessMsg] = useState<string | null>(null);
-    const [restartBanner, setRestartBanner] = useState(false);
-    const [showDestructiveConfirm, setShowDestructiveConfirm] = useState(false);
-    const [filesToDelete, setFilesToDelete] = useState<string[]>([]);
-    const [confirmText, setConfirmText] = useState('');
-
-    const loadConfig = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const data = await fetchKbJson<KbConfigOut>('/llm-config');
-            setGeneration(data.generation);
-            setProviders(data.providers);
-            setHasIndexedData(data.has_indexed_data);
-            setLlmSource(data.llm.source);
-            setEmbeddingSource(data.embedding.source);
-            setRerankSource(data.rerank.source);
-            setMaskedKeys({ llm: data.llm.api_key_masked, embedding: data.embedding.api_key_masked, rerank: data.rerank.api_key_masked });
-
-            const llmIn: KbLlmSection = { binding: data.llm.binding, host: data.llm.host, model: data.llm.model, api_key: data.llm.api_key_masked, max_async: data.llm.max_async, timeout: data.llm.timeout, temperature: data.llm.temperature, max_tokens: data.llm.max_tokens };
-            const embedIn: KbEmbeddingSection = { binding: data.embedding.binding, host: data.embedding.host, model: data.embedding.model, api_key: data.embedding.api_key_masked, dim: data.embedding.dim, token_limit: data.embedding.token_limit, send_dim: data.embedding.send_dim, timeout: data.embedding.timeout };
-            const rerankIn: KbRerankSection = { enabled: data.rerank.enabled, binding: data.rerank.binding, host: data.rerank.host, model: data.rerank.model, api_key: data.rerank.api_key_masked };
-
-            setLlm(llmIn);
-            setEmbedding(embedIn);
-            setOrigEmbedding(embedIn);
-            setRerank(rerankIn);
-        } catch (err: any) {
-            setError(t('enterprise.kbConfig.loadError'));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => { loadConfig(); }, []);
-
-    const handleSave = async (forceClear = false) => {
-        if (rerank.enabled && !rerank.binding) {
-            setError(t('enterprise.kbConfig.rerankBindingRequired'));
-            return;
-        }
-        setSaving(true);
-        setError(null);
-        setSuccessMsg(null);
-        setRestartBanner(false);
-        const body = { generation, force_clear: forceClear, llm, embedding, rerank };
-        try {
-            const result = await fetchKbJson<{ status: string; generation: number; reason?: string; deleted?: string[] }>('/llm-config', { method: 'POST', body: JSON.stringify(body) });
-            setGeneration(result.generation);
-            if (result.status === 'restart_required') {
-                setRestartBanner(true);
-            } else {
-                setSuccessMsg(t('enterprise.kbConfig.saveSuccess'));
-                setTimeout(() => setSuccessMsg(null), 3000);
-            }
-            setShowDestructiveConfirm(false);
-            setConfirmText('');
-            await loadConfig();
-        } catch (err: any) {
-            const msg = err?.message || 'Save failed';
-            if (msg.includes('embedding_rebuild_requires_clear')) {
-                try {
-                    const detail = JSON.parse(msg);
-                    setFilesToDelete(detail.will_clear ?? []);
-                } catch {
-                    setFilesToDelete([]);
-                }
-                setShowDestructiveConfirm(true);
-            } else if (msg.includes('stale_config')) {
-                await loadConfig();
-                const retryBody = { generation, force_clear: forceClear, llm, embedding, rerank };
-                try {
-                    await fetchKbJson('/llm-config', { method: 'POST', body: JSON.stringify(retryBody) });
-                    setSuccessMsg(t('enterprise.kbConfig.saveSuccess'));
-                    setTimeout(() => setSuccessMsg(null), 3000);
-                } catch { }
-            } else {
-                setError(msg);
-            }
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const destructive = isEmbeddingDestructive(origEmbedding, embedding);
-
-    const cardStyle: React.CSSProperties = { background: 'var(--card-bg, #fff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: '8px', padding: '20px', marginBottom: '16px' };
-    const labelStyle: React.CSSProperties = { fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: 'var(--text-secondary, #6b7280)' };
-    const inputStyle: React.CSSProperties = { width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color, #e5e7eb)', fontSize: '13px', background: 'var(--input-bg, #fff)', color: 'var(--text-primary, #111)' };
-    const selectStyle: React.CSSProperties = { ...inputStyle, appearance: 'auto' as any };
-    const rowStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '140px 1fr', alignItems: 'center', gap: '8px', marginBottom: '10px' };
-    const badgeOverlay: React.CSSProperties = { display: 'inline-block', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#dbeafe', color: '#1d4ed8', marginLeft: '8px', verticalAlign: 'middle' };
-    const badgeEnv: React.CSSProperties = { ...badgeOverlay, background: '#f3f4f6', color: '#6b7280' };
-
-    if (loading) {
-        return <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #6b7280)' }}>{t('enterprise.kbConfig.loading')}</div>;
-    }
-
-    return (
-        <div>
-            {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', color: '#dc2626', fontSize: '13px' }}>{error}</div>}
-            {successMsg && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', color: '#16a34a', fontSize: '13px' }}>{successMsg}</div>}
-            {restartBanner && <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', color: '#d97706', fontSize: '13px' }}>{t('enterprise.kbConfig.restartRequired')}</div>}
-
-            {/* LLM Card */}
-            <div style={cardStyle}>
-                <h3 style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
-                    {t('enterprise.kbConfig.llmTitle')}
-                    <span style={llmSource === 'overlay' ? badgeOverlay : badgeEnv}>{llmSource === 'overlay' ? t('enterprise.kbConfig.sourceOverlay') : t('enterprise.kbConfig.sourceEnv')}</span>
-                </h3>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.binding')}</label>
-                    <select style={selectStyle} value={llm.binding ?? ''} onChange={e => {
-                        const binding = e.target.value;
-                        if (binding === 'openai') {
-                            const preset = providers.openai_compatible_presets.find(p => p.id === 'openai');
-                            setLlm({ ...llm, binding, host: preset?.base_url ?? 'https://api.openai.com/v1', max_tokens: preset?.default_max_tokens ?? 16384 });
-                        } else {
-                            setLlm({ ...llm, binding, host: '', max_tokens: 4096 });
-                        }
-                    }}>
-                        <option value="">{t('enterprise.kbConfig.selectBinding')}</option>
-                        {providers.llm_bindings.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                </div>
-                {llm.binding === 'openai' && (
-                    <div style={rowStyle}>
-                        <label style={labelStyle}>{t('enterprise.kbConfig.preset')}</label>
-                        <select style={selectStyle} value={providers.openai_compatible_presets.find(p => p.base_url === llm.host)?.id ?? 'custom'} onChange={e => {
-                            const preset = providers.openai_compatible_presets.find(p => p.id === e.target.value);
-                            if (preset) setLlm({ ...llm, host: preset.base_url, max_tokens: preset.default_max_tokens });
-                        }}>
-                            {providers.openai_compatible_presets.map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
-                        </select>
-                    </div>
-                )}
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.host')}</label>
-                    <input style={inputStyle} value={llm.host ?? ''} onChange={e => setLlm({ ...llm, host: e.target.value })} placeholder="https://..." />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.model')}</label>
-                    <input style={inputStyle} value={llm.model ?? ''} onChange={e => setLlm({ ...llm, model: e.target.value })} placeholder="gpt-4o-mini" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.apiKey')}</label>
-                    <input style={inputStyle} type="password" value={llm.api_key} onChange={e => setLlm({ ...llm, api_key: e.target.value })} placeholder={maskedKeys.llm || t('enterprise.kbConfig.apiKeyPlaceholder')} />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.maxAsync')}</label>
-                    <input style={inputStyle} type="number" value={llm.max_async ?? ''} onChange={e => setLlm({ ...llm, max_async: e.target.value ? parseInt(e.target.value) : null })} placeholder="4" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.timeout')}</label>
-                    <input style={inputStyle} type="number" value={llm.timeout ?? ''} onChange={e => setLlm({ ...llm, timeout: e.target.value ? parseInt(e.target.value) : null })} placeholder="180" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.temperature')}</label>
-                    <input style={inputStyle} type="number" step="0.1" min="0" max="2" value={llm.temperature ?? ''} onChange={e => setLlm({ ...llm, temperature: e.target.value ? parseFloat(e.target.value) : null })} placeholder="0.7" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.maxTokens')}</label>
-                    <input style={inputStyle} type="number" value={llm.max_tokens ?? ''} onChange={e => setLlm({ ...llm, max_tokens: e.target.value ? parseInt(e.target.value) : null })} placeholder="16384" />
-                </div>
-            </div>
-
-            {/* Embedding Card */}
-            <div style={cardStyle}>
-                <h3 style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
-                    {t('enterprise.kbConfig.embeddingTitle')}
-                    <span style={embeddingSource === 'overlay' ? badgeOverlay : badgeEnv}>{embeddingSource === 'overlay' ? t('enterprise.kbConfig.sourceOverlay') : t('enterprise.kbConfig.sourceEnv')}</span>
-                </h3>
-                {destructive && hasIndexedData && (
-                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', color: '#d97706', fontSize: '13px' }}>
-                        {t('enterprise.kbConfig.embeddingWarning')}
-                    </div>
-                )}
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.binding')}</label>
-                    <select style={selectStyle} value={embedding.binding ?? ''} onChange={e => setEmbedding({ ...embedding, binding: e.target.value })}>
-                        <option value="">{t('enterprise.kbConfig.selectBinding')}</option>
-                        {providers.embedding_bindings.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.host')}</label>
-                    <input style={inputStyle} value={embedding.host ?? ''} onChange={e => setEmbedding({ ...embedding, host: e.target.value })} placeholder="https://api.openai.com/v1" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.model')}</label>
-                    <input style={inputStyle} value={embedding.model ?? ''} onChange={e => setEmbedding({ ...embedding, model: e.target.value })} placeholder="text-embedding-3-small" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.apiKey')}</label>
-                    <input style={inputStyle} type="password" value={embedding.api_key} onChange={e => setEmbedding({ ...embedding, api_key: e.target.value })} placeholder={maskedKeys.embedding || t('enterprise.kbConfig.apiKeyPlaceholder')} />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.dimension')}</label>
-                    <input style={inputStyle} type="number" value={embedding.dim ?? ''} onChange={e => setEmbedding({ ...embedding, dim: e.target.value ? parseInt(e.target.value) : null })} placeholder="1536" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.tokenLimit')}</label>
-                    <input style={inputStyle} type="number" value={embedding.token_limit ?? ''} onChange={e => setEmbedding({ ...embedding, token_limit: e.target.value ? parseInt(e.target.value) : null })} placeholder="8192" />
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.sendDim')}</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={embedding.send_dim ?? false} onChange={e => setEmbedding({ ...embedding, send_dim: e.target.checked })} />
-                        <span style={{ fontSize: '13px' }}>{t('enterprise.kbConfig.sendDimLabel')}</span>
-                    </label>
-                </div>
-                <div style={rowStyle}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.timeout')}</label>
-                    <input style={inputStyle} type="number" value={embedding.timeout ?? ''} onChange={e => setEmbedding({ ...embedding, timeout: e.target.value ? parseInt(e.target.value) : null })} placeholder="30" />
-                </div>
-            </div>
-
-            {/* Rerank Card */}
-            <div style={cardStyle}>
-                <h3 style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
-                    {t('enterprise.kbConfig.rerankTitle')}
-                    <span style={rerankSource === 'overlay' ? badgeOverlay : badgeEnv}>{rerankSource === 'overlay' ? t('enterprise.kbConfig.sourceOverlay') : t('enterprise.kbConfig.sourceEnv')}</span>
-                </h3>
-                <div style={{ ...rowStyle, marginBottom: '12px' }}>
-                    <label style={labelStyle}>{t('enterprise.kbConfig.enabled')}</label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={rerank.enabled} onChange={e => setRerank({ ...rerank, enabled: e.target.checked, binding: e.target.checked ? (providers.rerank_bindings[0] ?? null) : null })} />
-                        <span style={{ fontSize: '13px' }}>{t('enterprise.kbConfig.enableLabel')}</span>
-                    </label>
-                </div>
-                <div style={{ opacity: rerank.enabled ? 1 : 0.5, pointerEvents: rerank.enabled ? 'auto' : 'none' }}>
-                    <div style={rowStyle}>
-                        <label style={labelStyle}>{t('enterprise.kbConfig.binding')}</label>
-                        <select style={selectStyle} value={rerank.binding ?? ''} onChange={e => setRerank({ ...rerank, binding: e.target.value })}>
-                            <option value="">{t('enterprise.kbConfig.selectBinding')}</option>
-                            {providers.rerank_bindings.map(b => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                    </div>
-                    <div style={rowStyle}>
-                        <label style={labelStyle}>{t('enterprise.kbConfig.host')}</label>
-                        <input style={inputStyle} value={rerank.host ?? ''} onChange={e => setRerank({ ...rerank, host: e.target.value })} placeholder="https://api.cohere.ai" />
-                    </div>
-                    <div style={rowStyle}>
-                        <label style={labelStyle}>{t('enterprise.kbConfig.model')}</label>
-                        <input style={inputStyle} value={rerank.model ?? ''} onChange={e => setRerank({ ...rerank, model: e.target.value })} placeholder="rerank-english-v2.0" />
-                    </div>
-                    <div style={rowStyle}>
-                        <label style={labelStyle}>{t('enterprise.kbConfig.apiKey')}</label>
-                        <input style={inputStyle} type="password" value={rerank.api_key} onChange={e => setRerank({ ...rerank, api_key: e.target.value })} placeholder={maskedKeys.rerank || t('enterprise.kbConfig.apiKeyPlaceholder')} />
-                    </div>
-                </div>
-            </div>
-
-            {/* Save Button */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-                <button className="btn btn-primary" disabled={loading || saving} onClick={() => handleSave(false)}>
-                    {saving ? t('enterprise.kbConfig.saving') : t('enterprise.kbConfig.save')}
-                </button>
-            </div>
-
-            {/* Destructive Confirm Dialog */}
-            {showDestructiveConfirm && (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}>
-                    <div style={{ background: 'var(--card-bg, #fff)', borderRadius: '12px', padding: '24px', maxWidth: '480px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-                        <h3 style={{ color: '#dc2626', marginBottom: '12px' }}>{t('enterprise.kbConfig.destructiveTitle')}</h3>
-                        <p style={{ fontSize: '13px', marginBottom: '12px' }}>{t('enterprise.kbConfig.destructiveDesc')}</p>
-                        {filesToDelete.length > 0 && (
-                            <div style={{ background: 'var(--input-bg, #f9fafb)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', maxHeight: '120px', overflowY: 'auto' }}>
-                                {filesToDelete.map(f => <div key={f} style={{ fontFamily: 'monospace', fontSize: '12px', color: '#dc2626' }}>{f}</div>)}
-                            </div>
-                        )}
-                        <p style={{ fontSize: '13px', marginBottom: '8px' }}>{t('enterprise.kbConfig.destructiveConfirm')}</p>
-                        <input style={{ ...inputStyle, marginBottom: '16px' }} value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder="CLEAR" />
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                            <button className="btn btn-outline" onClick={() => { setShowDestructiveConfirm(false); setConfirmText(''); }}>{t('enterprise.kbConfig.cancel')}</button>
-                            <button className="btn btn-primary" style={{ background: '#dc2626' }} disabled={confirmText !== 'CLEAR'} onClick={() => handleSave(true)}>{t('enterprise.kbConfig.destructiveBtn')}</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
 // ─── AI PPT LLM Config Tab ──────────────────────────
 
 interface AipptProviderPreset {
@@ -2275,7 +1919,7 @@ export default function EnterpriseSettings() {
     const { t } = useTranslation();
     const qc = useQueryClient();
     const { user } = useAuthStore();
-    const [activeTab, setActiveTab] = useState<'llm' | 'org' | 'info' | 'approvals' | 'audit' | 'tools' | 'skills' | 'quotas' | 'users' | 'invites' | 'kb' | 'aippt'>('info');
+    const [activeTab, setActiveTab] = useState<'llm' | 'org' | 'info' | 'approvals' | 'audit' | 'tools' | 'skills' | 'quotas' | 'users' | 'invites' | 'aippt'>('info');
 
     // Track selected tenant as state so page refreshes on company switch
     const [selectedTenantId, setSelectedTenantId] = useState(localStorage.getItem('current_tenant_id') || '');
@@ -2391,9 +2035,6 @@ export default function EnterpriseSettings() {
         task: t('agent.toolCategories.task'),
         communication: t('agent.toolCategories.communication'),
         search: t('agent.toolCategories.search'),
-        lightrag: t('agent.toolCategories.lightrag', 'LightRAG'),
-        rag: t('agent.toolCategories.rag', 'LightRAG'),
-        graph: t('agent.toolCategories.graph', 'LightRAG'),
         aware: t('agent.toolCategories.aware', 'Aware & Triggers'),
         social: t('agent.toolCategories.social', 'Social'),
         code: t('agent.toolCategories.code', 'Code & Execution'),
@@ -2407,7 +2048,6 @@ export default function EnterpriseSettings() {
     const [toolsView, setToolsView] = useState<'global' | 'agent-installed'>('global');
     const [agentInstalledTools, setAgentInstalledTools] = useState<any[]>([]);
     const getToolGroupKey = (tool: any) => {
-        if (tool?.name?.startsWith('lightrag.')) return 'lightrag';
         return tool.category || 'general';
     };
 
@@ -2572,11 +2212,6 @@ export default function EnterpriseSettings() {
                             {tab === 'quotas' ? t('enterprise.tabs.quotas', 'Quotas') : tab === 'users' ? t('enterprise.tabs.users', 'Users') : tab === 'invites' ? t('enterprise.tabs.invites', 'Invitations') : t(`enterprise.tabs.${tab}`)}
                         </div>
                     ))}
-                    {user?.role === 'platform_admin' && (
-                        <div className={`tab ${activeTab === 'kb' ? 'active' : ''}`} onClick={() => setActiveTab('kb')}>
-                            {t('enterprise.tabs.kb')}
-                        </div>
-                    )}
                     {user?.role === 'platform_admin' && (
                         <div className={`tab ${activeTab === 'aippt' ? 'active' : ''}`} onClick={() => setActiveTab('aippt')}>
                             {t('enterprise.tabs.aippt')}
@@ -3991,9 +3626,6 @@ export default function EnterpriseSettings() {
 
                 {/* ── Invitation Codes Tab ── */}
                 {activeTab === 'invites' && <InvitationCodes />}
-
-                {/* ── Knowledge Base (LightRAG) Tab ── */}
-                {activeTab === 'kb' && <KbTab />}
 
                 {/* ── AI PPT LLM Config Tab ── */}
                 {activeTab === 'aippt' && <AipptTab />}
