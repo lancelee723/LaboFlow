@@ -61,28 +61,7 @@ services:
     networks:
       - laboflow
 
-  lightrag:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-lightrag:${TAG:-latest}
-    restart: unless-stopped
-    environment:
-      HOST: "0.0.0.0"
-      PORT: "9621"
-      WORKING_DIR: "/app/data/rag_storage"
-      INPUT_DIR: "/app/data/inputs"
-      TOKEN_SECRET: ${JWT_SECRET_KEY:-change-me-jwt-secret}
-      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-      LLM_BINDING: ${LIGHTRAG_LLM_BINDING:-openai}
-      LLM_MODEL: ${LIGHTRAG_LLM_MODEL:-gpt-4o-mini}
-      LLM_BINDING_HOST: ${LIGHTRAG_LLM_BINDING_HOST:-https://api.openai.com/v1}
-      LLM_BINDING_API_KEY: ${LIGHTRAG_LLM_BINDING_API_KEY:-}
-      EMBEDDING_BINDING: ${LIGHTRAG_EMBEDDING_BINDING:-openai}
-      EMBEDDING_MODEL: ${LIGHTRAG_EMBEDDING_MODEL:-text-embedding-3-small}
-      EMBEDDING_DIM: ${LIGHTRAG_EMBEDDING_DIM:-1536}
-    volumes:
-      - rag_storage:/app/data/rag_storage
-      - lightrag_inputs:/app/data/inputs
-    networks:
-      - laboflow
+  # RAGFlow: run separately via ragflow/docker/docker-compose.yml
 
   aippt:
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-latest}
@@ -98,7 +77,6 @@ services:
     depends_on:
       - clawith-frontend
       - clawith-backend
-      - lightrag
       - aippt
     networks:
       - laboflow
@@ -107,8 +85,6 @@ volumes:
   pgdata:
   redisdata:
   agent_data:
-  rag_storage:
-  lightrag_inputs:
 
 networks:
   laboflow:
