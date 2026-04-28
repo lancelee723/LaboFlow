@@ -123,27 +123,26 @@ else
     warn "To install manually:  Clawith/backend/.venv/bin/pip install playwright && Clawith/backend/.venv/bin/playwright install chromium"
 fi
 
-# ── 4. LightRAG ──────────────────────────────────────────────
-step "[4/5] LightRAG"
-cd "$ROOT/LightRAG"
-if [ ! -f ".env" ]; then
-    cp env.example .env
-    # Pre-populate token secret from top-level .env
-    source "$ROOT/.env"
-    if have sed; then
-        sed -i.bak "s|# TOKEN_SECRET=.*|TOKEN_SECRET=$JWT_SECRET_KEY|" .env 2>/dev/null || true
-        rm -f .env.bak
+# ── 4. RAGFlow ───────────────────────────────────────────────
+step "[4/5] RAGFlow — checking Docker service availability"
+: "${RAGFLOW_PORT:=8880}"
+RAGFLOW_TIMEOUT=120
+ok "Waiting up to ${RAGFLOW_TIMEOUT}s for RAGFlow on :$RAGFLOW_PORT ..."
+warn "If RAGFlow is not running, start it with: docker compose -f ragflow/docker/docker-compose.yml --profile cpu up -d"
+RAGFLOW_READY=false
+for i in $(seq 1 "$RAGFLOW_TIMEOUT"); do
+    if curl -s -o /dev/null -m 1 "http://localhost:$RAGFLOW_PORT" 2>/dev/null \
+       || (command -v nc &>/dev/null && nc -z 127.0.0.1 "$RAGFLOW_PORT" 2>/dev/null); then
+        RAGFLOW_READY=true
+        ok "RAGFlow is reachable on :$RAGFLOW_PORT (${i}s)"
+        break
     fi
-    ok "Created LightRAG/.env"
+    sleep 1
+done
+if [ "$RAGFLOW_READY" = false ]; then
+    warn "RAGFlow did not become available within ${RAGFLOW_TIMEOUT}s — skipping."
+    warn "Start it manually before running ./dev.sh"
 fi
-if [ ! -d ".venv" ]; then
-    warn "Running 'uv sync --extra api' — this installs LightRAG Python deps"
-    uv sync --extra api || fail "uv sync failed"
-    ok "LightRAG deps installed"
-else
-    ok "LightRAG .venv already exists"
-fi
-cd "$ROOT"
 
 # ── 5. AIPPT ─────────────────────────────────────────────────
 step "[5/5] AIPPT"
