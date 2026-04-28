@@ -1,3 +1,9 @@
+include:
+  # RAGFlow and its dependencies (MySQL, Elasticsearch, MinIO, Redis)
+  # Variable substitution uses ragflow/docker/.env
+  - path: ragflow/docker/docker-compose.yml
+    env_file: ragflow/docker/.env
+
 services:
   postgres:
     image: postgres:15.12-alpine
@@ -16,7 +22,7 @@ services:
     networks:
       - laboflow
 
-  redis:
+  clawith-redis:
     image: redis:7.4.2-alpine
     restart: unless-stopped
     volumes:
@@ -34,7 +40,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-clawith}:${POSTGRES_PASSWORD:-clawith}@postgres:5432/${POSTGRES_DB:-clawith}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://clawith-redis:6379/0
       AGENT_DATA_DIR: /data/agents
       AGENT_TEMPLATE_DIR: /app/agent_template
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
@@ -48,7 +54,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      clawith-redis:
         condition: service_healthy
     networks:
       - laboflow
@@ -61,8 +67,6 @@ services:
     networks:
       - laboflow
 
-  # RAGFlow: run separately via ragflow/docker/docker-compose.yml
-
   aippt:
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-latest}
     restart: unless-stopped
@@ -74,12 +78,16 @@ services:
     restart: unless-stopped
     ports:
       - "${NGINX_PORT:-3008}:80"
+    volumes:
+      - ./nginx/docker.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - clawith-frontend
       - clawith-backend
       - aippt
+      - ragflow-cpu
     networks:
       - laboflow
+      - ragflow  # must reach ragflow-cpu on its own network
 
 volumes:
   pgdata:
@@ -89,3 +97,6 @@ volumes:
 networks:
   laboflow:
     driver: bridge
+  # ragflow network is declared in ragflow/docker/docker-compose-base.yml (via include);
+  # referenced here so nginx can join it and reach ragflow-cpu by service name
+  ragflow: {}

@@ -16,6 +16,8 @@
 !README.md
 !docker-compose.yml
 !nginx.conf
+!nginx/
+!nginx/**
 !dev.sh
 !setup-all.sh
 !stop.sh
