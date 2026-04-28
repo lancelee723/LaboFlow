@@ -88,6 +88,7 @@ async def get_ragflow_sso_token(
         user_id=str(current_user.id),
         email=current_user.email or "",
         audience="ragflow",
+        role=getattr(current_user, "role", "user"),
     )
     return {"token": token, "ragflow_url": settings.RAGFLOW_URL}
 

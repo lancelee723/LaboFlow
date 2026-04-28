@@ -140,7 +140,7 @@ def create_sso_token(
         "aud": audience,
         "exp": expire,
     }
-    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 
 def decode_access_token(token: str) -> dict:
