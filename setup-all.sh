@@ -8,7 +8,7 @@
 # Steps:
 #   1. Ensure top-level .env exists (copy from .env.example)
 #   2. Clawith:  run its own setup.sh
-#   3. LightRAG: uv sync + copy env.example to .env
+#   3. RAGFlow:  poll port 8880 for Docker service readiness
 #   4. AIPPT:    pnpm install (skip if node_modules exists)
 #   5. Sanity check: required tools present (nginx, uv, pnpm)
 # ─────────────────────────────────────────────────────────────
