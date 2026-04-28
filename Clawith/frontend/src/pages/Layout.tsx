@@ -261,6 +261,26 @@ export default function Layout() {
     const [tenantFormLoading, setTenantFormLoading] = useState(false);
     const [tenantFormError, setTenantFormError] = useState('');
     const [allowSelfCreate, setAllowSelfCreate] = useState(true);
+    const [kbLoading, setKbLoading] = useState(false);
+
+    const openRAGFlowSSO = useCallback(async () => {
+        if (kbLoading) return;
+        setKbLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch('/api/enterprise/ragflow/sso-token', {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const { token: ssoToken, ragflow_url } = await res.json();
+            window.open(`${ragflow_url}/sso?token=${ssoToken}`, '_blank');
+        } catch (err) {
+            console.error('[RAGFlow SSO] failed to open knowledge base:', err);
+            alert(isChinese ? '打开知识库失败，请稍后重试' : 'Failed to open knowledge base. Please try again.');
+        } finally {
+            setKbLoading(false);
+        }
+    }, [kbLoading, isChinese]);
 
     // Notification polling
     const { data: unreadCount = 0 } = useQuery({
@@ -561,18 +581,18 @@ export default function Layout() {
                             <span className="sidebar-item-icon" style={{ display: 'flex' }}>{SidebarIcons.home}</span>
                             <span className="sidebar-item-text">{t('nav.dashboard')}</span>
                         </NavLink>
-                        <a
-                            href={`/kb/?sso_token=${localStorage.getItem('token') || ''}`}
+                        <button
                             className="sidebar-item"
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            onClick={openRAGFlowSSO}
+                            disabled={kbLoading}
+                            style={{ background: 'none', border: 'none', cursor: kbLoading ? 'wait' : 'pointer', width: '100%', textAlign: 'left', padding: 0, opacity: kbLoading ? 0.6 : 1 }}
                         >
                             <span className="sidebar-item-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                                 <IconBook2 size={14} stroke={1.5} />
                             </span>
                             <span className="sidebar-item-text">{t('nav.knowledgeBase', 'Knowledge Base')}</span>
                             <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
-                        </a>
+                        </button>
                         <a
                             href={`/ppt/?sso_token=${localStorage.getItem('token') || ''}`}
                             className="sidebar-item"
