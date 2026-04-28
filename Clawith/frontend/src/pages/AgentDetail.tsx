@@ -36,9 +36,6 @@ const getCategoryLabels = (t: any): Record<string, string> => ({
     task: t('agent.toolCategories.task'),
     communication: t('agent.toolCategories.communication'),
     search: t('agent.toolCategories.search'),
-    lightrag: t('agent.toolCategories.lightrag', 'LightRAG'),
-    rag: t('agent.toolCategories.rag', 'LightRAG'),
-    graph: t('agent.toolCategories.graph', 'LightRAG'),
     aware: t('agent.toolCategories.aware', 'Aware & Triggers'),
     social: t('agent.toolCategories.social', 'Social'),
     code: t('agent.toolCategories.code', 'Code & Execution'),
@@ -231,7 +228,6 @@ function ToolsManager({ agentId, canManage = false }: { agentId: string; canMana
     const agentInstalledTools = tools.filter(t => t.source === 'agent');
 
     const getToolGroupKey = (tool: any) => {
-        if (tool?.name?.startsWith('lightrag.')) return 'lightrag';
         return tool.category || 'general';
     };
 
