@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     # Exa AI (Search API)
     EXA_API_KEY: str = ""
 
+    # RAGFlow integration
+    RAGFLOW_URL: str = "http://localhost:8880"
 
     # Sandbox configuration
     SANDBOX_TYPE: SandboxType = SandboxType.SUBPROCESS

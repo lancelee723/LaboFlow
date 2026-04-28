@@ -119,6 +119,30 @@ def create_access_token(user_id: str, role: str, expires_delta: timedelta | None
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def create_sso_token(
+    user_id: str,
+    email: str,
+    audience: str,
+    role: str = "user",
+    ttl_minutes: int = 5,
+) -> str:
+    """Create a short-lived SSO JWT for a third-party service (e.g. RAGFlow).
+
+    The token is signed with the same JWT_SECRET_KEY and HS256 algorithm used
+    for access tokens, but carries a distinct ``aud`` claim so the receiving
+    service can reject tokens not intended for it.
+    """
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+    to_encode = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "aud": audience,
+        "exp": expire,
+    }
+    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 def decode_access_token(token: str) -> dict:
     """Decode and validate a JWT access token."""
     try:

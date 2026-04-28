@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.security import get_current_admin, get_current_user, require_role, encrypt_data
+from app.core.security import get_current_admin, get_current_user, require_role, encrypt_data, create_sso_token
 from app.database import get_db
 from app.models.org import OrgDepartment, OrgMember
 from app.models.identity import IdentityProvider
@@ -71,6 +71,25 @@ async def list_llm_providers(
 ):
     """List supported LLM providers and capabilities from registry."""
     return get_provider_manifest()
+
+
+# ─── RAGFlow SSO Token ──────────────────────────────────
+
+@router.get("/ragflow/sso-token")
+async def get_ragflow_sso_token(
+    current_user: User = Depends(get_current_user),
+):
+    """Mint a short-lived SSO JWT for the authenticated Clawith user.
+
+    The frontend opens ``{ragflow_url}/sso?token=<jwt>`` to automatically log
+    the user into RAGFlow without requiring a separate credential.
+    """
+    token = create_sso_token(
+        user_id=str(current_user.id),
+        email=current_user.email or "",
+        audience="ragflow",
+    )
+    return {"token": token, "ragflow_url": settings.RAGFLOW_URL}
 
 
 class LLMTestRequest(BaseModel):
