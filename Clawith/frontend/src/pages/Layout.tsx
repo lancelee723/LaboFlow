@@ -273,7 +273,7 @@ export default function Layout() {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const { token: ssoToken, ragflow_url } = await res.json();
-            window.open(`${ragflow_url}/sso?token=${ssoToken}`, '_blank');
+            window.open(`${ragflow_url}/sso?token=${ssoToken}`, '_blank', 'noopener,noreferrer');
         } catch (err) {
             console.error('[RAGFlow SSO] failed to open knowledge base:', err);
             alert(isChinese ? '打开知识库失败，请稍后重试' : 'Failed to open knowledge base. Please try again.');
