@@ -5,7 +5,7 @@
 # Starts all four services with hot-reload:
 #   1. Clawith backend   (uvicorn --reload on :8008)
 #   2. Clawith frontend  (vite on :3080)
-#   3. LightRAG server   (lightrag-server on :9621)
+#   3. RAGFlow           (docker compose on :8880)
 #   4. AIPPT frontend    (vite on :5173, base=/ppt/)
 #   5. NGINX             (unified entry on :3008)
 #
@@ -87,7 +87,7 @@ fi
 : "${NGINX_PORT:=3008}"
 : "${CLAWITH_FRONTEND_PORT:=3080}"
 : "${CLAWITH_BACKEND_PORT:=8008}"
-: "${LIGHTRAG_PORT:=9621}"
+: "${RAGFLOW_PORT:=8880}"
 : "${AIPPT_PORT:=5173}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -124,7 +124,7 @@ for pidfile in "$PID_DIR"/*.pid; do
     [ -f "$pidfile" ] && kill -9 "$(cat "$pidfile")" 2>/dev/null || true
     rm -f "$pidfile"
 done
-for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $LIGHTRAG_PORT $AIPPT_PORT; do
+for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $RAGFLOW_PORT $AIPPT_PORT; do
     cleanup_port "$port"
 done
 sleep 1
@@ -159,29 +159,10 @@ nohup node_modules/.bin/vite --host 0.0.0.0 --port "$CLAWITH_FRONTEND_PORT" \
 echo $! > "$PID_DIR/clawith-frontend.pid"
 cd "$ROOT"
 
-# ── 3. LightRAG ──────────────────────────────────────────────
-log "Starting LightRAG server on :$LIGHTRAG_PORT ..."
-LIGHTRAG_DIR="$ROOT/LightRAG"
-cd "$LIGHTRAG_DIR"
-if [ ! -f ".env" ]; then
-    err "LightRAG .env missing. Run ./setup-all.sh first."
-    exit 1
-fi
-if [ ! -x ".venv/bin/lightrag-server" ]; then
-    err "LightRAG .venv missing. Run ./setup-all.sh first."
-    exit 1
-fi
-# lightrag-server reads config from .env in CWD.
-# Start the venv binary directly so the pid file tracks the real server process.
-nohup env \
-    HOST=0.0.0.0 \
-    PORT="$LIGHTRAG_PORT" \
-    TOKEN_SECRET="$JWT_SECRET_KEY" \
-    JWT_ALGORITHM="$JWT_ALGORITHM" \
-    .venv/bin/lightrag-server \
-    > "$LOG_DIR/lightrag.log" 2>&1 &
-echo $! > "$PID_DIR/lightrag.pid"
-cd "$ROOT"
+# ── 3. RAGFlow ───────────────────────────────────────────────
+log "Starting RAGFlow via docker compose on :$RAGFLOW_PORT ..."
+docker compose -f "$ROOT/ragflow/docker/docker-compose.yml" --profile cpu up -d \
+    > "$LOG_DIR/ragflow.log" 2>&1 || { err "RAGFlow docker compose failed. Check $LOG_DIR/ragflow.log"; exit 1; }
 
 # ── 4. AIPPT ─────────────────────────────────────────────────
 log "Starting AIPPT on :$AIPPT_PORT ..."
@@ -208,7 +189,7 @@ cd "$ROOT"
 log "Waiting for upstream services..."
 wait_port "$CLAWITH_BACKEND_PORT"  "Clawith backend"  30 || true
 wait_port "$CLAWITH_FRONTEND_PORT" "Clawith frontend" 20 || true
-wait_port "$LIGHTRAG_PORT"         "LightRAG"         30 || true
+wait_port "$RAGFLOW_PORT"          "RAGFlow"          60 || true
 wait_port "$AIPPT_PORT"            "AIPPT"            20 || true
 
 # ── 5. NGINX ─────────────────────────────────────────────────
@@ -234,13 +215,13 @@ echo -e "${GREEN}  🦞 Labo-Flow dev environment is up${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  ${CYAN}Unified entry:${NC}   http://localhost:$NGINX_PORT"
-echo -e "  ${CYAN}Knowledge Base:${NC}  http://localhost:$NGINX_PORT/kb/"
+echo -e "  ${CYAN}Knowledge Base:${NC}  http://localhost:$NGINX_PORT/rag/"
 echo -e "  ${CYAN}AI PPT:${NC}          http://localhost:$NGINX_PORT/ppt/"
 echo ""
 echo -e "  ${CYAN}Direct access (debugging):${NC}"
 echo -e "    Clawith frontend  http://localhost:$CLAWITH_FRONTEND_PORT"
 echo -e "    Clawith backend   http://localhost:$CLAWITH_BACKEND_PORT/api/health"
-echo -e "    LightRAG          http://localhost:$LIGHTRAG_PORT"
+echo -e "    RAGFlow           http://localhost:$RAGFLOW_PORT"
 echo -e "    AIPPT             http://localhost:$AIPPT_PORT"
 echo ""
 echo -e "  Logs:   tail -f $LOG_DIR/*.log"

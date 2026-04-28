@@ -19,7 +19,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 : "${NGINX_PORT:=3008}"
 : "${CLAWITH_FRONTEND_PORT:=3080}"
 : "${CLAWITH_BACKEND_PORT:=8008}"
-: "${LIGHTRAG_PORT:=9621}"
+: "${RAGFLOW_PORT:=8880}"
 : "${AIPPT_PORT:=5173}"
 
 echo -e "${YELLOW}🛑 Stopping Labo-Flow services...${NC}"
@@ -31,6 +31,10 @@ if [ -f "$PID_DIR/nginx.pid" ]; then
     rm -f "$PID_DIR/nginx.pid"
     echo -e "  ${GREEN}✓${NC} nginx stopped"
 fi
+
+# Stop RAGFlow docker compose
+docker compose -f "$ROOT/ragflow/docker/docker-compose.yml" --profile cpu down 2>/dev/null || true
+echo -e "  ${GREEN}✓${NC} RAGFlow stopped"
 
 # Stop all other pid-file-tracked services
 for pidfile in "$PID_DIR"/*.pid; do
@@ -47,7 +51,7 @@ for pidfile in "$PID_DIR"/*.pid; do
 done
 
 # Final sweep by port — catches orphaned vite/uvicorn children
-for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $LIGHTRAG_PORT $AIPPT_PORT; do
+for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $RAGFLOW_PORT $AIPPT_PORT; do
     if command -v lsof &>/dev/null; then
         pids=$(lsof -ti:$port 2>/dev/null || true)
         if [ -n "$pids" ]; then
