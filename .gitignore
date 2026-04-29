@@ -9,11 +9,12 @@
 !aippt/**
 !Clawith/
 !Clawith/**
-# Only track ragflow's docker config (128KB), NOT the full 5.1GB source
+# Only track ragflow docker config + build files, NOT the full 5.1GB source
 !ragflow/
 ragflow/*
 !ragflow/docker/
 !ragflow/docker/**
+!ragflow/Dockerfile.laboflow
 
 
 # ── Allow specific root-level files ─────────────
@@ -87,6 +88,7 @@ build/
 
 # Docker
 **/.dockerignore
+!ragflow/.dockerignore
 docker-compose.override.yml
 
 # Data & Storage

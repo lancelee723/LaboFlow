@@ -23,6 +23,7 @@ IMAGES=(
   "clawith-bridge|Clawith/bridge|Clawith/bridge/Dockerfile"
   "aippt|aippt|aippt/Dockerfile"
   "nginx|nginx|nginx/Dockerfile"
+  "ragflow|ragflow|ragflow/Dockerfile.laboflow"
 )
 
 # 敏感文件模式：构建上下文中若存在且未被 .dockerignore 排除则拒绝构建
