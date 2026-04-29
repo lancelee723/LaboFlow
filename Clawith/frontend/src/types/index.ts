@@ -39,6 +39,7 @@ export interface Agent {
     agent_type?: 'native' | 'openclaw';
     openclaw_last_seen?: string;
     bridge_mode?: 'disabled' | 'enabled' | 'auto';
+    unread_count?: number;
     created_at: string;
     last_active_at?: string;
 }
