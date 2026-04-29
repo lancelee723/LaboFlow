@@ -2540,6 +2540,7 @@ async def clean_orphaned_mcp_tools():
         stmt = delete(Tool).where(
             and_(
                 Tool.type == "mcp",
+                Tool.source != "builtin",  # never delete seeded builtin MCP tools
                 Tool.tenant_id == None,
                 ~Tool.id.in_(assigned_ids) if assigned_ids else True
             )
