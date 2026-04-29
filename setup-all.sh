@@ -155,6 +155,26 @@ if [ "$RAGFLOW_READY" = false ]; then
     warn "Check logs: docker compose $RAGFLOW_COMPOSE logs --tail=30"
 fi
 
+# RAGFlow MCP module sanity check
+if [ -f "$ROOT/ragflow/mcp/server/server.py" ]; then
+    ok "RAGFlow MCP server script present"
+    if [ -f "$ROOT/ragflow/.venv/bin/python" ] && \
+       "$ROOT/ragflow/.venv/bin/python" -c "import click, starlette" 2>/dev/null; then
+        ok "RAGFlow MCP dependencies installed"
+    else
+        warn "RAGFlow MCP deps may be missing — re-run 'cd ragflow && uv sync --all-extras'"
+    fi
+else
+    warn "ragflow/mcp/server/server.py missing — RAGFlow checkout incomplete"
+fi
+
+# Verify docker-compose has MCP enabled (production deploy readiness, optional)
+if grep -q "^[[:space:]]*- --enable-mcpserver" "$ROOT/ragflow/docker/docker-compose.yml" 2>/dev/null; then
+    ok "RAGFlow MCP enabled in docker-compose (production deploy ready)"
+else
+    warn "RAGFlow MCP NOT enabled in docker-compose.yml — fine for dev, required for docker prod deploy"
+fi
+
 # ── 5. AIPPT ─────────────────────────────────────────────────
 step "[5/5] AIPPT"
 cd "$ROOT/aippt"

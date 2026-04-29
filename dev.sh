@@ -88,6 +88,7 @@ fi
 : "${CLAWITH_FRONTEND_PORT:=3080}"
 : "${CLAWITH_BACKEND_PORT:=8008}"
 : "${RAGFLOW_PORT:=8880}"
+: "${RAGFLOW_MCP_PORT:=9382}"
 : "${AIPPT_PORT:=5173}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -124,7 +125,7 @@ for pidfile in "$PID_DIR"/*.pid; do
     [ -f "$pidfile" ] && kill -9 "$(cat "$pidfile")" 2>/dev/null || true
     rm -f "$pidfile"
 done
-for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $RAGFLOW_PORT $AIPPT_PORT; do
+for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $RAGFLOW_PORT $RAGFLOW_MCP_PORT $AIPPT_PORT; do
     cleanup_port "$port"
 done
 sleep 1
@@ -141,6 +142,7 @@ nohup env PYTHONUNBUFFERED=1 \
     JWT_SECRET_KEY="$JWT_SECRET_KEY" \
     DATABASE_URL="$DATABASE_URL" \
     PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
+    RAGFLOW_MCP_URL="${RAGFLOW_MCP_URL:-http://localhost:$RAGFLOW_MCP_PORT/mcp}" \
     .venv/bin/uvicorn app.main:app \
         --host 0.0.0.0 --port "$CLAWITH_BACKEND_PORT" --reload \
     > "$LOG_DIR/clawith-backend.log" 2>&1 &
@@ -159,10 +161,77 @@ nohup node_modules/.bin/vite --host 0.0.0.0 --port "$CLAWITH_FRONTEND_PORT" \
 echo $! > "$PID_DIR/clawith-frontend.pid"
 cd "$ROOT"
 
-# ── 3. RAGFlow ───────────────────────────────────────────────
-log "Starting RAGFlow via docker compose on :$RAGFLOW_PORT ..."
-docker compose -f "$ROOT/ragflow/docker/docker-compose.yml" --profile cpu up -d \
-    > "$LOG_DIR/ragflow.log" 2>&1 || { err "RAGFlow docker compose failed. Check $LOG_DIR/ragflow.log"; exit 1; }
+# ── 3. RAGFlow (dev mode) ────────────────────────────────────
+RAGFLOW_DIR="$ROOT/ragflow"
+log "Starting RAGFlow base services (MySQL/Redis/MinIO/ES) via docker compose..."
+# Start infrastructure dependencies only (no ragflow container)
+docker compose -f "$RAGFLOW_DIR/docker/docker-compose-base.yml" --profile elasticsearch up -d \
+    > "$LOG_DIR/ragflow-base.log" 2>&1 \
+    || { err "RAGFlow base services failed. Check $LOG_DIR/ragflow-base.log"; exit 1; }
+
+log "Waiting for Elasticsearch on :1200 ..."
+for _i in $(seq 1 60); do
+    if curl -s -o /dev/null -m 2 -u "elastic:infini_rag_flow" "http://localhost:1200/_cluster/health" 2>/dev/null; then
+        ok "Elasticsearch ready (${_i}s)"; break
+    fi
+    sleep 1
+done
+
+log "Starting RAGFlow Python API on :9380 ..."
+# Check python exists AND has packages installed (not empty venv)
+if [ ! -f "$RAGFLOW_DIR/.venv/bin/python" ] || \
+   ! "$RAGFLOW_DIR/.venv/bin/python" -c "import quart" 2>/dev/null; then
+    log "RAGFlow .venv not ready — running uv sync (may take a moment)..."
+    cd "$RAGFLOW_DIR"
+    uv sync --python 3.12 --all-extras --quiet \
+        > "$LOG_DIR/ragflow-uv-sync.log" 2>&1 \
+        || { err "uv sync failed. Check $LOG_DIR/ragflow-uv-sync.log"; exit 1; }
+    cd "$ROOT"
+fi
+cd "$RAGFLOW_DIR"
+nohup env PYTHONPATH="$RAGFLOW_DIR" \
+    HF_ENDPOINT=https://hf-mirror.com \
+    CLAWITH_JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+    "$RAGFLOW_DIR/.venv/bin/python" api/ragflow_server.py \
+    > "$LOG_DIR/ragflow-api.log" 2>&1 &
+echo $! > "$PID_DIR/ragflow-api.pid"
+
+log "Starting RAGFlow task executor (worker 0) ..."
+nohup env PYTHONPATH="$RAGFLOW_DIR" \
+    HF_ENDPOINT=https://hf-mirror.com \
+    CLAWITH_JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+    "$RAGFLOW_DIR/.venv/bin/python" rag/svr/task_executor.py 0 \
+    > "$LOG_DIR/ragflow-task-executor.log" 2>&1 &
+echo $! > "$PID_DIR/ragflow-task-executor.pid"
+cd "$ROOT"
+
+log "Starting RAGFlow MCP server on :$RAGFLOW_MCP_PORT (mode=host) ..."
+cd "$RAGFLOW_DIR"
+nohup env PYTHONPATH="$RAGFLOW_DIR" \
+    HF_ENDPOINT=https://hf-mirror.com \
+    "$RAGFLOW_DIR/.venv/bin/python" mcp/server/server.py \
+        --host=127.0.0.1 \
+        --port="$RAGFLOW_MCP_PORT" \
+        --base-url=http://127.0.0.1:9380 \
+        --mode=host \
+    > "$LOG_DIR/ragflow-mcp.log" 2>&1 &
+echo $! > "$PID_DIR/ragflow-mcp.pid"
+cd "$ROOT"
+
+log "Starting RAGFlow web frontend on :$RAGFLOW_PORT ..."
+RAGFLOW_WEB_DIR="$RAGFLOW_DIR/web"
+if [ ! -f "$RAGFLOW_WEB_DIR/node_modules/.bin/vite" ]; then
+    log "RAGFlow web node_modules not ready — running npm install..."
+    cd "$RAGFLOW_WEB_DIR"
+    npm install --silent > "$LOG_DIR/ragflow-npm-install.log" 2>&1 \
+        || { err "RAGFlow npm install failed. Check $LOG_DIR/ragflow-npm-install.log"; exit 1; }
+    cd "$ROOT"
+fi
+cd "$RAGFLOW_WEB_DIR"
+nohup env PORT="$RAGFLOW_PORT" npm run dev \
+    > "$LOG_DIR/ragflow-web.log" 2>&1 &
+echo $! > "$PID_DIR/ragflow-web.pid"
+cd "$ROOT"
 
 # ── 4. AIPPT ─────────────────────────────────────────────────
 log "Starting AIPPT on :$AIPPT_PORT ..."
@@ -190,6 +259,7 @@ log "Waiting for upstream services..."
 wait_port "$CLAWITH_BACKEND_PORT"  "Clawith backend"  30 || true
 wait_port "$CLAWITH_FRONTEND_PORT" "Clawith frontend" 20 || true
 wait_port "$RAGFLOW_PORT"          "RAGFlow"          180 || true
+wait_port "$RAGFLOW_MCP_PORT"      "RAGFlow MCP"      30  || true
 wait_port "$AIPPT_PORT"            "AIPPT"            20 || true
 
 # ── 5. NGINX ─────────────────────────────────────────────────
@@ -222,6 +292,7 @@ echo -e "  ${CYAN}Direct access (debugging):${NC}"
 echo -e "    Clawith frontend  http://localhost:$CLAWITH_FRONTEND_PORT"
 echo -e "    Clawith backend   http://localhost:$CLAWITH_BACKEND_PORT/api/health"
 echo -e "    RAGFlow           http://localhost:$RAGFLOW_PORT"
+echo -e "    RAGFlow MCP       http://localhost:$RAGFLOW_MCP_PORT/mcp  (server-to-server)"
 echo -e "    AIPPT             http://localhost:$AIPPT_PORT"
 echo ""
 echo -e "  Logs:   tail -f $LOG_DIR/*.log"
