@@ -3690,8 +3690,21 @@ async def _execute_mcp_tool(tool_name: str, arguments: dict, agent_id=None) -> s
                 direct_api_key = await get_atlassian_api_key_for_agent(agent_id)
             except Exception:
                 pass
+        # ── RAGFlow special-case: friendly preflight when api_key missing ──
+        if tool.mcp_server_name == "RAGFlow" and not direct_api_key:
+            return (
+                "❌ This agent has no RAGFlow API key configured. "
+                "Open Agent settings → RAGFlow Retrieval → paste your API Key. "
+                "Generate one via the Knowledge Base sidebar (RAGFlow Profile → API Keys)."
+            )
+
         client = MCPClient(mcp_url, api_key=direct_api_key)
-        return await client.call_tool(mcp_name, arguments)
+        raw = await client.call_tool(mcp_name, arguments)
+
+        # ── RAGFlow special-case: format JSON → markdown citations ──
+        if tool.mcp_server_name == "RAGFlow":
+            return _format_ragflow_response(raw)
+        return raw
 
     except Exception as e:
         logger.exception(f"[MCP] Tool execution error: {tool_name}")

@@ -81,3 +81,57 @@ def test_format_ragflow_null_similarity_does_not_crash():
              "dataset_name": "DS", "document_id": "d1", "dataset_id": "s1", "positions": []}
     out = _format_ragflow_response(json.dumps({"chunks": [chunk], "pagination": {}}))
     assert "A.pdf" in out  # must not raise
+
+
+# ── _execute_mcp_tool RAGFlow special-case ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_ragflow_missing_api_key_returns_helpful_message(monkeypatch):
+    """If the RAGFlow Tool exists but the agent has no api_key configured,
+    we should return a friendly hint without hitting the network."""
+    from app.services import agent_tools
+
+    class FakeTool:
+        name = "ragflow_retrieval"
+        type = "mcp"
+        mcp_server_url = "http://localhost:9382/mcp"
+        mcp_server_name = "RAGFlow"
+        mcp_tool_name = "ragflow_retrieval"
+        config = {}
+        id = 999
+
+    class FakeAgentTool:
+        config = {}  # no api_key
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return FakeResult.next_value
+        next_value = None
+
+    class FakeDB:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def execute(self, _stmt):
+            r = FakeResult()
+            FakeResult.next_value = self._sequence.pop(0) if self._sequence else None
+            return r
+        def __init__(self, sequence):
+            self._sequence = sequence
+
+    # Monkeypatch async_session to yield Tool then AgentTool
+    fake_db = FakeDB([FakeTool(), FakeAgentTool()])
+    monkeypatch.setattr(agent_tools, "async_session", lambda: fake_db)
+
+    # Monkeypatch MCPClient — must NOT be called when api_key missing
+    called = {"hit": False}
+    class FakeMCP:
+        def __init__(self, *a, **kw): called["hit"] = True
+        async def call_tool(self, *a, **kw): return ""
+    monkeypatch.setattr("app.services.mcp_client.MCPClient", FakeMCP)
+
+    result = await agent_tools._execute_mcp_tool(
+        "ragflow_retrieval", {"question": "test"}, agent_id=1
+    )
+    assert "no RAGFlow API key" in result.lower() or "api key" in result.lower()
+    assert called["hit"] is False, "MCPClient should not be created when api_key missing"
