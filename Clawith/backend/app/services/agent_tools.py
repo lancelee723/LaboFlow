@@ -3585,6 +3585,58 @@ async def _send_file_via_slack(agent_id, config, file_path: Path, member_name: s
         return f"Failed to send file via Slack: {e}"
 
 
+def _format_ragflow_response(raw: str) -> str:
+    """Convert RAGFlow MCP retrieval JSON output into compact markdown citations.
+
+    The MCP server returns a JSON string in TextContent. We unpack it,
+    sort/preserve the chunks, and produce a markdown citation list that the
+    LLM can read and quote back to the user. Doc/dataset IDs are kept as a
+    trailing line so the LLM can scope follow-up queries by document.
+
+    On any parse failure, the raw string is returned unchanged so the LLM
+    still sees something rather than an opaque error.
+    """
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+
+    chunks = data.get("chunks", [])
+    if not chunks:
+        return "Knowledge base returned no relevant results for this query."
+
+    pagination = data.get("pagination", {})
+    total = pagination.get("total_chunks", len(chunks))
+
+    lines = [
+        f"Knowledge base returned {len(chunks)} chunks "
+        f"(of {total} matching) — sorted by relevance:\n"
+    ]
+
+    for i, c in enumerate(chunks, 1):
+        sim = c.get("similarity") or 0
+        sim_pct = f"{int(sim * 100)}%"
+        doc_name = c.get("document_keyword") or c.get("document_name") or "(unknown doc)"
+        ds_name = c.get("dataset_name") or "(unknown dataset)"
+        positions = c.get("positions") or []
+        page = None
+        if positions and isinstance(positions[0], list) and positions[0]:
+            page = positions[0][0]
+        page_str = f" · p.{page}" if page else ""
+        content = (c.get("content") or "").strip().replace("\n", " ")
+        if len(content) > 400:
+            content = content[:400] + "…"
+        doc_id = c.get("document_id", "")
+        ds_id = c.get("dataset_id", "")
+        lines.append(
+            f"[{i}] **{doc_name}**{page_str} · {ds_name} · sim {sim_pct}\n"
+            f"> {content}\n"
+            f"  (doc_id={doc_id}, dataset_id={ds_id})"
+        )
+
+    return "\n\n".join(lines)
+
+
 async def _execute_mcp_tool(tool_name: str, arguments: dict, agent_id=None) -> str:
     """Execute a tool via MCP if it exists in the DB as an MCP tool."""
     try:
