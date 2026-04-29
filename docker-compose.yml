@@ -49,6 +49,7 @@ services:
       CORS_ORIGINS: '["*"]'
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
       DOCKER_NETWORK: laboflow
+      RAGFLOW_MCP_URL: http://ragflow-cpu:9382/mcp
     volumes:
       - agent_data:/data/agents
     depends_on:
