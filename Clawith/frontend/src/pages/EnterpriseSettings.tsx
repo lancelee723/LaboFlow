@@ -2044,6 +2044,7 @@ export default function EnterpriseSettings() {
         custom: t('agent.toolCategories.custom'),
         general: t('agent.toolCategories.general'),
         agentbay: t('agent.toolCategories.agentbay', 'AgentBay'),
+        knowledge: t('agent.toolCategories.knowledge', 'Knowledge Base'),
     };
     const [toolsView, setToolsView] = useState<'global' | 'agent-installed'>('global');
     const [agentInstalledTools, setAgentInstalledTools] = useState<any[]>([]);
