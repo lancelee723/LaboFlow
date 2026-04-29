@@ -1,5 +1,7 @@
 """Seed builtin tools into the database on startup."""
 
+import os
+
 from loguru import logger
 from sqlalchemy import select
 from app.database import async_session
@@ -2338,6 +2340,68 @@ PLAYWRIGHT_TOOLS = [
     },
 ]
 
+# ── RAGFlow MCP tool (Knowledge Base retrieval) ──────────────────
+RAGFLOW_TOOLS = [
+    {
+        "name": "ragflow_retrieval",
+        "display_name": "RAGFlow Retrieval",
+        "description": (
+            "Retrieve relevant chunks from the user's RAGFlow knowledge base. "
+            "Each user must paste their own RAGFlow API key in this tool's settings; "
+            "the key determines which datasets are visible. "
+            "When asked to look something up in the knowledge base, call this tool "
+            "with the user's question. Optionally narrow the search to specific "
+            "datasets by passing dataset_ids (the available dataset list with their "
+            "descriptions and IDs is included in the runtime tool description "
+            "returned by the MCP server)."
+        ),
+        "category": "knowledge",
+        "icon": "📚",
+        "is_default": False,
+        "type": "mcp",
+        "mcp_server_url": os.getenv("RAGFLOW_MCP_URL", "http://localhost:9382/mcp"),
+        "mcp_server_name": "RAGFlow",
+        "mcp_tool_name": "ragflow_retrieval",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question or query to search for.",
+                },
+                "dataset_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional. Array of dataset IDs to scope the search. "
+                        "Leave empty/omit to search across ALL datasets the user "
+                        "has access to. The list of available dataset names + IDs "
+                        "is provided by the MCP server at runtime."
+                    ),
+                },
+            },
+            "required": ["question"],
+        },
+        "config": {},
+        "config_schema": {
+            "fields": [
+                {
+                    "key": "api_key",
+                    "label": "RAGFlow API Key",
+                    "type": "password",
+                    "default": "",
+                    "placeholder": "ragflow-xxxxxxxxxxxxxxxxxxxxxxxx (generate at /rag/profile)",
+                    "help": (
+                        "Open the Knowledge Base sidebar item to log in to RAGFlow, "
+                        "then go to Profile → API Keys to generate one. The key "
+                        "determines which RAGFlow account's datasets the agent can search."
+                    ),
+                },
+            ]
+        },
+    },
+]
+
 # Merge all tool lists into the final BUILTIN_TOOLS that seed_builtin_tools() iterates.
 BUILTIN_TOOLS = [
     *BUILTIN_TOOLS,
@@ -2345,6 +2409,8 @@ BUILTIN_TOOLS = [
     *AGENTBAY_TOOLS,
     # ── Built-in Playwright Browser Tools ──
     *PLAYWRIGHT_TOOLS,
+    # ── RAGFlow MCP Tools ──
+    *RAGFLOW_TOOLS,
 ]
 
 
@@ -2363,7 +2429,7 @@ async def seed_builtin_tools():
                     name=t["name"],
                     display_name=t["display_name"],
                     description=t["description"],
-                    type="builtin",
+                    type=t.get("type", "builtin"),
                     category=t["category"],
                     icon=t["icon"],
                     is_default=t["is_default"],
@@ -2371,6 +2437,9 @@ async def seed_builtin_tools():
                     config=t.get("config", {}),
                     config_schema=t.get("config_schema", {}),
                     source="builtin",
+                    mcp_server_url=t.get("mcp_server_url"),
+                    mcp_server_name=t.get("mcp_server_name"),
+                    mcp_tool_name=t.get("mcp_tool_name"),
                 )
                 db.add(tool)
                 await db.flush()  # get tool.id
@@ -2405,6 +2474,20 @@ async def seed_builtin_tools():
                 if existing.parameters_schema != t["parameters_schema"]:
                     existing.parameters_schema = t["parameters_schema"]
                     updated_fields.append("parameters_schema")
+                # ── MCP fields sync (type=mcp tools whose URL shifts between deploy modes) ──
+                if t.get("type") == "mcp":
+                    if existing.type != "mcp":
+                        existing.type = "mcp"
+                        updated_fields.append("type")
+                    if existing.mcp_server_url != t.get("mcp_server_url"):
+                        existing.mcp_server_url = t.get("mcp_server_url")
+                        updated_fields.append("mcp_server_url")
+                    if existing.mcp_server_name != t.get("mcp_server_name"):
+                        existing.mcp_server_name = t.get("mcp_server_name")
+                        updated_fields.append("mcp_server_name")
+                    if existing.mcp_tool_name != t.get("mcp_tool_name"):
+                        existing.mcp_tool_name = t.get("mcp_tool_name")
+                        updated_fields.append("mcp_tool_name")
                 if updated_fields:
                     logger.info(f"[ToolSeeder] Updated {', '.join(updated_fields)}: {t['name']}")
 
@@ -2467,6 +2550,29 @@ async def clean_orphaned_mcp_tools():
         
         if deleted_count > 0:
             logger.info(f"[ToolSeeder] Cleaned up {deleted_count} orphaned MCP tools")
+
+async def purge_lightrag_tools():
+    """Remove legacy LightRAG tools left over from before the RAGFlow migration."""
+    from sqlalchemy import delete as sa_delete
+    from app.models.tool import AgentTool
+
+    async with async_session() as db:
+        # Delete FK references first
+        await db.execute(
+            sa_delete(AgentTool).where(
+                AgentTool.tool_id.in_(
+                    select(Tool.id).where(Tool.name.like("lightrag.%"))
+                )
+            )
+        )
+        result = await db.execute(
+            sa_delete(Tool).where(Tool.name.like("lightrag.%"))
+        )
+        deleted_count = result.rowcount
+        await db.commit()
+        if deleted_count > 0:
+            logger.info(f"[ToolSeeder] Purged {deleted_count} legacy LightRAG tools")
+
 
 # ── Atlassian Rovo MCP Server Integration ──────────────────────────────────
 
