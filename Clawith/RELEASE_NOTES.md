@@ -1,3 +1,58 @@
+# v1.9.0 — OKR Engine, Workspace Collaboration, Multi-Channel Expansion & Security Hardening
+
+## What's New
+
+### OKR Management System
+- Full OKR data model & API (Objectives + Key Results, company dashboard)
+- Auto-provisioned OKR Agent — created when tenant first enables OKR
+- Daily progress collection & reporting via A2A; skips non-business days
+- KR Content Update Tool for agents; OKR Settings page in Enterprise Settings
+
+### Workspace Collaboration
+- Rich file preview sidebar (images, HTML, PDF, Markdown)
+- Preview lock to prevent auto-switching during agent writes
+- Streaming draft parameters display; file deletion confirmation
+- Auto-archive of agent-generated documents into folders
+
+### New Channel Integrations
+- WeChat Work (微信), WhatsApp, Google Workspace channels
+- DingTalk rich media: image, file, audio, video message types
+
+### New Agent Tools
+- Format conversion: Word / Excel / PPT / PDF
+- Feishu document search; platform message priority routing (`send_platform_message`)
+
+### A2A Enhancements
+- `a2a_async_enabled` moved to Tenant level (was per-Agent); configure in Enterprise Settings
+- A2A session visibility in "Other Users" tab; user-friendly notification titles
+
+### Security Hardening
+- 4 critical vulnerabilities patched: unauthenticated API key generation, LLM API keys now AES-256 encrypted, default JWT secret blocked in production, multi-tenant isolation gaps fixed
+- Stronger `execute_code` bwrap sandbox; plaintext credential fields removed
+
+### Performance
+- Session list N+1 query fix: 1+2N queries → 3–4 bulk queries
+- A2A wake reflection capped at 2 tool-call rounds
+
+### Bug Fixes
+- Backend startup hang on DB bootstrap
+- Feishu duplicate WebSocket connection
+- Approvals tab crash on non-array responses
+- `ensure_identity_provider` missing in registration flow
+- Tool call message pairs split apart (#416); malformed JSON in write_file (#212)
+- User profile PATCH not persisting (#213); org member identity mapping for SSO (#404)
+
+## Upgrade Guide
+> **Database migration required.** Run `alembic upgrade head` before starting.
+
+### Breaking Changes
+1. `a2a_async_enabled` moved from Agent → Tenant. Migration sets tenant flag to `FALSE`.
+2. `send_web_message` renamed to `send_platform_message`. Update `soul.md` files.
+3. Plaintext credential fields removed. Back up credentials before migrating.
+4. JWT secret enforcement: backend refuses to start with default `SECRET_KEY` unless `DEBUG=true`.
+
+---
+
 # v1.8.3-beta.2 — A2A Async Communication, Image Context & Search Tools
 
 ## What's New

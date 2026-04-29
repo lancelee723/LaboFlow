@@ -1,6 +1,8 @@
 """Clawith Backend — FastAPI Application Entry Point."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
+import shutil
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,34 @@ from app.core.middleware import TraceIdMiddleware
 from app.schemas.schemas import HealthResponse
 
 settings = get_settings()
+
+
+def _log_bwrap_startup_status() -> None:
+    """Emit a startup diagnostic for bubblewrap availability.
+
+    We only warn when bwrap is missing so deployments can still start in
+    degraded mode. The subprocess sandbox will fall back to the hardened local
+    execution path in that case.
+    """
+    in_container = Path("/.dockerenv").exists()
+    bwrap_path = shutil.which("bwrap")
+
+    if bwrap_path:
+        location = "container" if in_container else "host"
+        logger.info(f"[startup] bubblewrap detected at {bwrap_path} ({location})")
+        return
+
+    if in_container:
+        logger.warning(
+            "[startup] bubblewrap (bwrap) is not installed in the backend container. "
+            "The service will still start, but execute_code will run without bwrap filesystem isolation."
+        )
+        return
+
+    logger.warning(
+        "[startup] bubblewrap (bwrap) is not installed on the host. "
+        "The service will still start, but execute_code will run without bwrap filesystem isolation."
+    )
 
 
 async def _start_ss_local() -> None:
@@ -86,6 +116,14 @@ async def lifespan(app: FastAPI):
     configure_logging()
     intercept_standard_logging()
     logger.info("[startup] Logging configured")
+    _log_bwrap_startup_status()
+
+    # Warn about default JWT secrets in production
+    if "change-me" in settings.SECRET_KEY.lower() or "change-me" in settings.JWT_SECRET_KEY.lower():
+        logger.warning(
+            "[startup] WARNING: SECRET_KEY or JWT_SECRET_KEY contains default 'change-me' value. "
+            "This is insecure for production. Set unique secrets in your .env file."
+        )
 
     # Warn about default JWT secrets in production
     if "change-me" in settings.SECRET_KEY.lower() or "change-me" in settings.JWT_SECRET_KEY.lower():
@@ -103,6 +141,7 @@ async def lifespan(app: FastAPI):
     from app.services.feishu_ws import feishu_ws_manager
     from app.services.dingtalk_stream import dingtalk_stream_manager
     from app.services.wecom_stream import wecom_stream_manager
+    from app.services.wechat_channel import wechat_poll_manager
     from app.services.discord_gateway import discord_gateway_manager
 
     # ── Step 0: Ensure all DB tables exist (idempotent, safe to run on every startup) ──
@@ -140,6 +179,7 @@ async def lifespan(app: FastAPI):
         logger.info("[startup] Database tables ready")
     except Exception as e:
         logger.warning(f"[startup] create_all failed: {e}")
+
 
     # Startup: seed data — each step isolated so one failure doesn't block others
     logger.info("[startup] seeding...")
@@ -183,9 +223,10 @@ async def lifespan(app: FastAPI):
         print(f"[startup] ⚠️ enterprise_info migration failed: {e}", flush=True)
 
     try:
-        from app.services.tool_seeder import seed_builtin_tools, clean_orphaned_mcp_tools
+        from app.services.tool_seeder import seed_builtin_tools, clean_orphaned_mcp_tools, purge_lightrag_tools
         await seed_builtin_tools()
         await clean_orphaned_mcp_tools()
+        await purge_lightrag_tools()
     except Exception as e:
         logger.warning(f"[startup] Builtin tools seed or cleanup failed: {e}")
 
@@ -218,6 +259,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[startup] Default agents seed failed: {e}")
 
+    try:
+        # Seed OKR Agent independently (supports retroactive creation on existing deployments)
+        from app.services.agent_seeder import seed_okr_agent
+        await seed_okr_agent()
+    except Exception as e:
+        logger.warning(f"[startup] OKR Agent seed failed: {e}")
+
+    try:
+        # Patch existing OKR Agent with new fields/tools/triggers added in later versions
+        from app.services.agent_seeder import patch_existing_okr_agent
+        await patch_existing_okr_agent()
+    except Exception as e:
+        logger.warning(f"[startup] OKR Agent patch failed: {e}")
+
     # Start background tasks (always, even if seeding failed)
     try:
         logger.info("[startup] starting background tasks...")
@@ -240,6 +295,7 @@ async def lifespan(app: FastAPI):
             ("feishu_ws", feishu_ws_manager.start_all()),
             ("dingtalk_stream", dingtalk_stream_manager.start_all()),
             ("wecom_stream", wecom_stream_manager.start_all()),
+            ("wechat_poll", wechat_poll_manager.start_all()),
             ("discord_gw", discord_gateway_manager.start_all()),
             ("playwright_cleanup", _playwright_cleanup_loop()),
         ]:
@@ -309,7 +365,9 @@ from app.api.chat_sessions import router as chat_sessions_router
 from app.api.slack import router as slack_router
 from app.api.discord_bot import router as discord_router
 from app.api.dingtalk import router as dingtalk_router
+from app.api.google_workspace import router as google_workspace_router
 from app.api.wecom import router as wecom_router
+from app.api.wechat import router as wechat_router
 from app.api.teams import router as teams_router
 from app.api.triggers import router as triggers_router
 
@@ -322,6 +380,7 @@ from app.api.admin import router as admin_router
 from app.api.pages import router as pages_router, public_router as pages_public_router
 from app.api.agent_credentials import router as credentials_router
 from app.api.agentbay_control import router as agentbay_control_router
+from app.api.okr import router as okr_router
 
 from app.api.presentations import router as presentations_router
 from app.api.templates import router as templates_router
@@ -349,7 +408,9 @@ app.include_router(users_router, prefix=settings.API_PREFIX)
 app.include_router(slack_router, prefix=settings.API_PREFIX)
 app.include_router(discord_router, prefix=settings.API_PREFIX)
 app.include_router(dingtalk_router, prefix=settings.API_PREFIX)
+app.include_router(google_workspace_router, prefix=settings.API_PREFIX)
 app.include_router(wecom_router, prefix=settings.API_PREFIX)
+app.include_router(wechat_router, prefix=settings.API_PREFIX)
 app.include_router(teams_router, prefix=settings.API_PREFIX)
 
 app.include_router(atlassian_router, prefix=settings.API_PREFIX)
@@ -367,6 +428,7 @@ app.include_router(pages_router, prefix=settings.API_PREFIX)
 app.include_router(pages_public_router)  # Public endpoint for /p/{short_id}, no API prefix
 app.include_router(credentials_router, prefix=settings.API_PREFIX)
 app.include_router(agentbay_control_router, prefix=settings.API_PREFIX)
+app.include_router(okr_router)  # OKR — self-prefixed at /api/okr
 app.include_router(presentations_router, prefix=settings.API_PREFIX)
 app.include_router(templates_router, prefix=settings.API_PREFIX)
 

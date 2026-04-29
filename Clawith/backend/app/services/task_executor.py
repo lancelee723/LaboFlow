@@ -58,24 +58,6 @@ async def execute_task(task_id: uuid.UUID, agent_id: uuid.UUID) -> None:
             if task_type == 'supervision':
                 await _restore_supervision_status(task_id)
             return
-
-        model_id = agent.primary_model_id or agent.fallback_model_id
-        if not model_id:
-            await _log_error(task_id, f"{agent.name} 未配置 LLM 模型，无法执行任务")
-            if task_type == 'supervision':
-                await _restore_supervision_status(task_id)
-            return
-
-        model_result = await db.execute(
-            select(LLMModel).where(LLMModel.id == model_id, LLMModel.tenant_id == agent.tenant_id)
-        )
-        model = model_result.scalar_one_or_none()
-        if not model:
-            await _log_error(task_id, "配置的模型不存在")
-            if task_type == 'supervision':
-                await _restore_supervision_status(task_id)
-            return
-
         agent_name = agent.name
 
     # Step 3: Build full agent context (same as chat dialog)
@@ -113,39 +95,8 @@ You are now in TASK EXECUTION MODE (not a conversation). A task has been assigne
             user_prompt += f"\n任务描述: {task_description}"
         user_prompt += "\n\n请认真完成此任务，给出详细的执行结果。"
 
-    # Step 4: Call LLM with tool loop
-    from app.services.llm_utils import create_llm_client, get_max_tokens, LLMMessage, LLMError, get_model_api_key
-
-    messages = [
-        LLMMessage(role="system", content=static_prompt, dynamic_content=dynamic_prompt),
-        LLMMessage(role="user", content=user_prompt),
-    ]
-
-    # Normalize base_url
-    if not model.base_url:
-        await _log_error(task_id, f"未配置 {model.provider} 的 API 地址")
-        if task_type == 'supervision':
-            await _restore_supervision_status(task_id)
-        return
-
-    # Create unified LLM client
-    try:
-        client = create_llm_client(
-            provider=model.provider,
-            api_key=get_model_api_key(model),
-            model=model.model,
-            base_url=model.base_url,
-            timeout=float(getattr(model, 'request_timeout', None) or 1200.0),
-        )
-    except Exception as e:
-        await _log_error(task_id, f"创建 LLM 客户端失败: {e}")
-        if task_type == 'supervision':
-            await _restore_supervision_status(task_id)
-        return
-
-    # Load tools (same as chat dialog)
-    from app.services.agent_tools import execute_tool, get_agent_tools_for_llm
-    tools_for_llm = await get_agent_tools_for_llm(agent_id)
+    # Step 4: Call LLM with unified failover support
+    from app.services.llm import call_agent_llm_with_tools
 
     try:
         logger.info(f"[TaskExec] Calling LLM with tools for task: {task_title}")
