@@ -26,6 +26,7 @@ ss-nodes.json
 
 # Bundled bridge binary (built separately via bridge/clawith-bridge.spec)
 backend/app/static/bridge/clawith-bridge.exe
+backend/app/static/bridge/*.whl
 
 # Ignore Antigravity / Claude Code agent configurations
 .agent/

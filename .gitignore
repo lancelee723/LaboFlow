@@ -5,15 +5,20 @@
 *
 
 # ── Allow specific folders ──────────────────────
-!aiPPT/
+!aippt/
+!aippt/**
 !Clawith/
-!LightRAG/
-!docs/
-!docs/**
+!Clawith/**
+# Only track ragflow's docker config (128KB), NOT the full 5.1GB source
+!ragflow/
+ragflow/*
+!ragflow/docker/
+!ragflow/docker/**
+
 
 # ── Allow specific root-level files ─────────────
 !.env.example
-!README.md
+!/README.md
 !docker-compose.yml
 !nginx.conf
 !nginx/
@@ -21,9 +26,12 @@
 !dev.sh
 !setup-all.sh
 !stop.sh
+!docker-image-manager.sh
+!User-Manual.md
+
 
 # ── Always include .gitignore itself ────────────
-!.gitignore
+!/.gitignore
 
 # ========== Common ignores (for allowed folders) ==========
 
