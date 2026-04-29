@@ -622,7 +622,8 @@
       "code": "Code & Execution",
       "discovery": "Discovery",
       "feishu": "Feishu / Lark",
-      "agentbay": "AgentBay"
+      "agentbay": "AgentBay",
+      "knowledge": "Knowledge Base"
     },
     "upload": {
       "success": "Upload successful",

@@ -604,7 +604,8 @@
         "code": "代码与执行",
         "discovery": "发现",
         "feishu": "飞书",
-        "agentbay": "AgentBay"
+        "agentbay": "AgentBay",
+        "knowledge": "知识库"
       },
       "upload": {
         "success": "上传成功",
