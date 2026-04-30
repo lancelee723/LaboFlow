@@ -51,6 +51,42 @@ def _is_local_or_loopback_host(host: str | None) -> bool:
         return False
 
 
+def _request_origin_parts(request: Request) -> tuple[str, str, int | None]:
+    """Return (scheme, host, port) from forwarded headers when available."""
+    headers = request.headers
+    xf_proto = (headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    xf_host = (headers.get("x-forwarded-host") or "").split(",")[0].strip()
+    host_header = headers.get("host") or ""
+
+    scheme = xf_proto or request.url.scheme or "http"
+    authority = xf_host or host_header
+    if not authority:
+        authority = request.url.hostname or "localhost"
+
+    if authority.startswith("["):
+        # IPv6: [::1]:3008
+        end = authority.find("]")
+        host = authority[: end + 1] if end != -1 else authority
+        port_str = authority[end + 2:] if end != -1 and len(authority) > end + 2 and authority[end + 1] == ":" else ""
+    else:
+        parts = authority.rsplit(":", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            host, port_str = parts[0], parts[1]
+        else:
+            host, port_str = authority, ""
+
+    xf_port = (headers.get("x-forwarded-port") or "").split(",")[0].strip()
+    port: int | None = None
+    if xf_port.isdigit():
+        port = int(xf_port)
+    elif port_str.isdigit():
+        port = int(port_str)
+    elif request.url.port is not None:
+        port = request.url.port
+
+    return scheme, host, port
+
+
 def _resolve_browser_ragflow_url(configured_url: str, request: Request) -> str:
     """Resolve a browser-reachable RAGFlow base URL for SSO redirection.
 
@@ -60,30 +96,29 @@ def _resolve_browser_ragflow_url(configured_url: str, request: Request) -> str:
     """
     raw = (configured_url or "").strip()
     if not raw:
-        return str(request.base_url).rstrip("/")
+        scheme, host, port = _request_origin_parts(request)
+        netloc = f"{host}:{port}" if port else host
+        return urlunparse((scheme, netloc, "", "", "", "")).rstrip("/")
 
     parsed = urlparse(raw)
     if raw.startswith("/") and not parsed.scheme and not parsed.netloc:
-        req = urlparse(str(request.base_url))
-        host = req.hostname or "localhost"
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
-        netloc = f"{host}:{req.port}" if req.port else host
-        return urlunparse((req.scheme, netloc, raw.rstrip("/"), "", "", "")).rstrip("/")
+        scheme, host, port = _request_origin_parts(request)
+        netloc = f"{host}:{port}" if port else host
+        return urlunparse((scheme, netloc, raw.rstrip("/"), "", "", "")).rstrip("/")
 
     if not parsed.scheme or not parsed.netloc:
-        return str(request.base_url).rstrip("/")
+        scheme, host, port = _request_origin_parts(request)
+        netloc = f"{host}:{port}" if port else host
+        return urlunparse((scheme, netloc, "", "", "", "")).rstrip("/")
 
     if not _is_local_or_loopback_host(parsed.hostname):
         return raw.rstrip("/")
 
-    req = urlparse(str(request.base_url))
-    host = req.hostname or parsed.hostname or "localhost"
-    port = parsed.port if parsed.port is not None else req.port
-    scheme = req.scheme or parsed.scheme
+    req_scheme, req_host, req_port = _request_origin_parts(request)
+    host = req_host or parsed.hostname or "localhost"
+    port = parsed.port if parsed.port is not None else req_port
+    scheme = req_scheme or parsed.scheme
 
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
     netloc = f"{host}:{port}" if port else host
     return urlunparse((scheme, netloc, parsed.path.rstrip("/"), "", "", "")).rstrip("/")
 
