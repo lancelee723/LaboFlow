@@ -3,7 +3,6 @@
 huggingface.co/
 rag/res/
 web/node_modules/
-web/dist/
 web/.vite/
 
 # ── Python artifacts ──────────────────────────────────────────────────────────

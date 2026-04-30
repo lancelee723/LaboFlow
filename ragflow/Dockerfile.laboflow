@@ -5,24 +5,16 @@
 #   1. LaboFlow-branded web frontend (logo, UI text, SSO landing page)
 #   2. Clawith SSO endpoint: POST /v1/user/auth/sso/clawith
 #
+# Pre-requisite: build the web frontend locally before running docker build:
+#   cd ragflow/web && npm install --legacy-peer-deps && npm run build
+#
 # Build context : ragflow/  (from LaboFlow repo root)
 # Usage         : docker build -f ragflow/Dockerfile.laboflow ragflow/ -t <tag>
 
-# ── Stage 1: Build the LaboFlow-branded web frontend ─────────────────────────
-FROM node:20-slim AS web-builder
-
-WORKDIR /web
-COPY web/package.json web/package-lock.json* ./
-RUN npm install --legacy-peer-deps
-
-COPY web/ ./
-RUN NODE_OPTIONS="--max-old-space-size=8192" npm run build
-
-# ── Stage 2: Patch official RAGFlow with LaboFlow customizations ──────────────
 FROM infiniflow/ragflow:v0.25.0
 
 # SSO backend: replace user_api.py which adds POST /v1/user/auth/sso/clawith
 COPY api/apps/restful_apis/user_api.py /ragflow/api/apps/restful_apis/user_api.py
 
-# Web frontend: replace compiled dist with our branded build
-COPY --from=web-builder /web/dist /ragflow/web/dist
+# Web frontend: replace compiled dist with our branded build (pre-built locally)
+COPY web/dist /ragflow/web/dist
