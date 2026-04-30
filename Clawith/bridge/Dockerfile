@@ -1,5 +1,5 @@
 ARG DEBIAN_MIRROR=deb.debian.org
-FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.12-slim
+FROM docker.1ms.run/library/python:3.12-slim
 
 ARG DEBIAN_MIRROR
 

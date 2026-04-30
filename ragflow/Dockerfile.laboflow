@@ -11,7 +11,7 @@
 # Build context : ragflow/  (from LaboFlow repo root)
 # Usage         : docker build -f ragflow/Dockerfile.laboflow ragflow/ -t <tag>
 
-FROM infiniflow/ragflow:v0.25.0
+FROM swr.cn-north-4.myhuaweicloud.com/infiniflow/ragflow:v0.25.0
 
 # SSO backend: replace user_api.py which adds POST /v1/user/auth/sso/clawith
 COPY api/apps/restful_apis/user_api.py /ragflow/api/apps/restful_apis/user_api.py
