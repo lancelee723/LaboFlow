@@ -263,6 +263,19 @@ export default function Layout() {
     const [allowSelfCreate, setAllowSelfCreate] = useState(true);
     const [kbLoading, setKbLoading] = useState(false);
 
+    const resolveRagflowBrowserUrl = useCallback((rawUrl: string) => {
+        try {
+            const url = new URL(rawUrl, window.location.origin);
+            if (['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(url.hostname)) {
+                url.hostname = window.location.hostname;
+                url.protocol = window.location.protocol;
+            }
+            return url.toString().replace(/\/$/, '');
+        } catch {
+            return rawUrl.replace(/\/$/, '');
+        }
+    }, []);
+
     const openRAGFlowSSO = useCallback(async () => {
         if (kbLoading) return;
         setKbLoading(true);
@@ -273,14 +286,15 @@ export default function Layout() {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const { token: ssoToken, ragflow_url } = await res.json();
-            window.open(`${ragflow_url}/sso?token=${ssoToken}`, '_blank', 'noopener,noreferrer');
+            const safeBase = resolveRagflowBrowserUrl(ragflow_url || '');
+            window.open(`${safeBase}/sso?token=${encodeURIComponent(ssoToken)}`, '_blank', 'noopener,noreferrer');
         } catch (err) {
             console.error('[RAGFlow SSO] failed to open knowledge base:', err);
             alert(isChinese ? '打开知识库失败，请稍后重试' : 'Failed to open knowledge base. Please try again.');
         } finally {
             setKbLoading(false);
         }
-    }, [kbLoading, isChinese]);
+    }, [kbLoading, isChinese, resolveRagflowBrowserUrl]);
 
     // Notification polling
     const { data: unreadCount = 0 } = useQuery({

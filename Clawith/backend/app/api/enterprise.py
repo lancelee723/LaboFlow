@@ -2,6 +2,8 @@
 
 import uuid
 import logging
+import ipaddress
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,48 @@ from app.services.sso_service import sso_service
 
 router = APIRouter(prefix="/enterprise", tags=["enterprise"])
 settings = get_settings()
+
+
+def _is_local_or_loopback_host(host: str | None) -> bool:
+    if not host:
+        return True
+    host = host.strip().lower()
+    if host in {"localhost", "0.0.0.0", "::1"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_unspecified
+    except ValueError:
+        return False
+
+
+def _resolve_browser_ragflow_url(configured_url: str, request: Request) -> str:
+    """Resolve a browser-reachable RAGFlow base URL for SSO redirection.
+
+    If RAGFLOW_URL points to localhost/loopback, replace host (and scheme) with
+    the current request origin so external users won't be redirected to their own
+    local machine.
+    """
+    raw = (configured_url or "").strip()
+    if not raw:
+        return str(request.base_url).rstrip("/")
+
+    parsed = urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return str(request.base_url).rstrip("/")
+
+    if not _is_local_or_loopback_host(parsed.hostname):
+        return raw.rstrip("/")
+
+    req = urlparse(str(request.base_url))
+    host = req.hostname or parsed.hostname or "localhost"
+    port = parsed.port if parsed.port is not None else req.port
+    scheme = req.scheme or parsed.scheme
+
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{host}:{port}" if port else host
+    return urlunparse((scheme, netloc, parsed.path.rstrip("/"), "", "", "")).rstrip("/")
 
 
 # ─── Public: Check Email Exists ────────────────────────
@@ -73,6 +117,7 @@ async def list_llm_providers(
 
 @router.get("/ragflow/sso-token")
 async def get_ragflow_sso_token(
+    request: Request,
     current_user: User = Depends(get_current_user),
 ):
     """Mint a short-lived SSO JWT for the authenticated Clawith user.
@@ -86,7 +131,8 @@ async def get_ragflow_sso_token(
         audience="ragflow",
         role=getattr(current_user, "role", "user"),
     )
-    return {"token": token, "ragflow_url": settings.RAGFLOW_URL}
+    ragflow_url = _resolve_browser_ragflow_url(settings.RAGFLOW_URL, request)
+    return {"token": token, "ragflow_url": ragflow_url}
 
 
 class LLMTestRequest(BaseModel):
