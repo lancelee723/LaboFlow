@@ -77,10 +77,13 @@ def _request_origin_parts(request: Request) -> tuple[str, str, int | None]:
 
     xf_port = (headers.get("x-forwarded-port") or "").split(",")[0].strip()
     port: int | None = None
-    if xf_port.isdigit():
-        port = int(xf_port)
-    elif port_str.isdigit():
+    # Prefer the port embedded in Host / X-Forwarded-Host (browser's external port)
+    # over X-Forwarded-Port, which reflects the nginx internal $server_port (e.g. 80
+    # inside Docker even when the container is mapped to 3008 externally).
+    if port_str.isdigit():
         port = int(port_str)
+    elif xf_port.isdigit():
+        port = int(xf_port)
     elif request.url.port is not None:
         port = request.url.port
 
