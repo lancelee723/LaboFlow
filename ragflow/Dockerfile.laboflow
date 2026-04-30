@@ -13,6 +13,9 @@
 
 FROM swr.cn-north-4.myhuaweicloud.com/infiniflow/ragflow:v0.25.0
 
+# Ensure runtime services know the external base path when deployed behind /kb.
+ENV RAGFLOW_BASE_PATH=/kb
+
 # Defensive cleanup: strip possible runtime/test data inherited from base images.
 RUN rm -rf /ragflow/logs/* /ragflow/.docling_tmp/* /ragflow/docker/ragflow-logs/* \
 	&& find /ragflow -maxdepth 6 \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" -o -name "*.sqlite-wal" -o -name "*.sqlite-shm" \) -delete
@@ -22,3 +25,6 @@ COPY api/apps/restful_apis/user_api.py /ragflow/api/apps/restful_apis/user_api.p
 
 # Web frontend: replace compiled dist with our branded build (pre-built locally)
 COPY web/dist /ragflow/web/dist
+
+# Guardrail: fail build if dist is not built with /kb base path.
+RUN grep -q '"/kb/entry/js/' /ragflow/web/dist/index.html

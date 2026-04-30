@@ -50,6 +50,8 @@ services:
       - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
       - ./entrypoint.sh:/ragflow/entrypoint.sh
     env_file: .env
+    environment:
+      RAGFLOW_BASE_PATH: ${RAGFLOW_BASE_PATH:-/kb}
     networks:
       - ragflow
     restart: unless-stopped
@@ -98,6 +100,8 @@ services:
       - ./service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template
       - ./entrypoint.sh:/ragflow/entrypoint.sh
     env_file: .env
+    environment:
+      RAGFLOW_BASE_PATH: ${RAGFLOW_BASE_PATH:-/kb}
     networks:
       - ragflow
     restart: unless-stopped
