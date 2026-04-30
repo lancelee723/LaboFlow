@@ -25,6 +25,34 @@ web/.vite/
 logs/
 *.log
 docker/ragflow-logs/
+.docling_tmp/
+
+# Local compose/env secrets and runtime state
+docker/.env
+docker/.env.*
+
+# Common local persistence folders that may contain user data
+docker/oceanbase/data/
+docker/oceanbase/conf/
+docker/oceanbase/init.d/
+docker/seekdb/
+
+# Database dumps / local sqlite artifacts
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-wal
+**/*.sqlite-shm
+
+# User-generated content caches (defensive defaults)
+**/uploads/
+**/upload/
+**/datasets/
+**/dataset/
+**/chunks/
+**/chunk/
+**/user_data/
+**/userdata/
 
 # ── Other Dockerfiles (only Dockerfile.laboflow is used in this build) ────────
 Dockerfile

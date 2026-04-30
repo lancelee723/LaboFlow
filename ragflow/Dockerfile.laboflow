@@ -13,6 +13,10 @@
 
 FROM swr.cn-north-4.myhuaweicloud.com/infiniflow/ragflow:v0.25.0
 
+# Defensive cleanup: strip possible runtime/test data inherited from base images.
+RUN rm -rf /ragflow/logs/* /ragflow/.docling_tmp/* /ragflow/docker/ragflow-logs/* \
+	&& find /ragflow -maxdepth 6 \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" -o -name "*.sqlite-wal" -o -name "*.sqlite-shm" \) -delete
+
 # SSO backend: replace user_api.py which adds POST /v1/user/auth/sso/clawith
 COPY api/apps/restful_apis/user_api.py /ragflow/api/apps/restful_apis/user_api.py
 
