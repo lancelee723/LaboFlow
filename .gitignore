@@ -27,7 +27,8 @@ ragflow/*
 !dev.sh
 !setup-all.sh
 !stop.sh
-!docker-image-manager.sh
+# Keep local image build/push helper out of repository commits
+docker-image-manager.sh
 !User-Manual.md
 
 

@@ -85,7 +85,6 @@ services:
       - clawith-frontend
       - clawith-backend
       - aippt
-      - ragflow-cpu
     networks:
       - laboflow
       - ragflow  # must reach ragflow-cpu on its own network
