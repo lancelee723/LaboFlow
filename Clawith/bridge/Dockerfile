@@ -1,7 +1,13 @@
-FROM python:3.12-slim
+ARG DEBIAN_MIRROR=deb.debian.org
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.12-slim
+
+ARG DEBIAN_MIRROR
 
 # Claude Code CLI and a couple of common dev tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ]; then \
+        grep -rl 'deb.debian.org' /etc/apt/ | xargs sed -i "s|http://deb.debian.org|http://$DEBIAN_MIRROR|g; s|https://deb.debian.org|https://$DEBIAN_MIRROR|g"; \
+    fi \
+    && apt-get update && apt-get install -y --no-install-recommends \
         git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

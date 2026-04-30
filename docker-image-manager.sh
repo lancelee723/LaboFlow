@@ -8,12 +8,16 @@ set -o pipefail
 # 配置区（按需修改）
 # ============================================================
 
-# 私有镜像仓库地址，留空则在推送前提示输入。
+# 私有镜像仓库地址（含命名空间），留空则在推送前提示输入。
+# 格式: <registry-host>/<namespace>
 # 示例: crpi-xxxxx.cn-guangzhou.personal.cr.aliyuncs.com/laboflow
-REGISTRY=""
+REGISTRY="crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow"
 
 # 默认镜像 tag（可在菜单里覆盖）
 DEFAULT_TAG="latest"
+
+# Linux apt 源地址（仅影响 Dockerfile 内 Debian/apt 源，不影响 Docker 镜像源）
+LINUX_MIRROR="deb.debian.org"
 
 # 镜像清单：name|context_dir|dockerfile（相对仓库根目录）
 # 新增镜像在此追加一行即可，菜单会自动出现。
@@ -201,6 +205,115 @@ platforms_for_choice() {
   esac
 }
 
+linux_mirror_label() {
+  case "$1" in
+    deb.debian.org) echo "Debian 官方源" ;;
+    mirrors.tuna.tsinghua.edu.cn) echo "清华 TUNA 源" ;;
+    mirrors.ustc.edu.cn) echo "中科大 USTC 源" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+host_platform() {
+  local os arch
+  os=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  arch=$(uname -m 2>/dev/null)
+
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) return 1 ;;
+  esac
+
+  # 镜像构建目标统一使用 linux 平台。
+  if [[ "$os" == "darwin" || "$os" == "linux" ]]; then
+    echo "linux/${arch}"
+    return 0
+  fi
+
+  return 1
+}
+
+platform_label() {
+  case "$1" in
+    linux/amd64) echo "Linux-AMD64（适用于 Linux/Windows 的 X86-64 架构）" ;;
+    linux/arm64) echo "ARM64（适用于 M 系列芯片 Mac / ARM Linux）" ;;
+    linux/amd64,linux/arm64) echo "通用架构（包括 ARM 和 X86-64）" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+menu_push_arch_select() {
+  print_header
+  echo "${BOLD}${CYAN}>> 推送远程镜像 / 选择架构${RESET}"
+  echo
+  echo "  1. 通用架构（包括 ARM 和 X86-64）"
+  echo "  2. Linux-AMD64 架构（适用于 Linux 或 Windows 的 X86-64 架构）"
+  echo "  3. ARM 架构（适用于 M 系列芯片的 Mac 设备）"
+  echo "  0. 返回上级"
+  echo
+  prompt "请输入你的选项（默认 1）："
+  read -r c
+  c="${c:-1}"
+  case "$c" in
+    0) return 1 ;;
+    1|2|3) _ARCH_CHOICE="$c"; return 0 ;;
+    *) err "无效选项"; sleep 1; return 2 ;;
+  esac
+}
+
+# 列出本地与某镜像名匹配的引用（repo:tag）
+collect_local_refs() {
+  local name="$1"
+  docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null \
+    | grep -E "^(.*\/)?docker-${name}:" \
+    | awk '!seen[$0]++'
+}
+
+# 获取某个本地引用的平台摘要（如 linux/amd64 或 linux/amd64,linux/arm64）
+platforms_for_local_ref() {
+  local ref="$1"
+  local inspect_out plats
+
+  inspect_out=$(docker buildx imagetools inspect "docker-daemon:${ref}" 2>/dev/null || true)
+  plats=$(printf '%s\n' "$inspect_out" | awk '/Platform:/ {print $2}' | awk '!seen[$0]++' | paste -sd, -)
+  if [[ -n "$plats" ]]; then
+    echo "$plats"
+    return 0
+  fi
+
+  docker image inspect "$ref" --format '{{.Os}}/{{.Architecture}}' 2>/dev/null || true
+}
+
+# 统计某个镜像名在本地已有架构
+local_arch_summary_for_image() {
+  local name="$1"
+  local -a refs=()
+  local -a plats=()
+  local ref p
+
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] && refs+=("$ref")
+  done < <(collect_local_refs "$name")
+
+  if (( ${#refs[@]} == 0 )); then
+    echo "(本地无镜像)"
+    return 0
+  fi
+
+  for ref in "${refs[@]}"; do
+    p=$(platforms_for_local_ref "$ref")
+    [[ -n "$p" ]] && plats+=("$p")
+  done
+
+  if (( ${#plats[@]} == 0 )); then
+    echo "(架构未知)"
+    return 0
+  fi
+
+  printf '%s\n' "${plats[@]}" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -
+}
+
 # ============================================================
 # 构建 / 推送核心
 # ============================================================
@@ -231,6 +344,7 @@ build_image() {
   local args=(buildx build
     --platform "$platforms"
     --progress=plain
+    --build-arg "DEBIAN_MIRROR=$LINUX_MIRROR"
     -f "$df"
     -t "$full_tag" -t "$latest_tag"
   )
@@ -249,29 +363,29 @@ build_image() {
   docker "${args[@]}"
 }
 
+prune_buildx_cache() {
+  ensure_buildx || return 1
+
+  print_header
+  echo "${BOLD}${CYAN}>> 清理 Buildx 构建缓存${RESET}"
+  echo
+  printf "  Builder: %s\n" "$BUILDX_BUILDER"
+  echo "  说明: 该操作清理当前 builder 的本地构建缓存。"
+  echo "       适用于多架构构建/推送后本地没有镜像标签，但仍想释放本地构建残留。"
+  echo "       该操作不会删除远端仓库中的镜像。"
+  echo
+  prompt "确认清理 Buildx 缓存？(y/N):"
+  read -r ans
+  [[ "$ans" =~ ^[Yy]$ ]] || return 0
+
+  docker buildx prune --builder "$BUILDX_BUILDER" -f
+}
+
 # ============================================================
 # 菜单
 # ============================================================
 
-# 结果存入全局 _ARCH_CHOICE，避免 $() 子 Shell 吞掉 read
 _ARCH_CHOICE=""
-menu_arch_select() {
-  print_header
-  echo "${BOLD}${CYAN}>> 镜像打包 / 选择架构${RESET}"
-  echo
-  echo "  1. 通用架构（linux/amd64 + linux/arm64）"
-  echo "  2. Linux-AMD64（x86_64，Linux/Windows）"
-  echo "  3. ARM64（Apple Silicon / ARM Linux）"
-  echo "  0. 返回上级"
-  echo
-  prompt "请输入你的选项：（数字）"
-  read -r c
-  case "$c" in
-    0) return 1 ;;
-    1|2|3) _ARCH_CHOICE="$c"; return 0 ;;
-    *) err "无效选项"; sleep 1; return 2 ;;
-  esac
-}
 
 menu_image_select() {
   local title="$1"   # "打包" / "推送"
@@ -304,12 +418,31 @@ menu_image_select() {
 }
 
 action_build() {
-  while :; do
-    menu_arch_select; local rc=$?
-    [[ $rc -eq 1 ]] && return 0
-    [[ $rc -eq 0 ]] && break
-  done
-  local platforms; platforms=$(platforms_for_choice "$_ARCH_CHOICE")
+  local platforms platform_desc
+  platforms=$(host_platform) || {
+    err "无法检测当前设备对应的镜像架构，请手动检查 uname -m。"
+    pause_return
+    return 1
+  }
+  platform_desc=$(platform_label "$platforms")
+
+  print_header
+  echo "${BOLD}${CYAN}>> 打包本地镜像（仅供本地使用）${RESET}"
+  echo
+  echo "  本功能仅构建当前设备环境可用的单一架构镜像。"
+  printf "  当前设备目标架构: %s\n" "$platform_desc"
+  printf "  目标平台参数    : %s\n" "$platforms"
+  echo
+  echo "  1. 确认"
+  echo "  0. 取消（返回上级）"
+  echo
+  prompt "请选择："
+  read -r c
+  case "$c" in
+    0) return 0 ;;
+    1) ;;
+    *) err "无效选项"; pause_return; return 1 ;;
+  esac
 
   while :; do
     SELECTED_IMAGES=()
@@ -349,14 +482,63 @@ action_build() {
 }
 
 action_push() {
-  if [[ -z "$REGISTRY" ]]; then
-    print_header
-    warn "尚未配置 REGISTRY 仓库地址。"
-    prompt "请输入私有仓库地址（留空取消）："
+  print_header
+  echo "${BOLD}${CYAN}>> 推送远程镜像${RESET}"
+  echo
+  echo "  推送远程镜像将重建镜像并直接推送至指定仓库。"
+  echo "  该流程不会使用本地已构建镜像作为推送源。"
+  echo
+  echo "  1. 确认"
+  echo "  0. 返回上级"
+  echo
+  prompt "请选择："
+  read -r c
+  case "$c" in
+    0) return 0 ;;
+    1) ;;
+    *) err "无效选项"; pause_return; return 1 ;;
+  esac
+
+  print_header
+  echo "${BOLD}${CYAN}>> 推送远程镜像 / 仓库配置 & 登录${RESET}"
+  echo
+  printf "  当前仓库地址: %s\n" "${REGISTRY:-${DIM}(未设置)${RESET}}"
+  echo
+  echo "  1. 使用当前仓库地址并登录"
+  echo "  2. 修改仓库地址并登录"
+  echo "  0. 返回上级"
+  echo
+  prompt "请选择："
+  read -r reg_choice
+
+  if [[ "$reg_choice" == "0" ]]; then
+    return 0
+  elif [[ "$reg_choice" == "2" ]]; then
+    printf "  ${DIM}格式: <registry-host>/<namespace>，例如:${RESET}\n"
+    printf "  ${DIM}  crpi-xxxxx.cn-guangzhou.personal.cr.aliyuncs.com/laboflow${RESET}\n"
+    echo
+    prompt "请输入私有仓库地址："
     read -r reg
     [[ -z "$reg" ]] && { warn "已取消"; pause_return; return 0; }
     REGISTRY="$reg"
+  elif [[ "$reg_choice" != "1" ]]; then
+    err "无效选项"; pause_return; return 1
   fi
+
+  [[ -z "$REGISTRY" ]] && { err "仓库地址未设置"; pause_return; return 1; }
+
+  info "执行: docker login ${REGISTRY%%/*}"
+  echo
+  docker login "${REGISTRY%%/*}" || { err "登录失败"; pause_return; return 1; }
+  echo
+  ok "登录成功"
+
+  while :; do
+    menu_push_arch_select; local rc=$?
+    [[ $rc -eq 1 ]] && return 0
+    [[ $rc -eq 0 ]] && break
+  done
+  local platforms; platforms=$(platforms_for_choice "$_ARCH_CHOICE")
 
   while :; do
     SELECTED_IMAGES=()
@@ -364,16 +546,6 @@ action_push() {
     [[ $rc -eq 1 ]] && return 0
     [[ $rc -eq 0 ]] && break
   done
-
-  print_header
-  echo "  1. 通用架构（linux/amd64 + linux/arm64）"
-  echo "  2. Linux-AMD64"
-  echo "  3. ARM64"
-  echo "  0. 返回"
-  prompt "推送架构选择："
-  read -r ac
-  [[ "$ac" == "0" ]] && return 0
-  local platforms; platforms=$(platforms_for_choice "$ac") || { err "无效"; pause_return; return 1; }
 
   prompt "镜像 tag（默认 ${DEFAULT_TAG}）："
   read -r tag
@@ -386,14 +558,11 @@ action_push() {
   info "平台: $platforms"
   info "Tag:  $tag"
   info "镜像: ${SELECTED_IMAGES[*]}"
-  prompt "确认推送？该操作会上传到远端仓库 (y/N):"
+  info "模式: 重新构建并直接推送"
+  echo
+  prompt "确认开始推送？(y/N):"
   read -r ans
   [[ "$ans" =~ ^[Yy]$ ]] || { warn "已取消"; pause_return; return 0; }
-
-  if ! docker info 2>/dev/null | grep -q "Username"; then
-    warn "看起来未登录 Docker 仓库，尝试 docker login..."
-    docker login "${REGISTRY%%/*}" || { err "登录失败"; pause_return; return 1; }
-  fi
 
   local fail=0
   for name in "${SELECTED_IMAGES[@]}"; do
@@ -412,10 +581,11 @@ action_push() {
 action_delete() {
   while :; do
     print_header
-    echo "${BOLD}${CYAN}>> 删除镜像${RESET}"
+    echo "${BOLD}${CYAN}>> 删除镜像 / 清理缓存${RESET}"
     echo
     echo "  1. 删除全部（清除所有 LaboFlow 本地镜像）"
     local idx=2
+    local cache_choice
     local -a names=()
     for entry in "${IMAGES[@]}"; do
       IFS='|' read -r n _ _ <<<"$entry"
@@ -423,12 +593,24 @@ action_delete() {
       printf "  %d. 删除 %s\n" "$idx" "$n"
       idx=$((idx + 1))
     done
+    cache_choice=$idx
+    printf "  %d. 清理 Buildx 构建缓存（适用于多架构构建/推送后的本地残留）\n" "$cache_choice"
     echo "  0. 返回上级"
     echo
     prompt "请输入你的选项：（数字）"
     read -r c
 
     if [[ "$c" == "0" ]]; then return 0; fi
+
+    if [[ "$c" == "$cache_choice" ]]; then
+      if prune_buildx_cache; then
+        ok "Buildx 缓存清理完成"
+      else
+        err "Buildx 缓存清理失败"
+      fi
+      pause_return
+      continue
+    fi
 
     local to_delete=()
     if [[ "$c" == "1" ]]; then
@@ -466,6 +648,18 @@ action_delete() {
 
     if (( ${#unique_ids[@]} == 0 )); then
       warn "本地未找到匹配的镜像"
+      warn "如果这些镜像是通过多架构构建/远程推送生成的，本地通常不会有可删除的 docker images 标签。"
+      warn "这种情况下可以改为清理 Buildx 构建缓存，以释放本地构建残留。"
+      echo
+      prompt "是否立即清理 Buildx 构建缓存？(y/N):"
+      read -r ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        if prune_buildx_cache; then
+          ok "Buildx 缓存清理完成"
+        else
+          err "Buildx 缓存清理失败"
+        fi
+      fi
       pause_return; continue
     fi
 
@@ -493,25 +687,65 @@ action_delete() {
   done
 }
 
-action_settings() {
+action_image_list() {
   print_header
-  echo "${BOLD}${CYAN}>> 当前配置${RESET}"
+  echo "${BOLD}${CYAN}>> 镜像清单${RESET}"
   echo
-  printf "  REGISTRY      : %s\n" "${REGISTRY:-${DIM}(未设置)${RESET}}"
-  printf "  DEFAULT_TAG   : %s\n" "$DEFAULT_TAG"
-  printf "  BUILDX_BUILDER: %s\n" "$BUILDX_BUILDER"
-  printf "  REPO_ROOT     : %s\n" "$REPO_ROOT"
-  echo
-  echo "  镜像清单："
   for entry in "${IMAGES[@]}"; do
     IFS='|' read -r n ctx df <<<"$entry"
+    local arch_summary
+    arch_summary=$(local_arch_summary_for_image "$n")
     if [[ -f "${REPO_ROOT}/${df}" ]]; then
       printf "    ${GREEN}●${RESET} %-20s %s\n" "$n" "$df"
     else
       printf "    ${RED}○${RESET} %-20s %s ${DIM}(Dockerfile 缺失)${RESET}\n" "$n" "$df"
     fi
+    printf "      ${GRAY}本地架构: %s${RESET}\n" "$arch_summary"
   done
   pause_return
+}
+
+action_config() {
+  while :; do
+    print_header
+    echo "${BOLD}${CYAN}>> 功能配置${RESET}"
+    echo
+    echo "  当前配置"
+    printf "  REGISTRY      : %s\n" "${REGISTRY:-${DIM}(未设置)${RESET}}"
+    printf "  DEFAULT_TAG   : %s\n" "$DEFAULT_TAG"
+    printf "  BUILDX_BUILDER: %s\n" "$BUILDX_BUILDER"
+    printf "  REPO_ROOT     : %s\n" "$REPO_ROOT"
+    printf "  Linux 源地址  : %s (%s)\n" "$LINUX_MIRROR" "$(linux_mirror_label "$LINUX_MIRROR")"
+    echo
+    echo "  1. 修改 Linux 源地址"
+    echo "  0. 返回上级"
+    echo
+    prompt "请选择："
+    read -r c
+    case "$c" in
+      0) return 0 ;;
+      1)
+        print_header
+        echo "${BOLD}${CYAN}>> 功能配置 / 修改 Linux 源地址${RESET}"
+        echo
+        echo "  1. Debian 官方源"
+        echo "  2. 清华 TUNA 源"
+        echo "  3. 中科大 USTC 源"
+        echo "  0. 返回上级"
+        echo
+        prompt "请选择："
+        read -r mirror_choice
+        case "$mirror_choice" in
+          0) ;;
+          1) LINUX_MIRROR="deb.debian.org"; ok "已切换为 Debian 官方源"; pause_return ;;
+          2) LINUX_MIRROR="mirrors.tuna.tsinghua.edu.cn"; ok "已切换为清华 TUNA 源"; pause_return ;;
+          3) LINUX_MIRROR="mirrors.ustc.edu.cn"; ok "已切换为中科大 USTC 源"; pause_return ;;
+          *) err "无效选项"; pause_return ;;
+        esac
+        ;;
+      *) err "无效选项"; sleep 1 ;;
+    esac
+  done
 }
 
 main_menu() {
@@ -519,10 +753,11 @@ main_menu() {
     print_header
     echo "${BOLD}${CYAN}>> 主菜单${RESET}"
     echo
-    echo "  1. 镜像打包"
-    echo "  2. 镜像推送"
-    echo "  3. 删除镜像"
-    echo "  4. 查看配置 / 镜像清单"
+    echo "  1. 打包本地镜像"
+    echo "  2. 推送远程镜像"
+    echo "  3. 删除镜像 / 清理缓存"
+    echo "  4. 镜像清单"
+    echo "  5. 功能配置"
     echo "  0. 退出"
     echo
     prompt "请输入你的选项：（数字）"
@@ -531,7 +766,8 @@ main_menu() {
       1) action_build ;;
       2) action_push ;;
       3) action_delete ;;
-      4) action_settings ;;
+      4) action_image_list ;;
+      5) action_config ;;
       0) ok "再见 ✨"; exit 0 ;;
       *) err "无效选项"; sleep 1 ;;
     esac

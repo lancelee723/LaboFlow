@@ -1,9 +1,15 @@
 # ─── Backend Dockerfile (Optimized) ─────────────────────
 # Multi-stage: deps → production
-FROM python:3.12-slim AS deps
+ARG DEBIAN_MIRROR=deb.debian.org
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.12-slim AS deps
+
+ARG DEBIAN_MIRROR
 
 WORKDIR /app
-RUN apt-get update && \
+RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ]; then \
+        grep -rl 'deb.debian.org' /etc/apt/ | xargs sed -i "s|http://deb.debian.org|http://$DEBIAN_MIRROR|g; s|https://deb.debian.org|https://$DEBIAN_MIRROR|g"; \
+    fi && \
+    apt-get update && \
     apt-get install -y --no-install-recommends gcc libpq-dev libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info pango1.0-tools && \
     rm -rf /var/lib/apt/lists/*
 
@@ -19,14 +25,19 @@ RUN if [ -n "$CLAWITH_PIP_INDEX_URL" ] && [ -n "$CLAWITH_PIP_TRUSTED_HOST" ]; th
     fi
 
 # ─── Production ─────────────────────────────────────────
-FROM python:3.12-slim AS production
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.12-slim AS production
+
+ARG DEBIAN_MIRROR
 
 WORKDIR /app
 
 # Browsers installed outside $HOME so the non-root 'clawith' user can exec them
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-RUN apt-get update && \
+RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ]; then \
+        grep -rl 'deb.debian.org' /etc/apt/ | xargs sed -i "s|http://deb.debian.org|http://$DEBIAN_MIRROR|g; s|https://deb.debian.org|https://$DEBIAN_MIRROR|g"; \
+    fi && \
+    apt-get update && \
     apt-get install -y --no-install-recommends libpq5 curl shadowsocks-libev gosu bubblewrap libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info pango1.0-tools fonts-wqy-microhei fonts-wqy-zenhei && \
     rm -rf /var/lib/apt/lists/*
 
