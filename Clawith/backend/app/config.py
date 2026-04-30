@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     EXA_API_KEY: str = ""
 
     # RAGFlow integration
-    RAGFLOW_URL: str = "http://localhost:8880"
+    RAGFLOW_URL: str = "/kb"
 
     # Sandbox configuration
     SANDBOX_TYPE: SandboxType = SandboxType.SUBPROCESS

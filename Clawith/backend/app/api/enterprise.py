@@ -63,6 +63,14 @@ def _resolve_browser_ragflow_url(configured_url: str, request: Request) -> str:
         return str(request.base_url).rstrip("/")
 
     parsed = urlparse(raw)
+    if raw.startswith("/") and not parsed.scheme and not parsed.netloc:
+        req = urlparse(str(request.base_url))
+        host = req.hostname or "localhost"
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = f"{host}:{req.port}" if req.port else host
+        return urlunparse((req.scheme, netloc, raw.rstrip("/"), "", "", "")).rstrip("/")
+
     if not parsed.scheme or not parsed.netloc:
         return str(request.base_url).rstrip("/")
 

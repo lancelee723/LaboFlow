@@ -3026,7 +3026,7 @@ RAGFLOW_TOOLS = [
                     "label": "RAGFlow API Key",
                     "type": "password",
                     "default": "",
-                    "placeholder": "ragflow-xxxxxxxxxxxxxxxxxxxxxxxx (generate at /rag/profile)",
+                    "placeholder": "ragflow-xxxxxxxxxxxxxxxxxxxxxxxx (generate at /kb/profile)",
                     "help": (
                         "Open the Knowledge Base sidebar item to log in to RAGFlow, "
                         "then go to Profile → API Keys to generate one. The key "

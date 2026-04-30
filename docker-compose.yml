@@ -51,6 +51,7 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       CORS_ORIGINS: '["*"]'
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
+      RAGFLOW_URL: ${RAGFLOW_URL:-/kb}
       DOCKER_NETWORK: laboflow
       RAGFLOW_MCP_URL: http://ragflow-cpu:9382/mcp
     volumes:
