@@ -194,7 +194,7 @@ class ChannelUserService:
         if tenant_id:
             query = query.where(IdentityProvider.tenant_id == tenant_id)
 
-        result = await db.execute(query)
+        result = await db.execute(query.limit(1))
         provider = result.scalar_one_or_none()
 
         if not provider:
@@ -388,7 +388,7 @@ class ChannelUserService:
         if tenant_id:
             query = query.where(User.tenant_id == tenant_id)
 
-        existing = await db.execute(query)
+        existing = await db.execute(query.limit(1))
         if existing.scalar_one_or_none():
             username = f"{username}_{identity_seed[:6]}"
 
@@ -489,7 +489,7 @@ async def get_platform_user_by_org_member(
     if agent_tenant_id:
         query = query.where(User.tenant_id == agent_tenant_id)
 
-    existing = await db.execute(query)
+    existing = await db.execute(query.limit(1))
     if existing.scalar_one_or_none():
         username = f"{username}_{org_member.external_id[:6] if org_member.external_id else org_member.id.hex[:6]}"
 

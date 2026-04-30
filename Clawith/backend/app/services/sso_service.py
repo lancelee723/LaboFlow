@@ -45,12 +45,12 @@ class SSOService:
         if tenant_id:
             query = query.where(User.tenant_id == tenant_id)
         
-        result = await db.execute(query)
+        result = await db.execute(query.limit(1))
         user = result.scalar_one_or_none()
-        
+
         if user:
             return user
-            
+
         # 2. If not found and tenant_id is provided, try to find an Identity
         if email:
             id_query = select(Identity).where(Identity.email == email)
@@ -90,7 +90,7 @@ class SSOService:
         if tenant_id:
             query = query.where(User.tenant_id == tenant_id)
             
-        result = await db.execute(query)
+        result = await db.execute(query.limit(1))
         user = result.scalar_one_or_none()
         if user:
             return user
@@ -171,7 +171,7 @@ class SSOService:
         if tenant_id:
             query = query.where(IdentityProvider.tenant_id == tenant_id)
             
-        result = await db.execute(query)
+        result = await db.execute(query.limit(1))
         provider = result.scalar_one_or_none()
 
         if not provider:
@@ -288,7 +288,7 @@ class SSOService:
                     OrgMember.provider_id == provider_id,
                     OrgMember.status == "active",
                     column == lookup_value,
-                )
+                ).limit(1)
             )
             member = member_result.scalar_one_or_none()
             if member:
@@ -331,7 +331,7 @@ class SSOService:
             IdentityProvider.tenant_id == tenant_id
         )
             
-        result = await db.execute(query)
+        result = await db.execute(query.limit(1))
         provider = result.scalar_one_or_none()
 
         if not provider:
@@ -442,7 +442,7 @@ class SSOService:
         if tenant_id:
             query = query.where(IdentityProvider.tenant_id == tenant_id)
             
-        result = await db.execute(query)
+        result = await db.execute(query.limit(1))
         provider = result.scalar_one_or_none()
 
         if not provider:
@@ -454,7 +454,7 @@ class SSOService:
             select(OrgMember).where(
                 OrgMember.user_id == mid,
                 OrgMember.provider_id == provider.id,
-            )
+            ).limit(1)
         )
         member = member_result.scalar_one_or_none()
 

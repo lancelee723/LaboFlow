@@ -233,13 +233,15 @@ class WeComStreamManager:
             client.on("event.enter_chat", on_enter_chat)
 
             # Connect and run (with retry on failure)
+            _CONNECT_TIMEOUT = 30  # seconds
             retry_delay = 5  # Start with 5 seconds
             max_retry_delay = 120  # Cap at 2 minutes
             while True:
                 try:
                     logger.info(f"[WeCom Stream] Connecting for agent {agent_id}...")
-                    await client.connect_async()
+                    await asyncio.wait_for(client.connect_async(), timeout=_CONNECT_TIMEOUT)
                     self._connected[agent_id] = True
+                    logger.info(f"[WeCom Stream] Connected for agent {agent_id}")
 
                     # Keep alive
                     retry_delay = 5  # Reset on successful connect
@@ -250,6 +252,12 @@ class WeComStreamManager:
                     logger.info(f"[WeCom Stream] Client disconnected for agent {agent_id}, reconnecting in {retry_delay}s...")
                 except asyncio.CancelledError:
                     raise  # Propagate cancellation
+                except asyncio.TimeoutError:
+                    self._connected[agent_id] = False
+                    logger.error(
+                        f"[WeCom Stream] connect_async timed out after {_CONNECT_TIMEOUT}s for {agent_id}, "
+                        "check network connectivity to WeCom servers"
+                    )
                 except Exception as e:
                     self._connected[agent_id] = False
                     logger.error(f"[WeCom Stream] Connection error for {agent_id}: {e}, retrying in {retry_delay}s...")
