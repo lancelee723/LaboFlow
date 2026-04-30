@@ -125,7 +125,7 @@ LaboFlow/
 
 ```bash
 # 克隆项目（含子模块）
-git clone --recurse-submodules https://github.com/your-repo/LaboFlow.git
+git clone --recurse-submodules https://github.com/lancelee723/LaboFlow.git
 cd LaboFlow
 
 # 复制环境变量模板
