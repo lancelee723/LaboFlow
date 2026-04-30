@@ -13,7 +13,7 @@ set -o pipefail
 REGISTRY=""
 
 # 默认镜像 tag（可在菜单里覆盖）
-DEFAULT_TAG="$(date +%y.%-m.%-d)"
+DEFAULT_TAG="latest"
 
 # 镜像清单：name|context_dir|dockerfile（相对仓库根目录）
 # 新增镜像在此追加一行即可，菜单会自动出现。
@@ -88,7 +88,7 @@ print_header() {
   printf "${CYAN}%s${RESET}\n" "$line"
   # 标题行（渐变）
   local title="LaboFlow Docker 镜像管理脚本"
-  local title_visual_len=32   # 中文按 2 宽
+  local title_visual_len=28   # 中文按 2 宽：LaboFlow Docker(16) + 镜像管理脚本(6×2=12)
   local pad_total=$((width - 2 - title_visual_len))
   local pad_left=$((pad_total / 2))
   local pad_right=$((pad_total - pad_left))
@@ -104,7 +104,7 @@ print_header() {
   printf "${CYAN}|${RESET}%*s${BOLD}${MAGENTA}%s${RESET}%*s${CYAN}|${RESET}\n" \
     "$sub_pad_left" "" "$sub" "$sub_pad_right" ""
   printf "${CYAN}%s${RESET}\n" "$line"
-  printf "${YELLOW}| 提示：请谨慎使用脚本各项功能，以免影响产品使用 |${RESET}\n"
+  printf "${YELLOW} >> 提示：请谨慎使用脚本各项功能，以免影响产品使用 <<${RESET}\n"
   printf "${CYAN}%s${RESET}\n\n" "$line"
 }
 
@@ -230,6 +230,7 @@ build_image() {
 
   local args=(buildx build
     --platform "$platforms"
+    --progress=plain
     -f "$df"
     -t "$full_tag" -t "$latest_tag"
   )
@@ -408,6 +409,90 @@ action_push() {
   pause_return
 }
 
+action_delete() {
+  while :; do
+    print_header
+    echo "${BOLD}${CYAN}>> 删除镜像${RESET}"
+    echo
+    echo "  1. 删除全部（清除所有 LaboFlow 本地镜像）"
+    local idx=2
+    local -a names=()
+    for entry in "${IMAGES[@]}"; do
+      IFS='|' read -r n _ _ <<<"$entry"
+      names+=("$n")
+      printf "  %d. 删除 %s\n" "$idx" "$n"
+      idx=$((idx + 1))
+    done
+    echo "  0. 返回上级"
+    echo
+    prompt "请输入你的选项：（数字）"
+    read -r c
+
+    if [[ "$c" == "0" ]]; then return 0; fi
+
+    local to_delete=()
+    if [[ "$c" == "1" ]]; then
+      to_delete=("${names[@]}")
+    elif [[ "$c" =~ ^[0-9]+$ ]] && (( c >= 2 && c < idx )); then
+      to_delete=("${names[$((c - 2))]}")
+    else
+      err "无效选项"; sleep 1; continue
+    fi
+
+    # 列出将要删除的镜像
+    echo
+    local img_ids=()
+    for name in "${to_delete[@]}"; do
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && img_ids+=("$line")
+      done < <(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null \
+        | grep -E "^(.*\/)?docker-${name}:")
+      # 也匹配无 registry 前缀的情况
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && img_ids+=("$line")
+      done < <(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null \
+        | grep -E "^docker-${name}:")
+    done
+
+    # 去重
+    local -a unique_ids=()
+    declare -A seen=()
+    for id in "${img_ids[@]}"; do
+      if [[ -z "${seen[$id]+_}" ]]; then
+        seen[$id]=1
+        unique_ids+=("$id")
+      fi
+    done
+
+    if (( ${#unique_ids[@]} == 0 )); then
+      warn "本地未找到匹配的镜像"
+      pause_return; continue
+    fi
+
+    info "以下本地镜像将被删除："
+    for id in "${unique_ids[@]}"; do
+      printf "    ${RED}-${RESET} %s\n" "$id"
+    done
+    echo
+    prompt "确认删除？此操作不可恢复 (y/N):"
+    read -r ans
+    [[ "$ans" =~ ^[Yy]$ ]] || { warn "已取消"; pause_return; continue; }
+
+    local fail=0
+    for id in "${unique_ids[@]}"; do
+      if docker rmi "$id" >/dev/null 2>&1; then
+        ok "已删除: $id"
+      else
+        err "删除失败: $id（可能正在使用中）"
+        fail=$((fail + 1))
+      fi
+    done
+    echo
+    (( fail == 0 )) && ok "删除完成" || err "$fail 个镜像删除失败"
+    pause_return
+  done
+}
+
 action_settings() {
   print_header
   echo "${BOLD}${CYAN}>> 当前配置${RESET}"
@@ -436,7 +521,8 @@ main_menu() {
     echo
     echo "  1. 镜像打包"
     echo "  2. 镜像推送"
-    echo "  3. 查看配置 / 镜像清单"
+    echo "  3. 删除镜像"
+    echo "  4. 查看配置 / 镜像清单"
     echo "  0. 退出"
     echo
     prompt "请输入你的选项：（数字）"
@@ -444,7 +530,8 @@ main_menu() {
     case "$c" in
       1) action_build ;;
       2) action_push ;;
-      3) action_settings ;;
+      3) action_delete ;;
+      4) action_settings ;;
       0) ok "再见 ✨"; exit 0 ;;
       *) err "无效选项"; sleep 1 ;;
     esac
