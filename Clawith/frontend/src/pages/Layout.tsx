@@ -603,7 +603,7 @@ export default function Layout() {
                             className="sidebar-item"
                             onClick={openRAGFlowSSO}
                             disabled={kbLoading}
-                            style={{ background: 'none', border: 'none', cursor: kbLoading ? 'wait' : 'pointer', width: '100%', textAlign: 'left', opacity: kbLoading ? 0.6 : 1 }}
+                            style={{ cursor: kbLoading ? 'wait' : 'pointer', width: '100%', textAlign: 'left', opacity: kbLoading ? 0.6 : 1 }}
                         >
                             <span className="sidebar-item-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                                 <IconBook2 size={14} stroke={1.5} />

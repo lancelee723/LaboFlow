@@ -455,6 +455,8 @@ select:focus {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
+  background: transparent;
+  border: none;
 }
 
 .sidebar-item:hover {
