@@ -4,8 +4,12 @@
 # Changes from upstream:
 #   1. LaboFlow-branded web frontend (logo, UI text, SSO landing page)
 #   2. Selective restful_apis patches: Clawith SSO (user_api), system/config
-#      (system_api), and tenant listing (tenant_api) + web_utils dependency
-#   3. DISABLE_PASSWORD_LOGIN + REGISTER_ENABLED settings  (common/settings.py)
+#      (system_api), tenant listing (tenant_api), dataset GET route (dataset_api),
+#      document parse/ingest/etc (document_api), session-auth chunks (chunk_api)
+#      + api/apps/services/ abstraction layer + validation_utils.py + ssrf_guard.py
+#   3. SDK doc.py replaced with local newer version (document-level chunks routes
+#      removed there; they now live in restful_apis/chunk_api.py with @login_required)
+#   4. DISABLE_PASSWORD_LOGIN + REGISTER_ENABLED settings  (common/settings.py)
 #
 # Pre-requisite: build the web frontend locally before running docker build:
 #   cd ragflow/web && npm install --legacy-peer-deps && npm run build
@@ -23,14 +27,52 @@ RUN rm -rf /ragflow/logs/* /ragflow/.docling_tmp/* /ragflow/docker/ragflow-logs/
 	&& find /ragflow -maxdepth 6 \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" -o -name "*.sqlite-wal" -o -name "*.sqlite-shm" \) -delete
 
 # Selective restful_apis patches:
-#   - user_api.py   : Clawith SSO (/auth/sso/clawith, /auth/login/channels)
-#   - system_api.py : system/config endpoint (not in v0.25.0 base)
-#   - tenant_api.py : /tenants endpoint needed by frontend
-# Intentionally NOT copying document_api.py or others — our local versions call
-# symbols (update_chunk_method) that don't exist in v0.25.0's service layer.
-COPY api/apps/restful_apis/user_api.py   /ragflow/api/apps/restful_apis/user_api.py
-COPY api/apps/restful_apis/system_api.py /ragflow/api/apps/restful_apis/system_api.py
-COPY api/apps/restful_apis/tenant_api.py /ragflow/api/apps/restful_apis/tenant_api.py
+#   - user_api.py     : Clawith SSO (/auth/sso/clawith, /auth/login/channels)
+#   - system_api.py   : system/config endpoint
+#   - tenant_api.py   : /tenants endpoint needed by frontend
+#   - dataset_api.py  : adds GET /datasets/<id> + others; uses services/ + validation_utils.py
+#   - document_api.py : adds POST /datasets/<id>/documents/parse + /stop + /ingest +
+#                       /datasets/<id>/documents/<id>/metadata/config + thumbnails +
+#                       artifact + batch-update-status etc. (frontend "解析" button needs this)
+#   - chunk_api.py    : moves document-level chunks routes here under @login_required
+#                       so the web frontend can call them with session cookie
+# NOTE on file_api.py / memory_api.py: their local versions are identical to base
+# v0.25.0 (same route count, no missing routes), so they don't need copying.
+COPY api/apps/restful_apis/user_api.py     /ragflow/api/apps/restful_apis/user_api.py
+COPY api/apps/restful_apis/system_api.py   /ragflow/api/apps/restful_apis/system_api.py
+COPY api/apps/restful_apis/tenant_api.py   /ragflow/api/apps/restful_apis/tenant_api.py
+COPY api/apps/restful_apis/dataset_api.py  /ragflow/api/apps/restful_apis/dataset_api.py
+COPY api/apps/restful_apis/document_api.py /ragflow/api/apps/restful_apis/document_api.py
+COPY api/apps/restful_apis/chunk_api.py    /ragflow/api/apps/restful_apis/chunk_api.py
+COPY api/apps/restful_apis/agent_api.py   /ragflow/api/apps/restful_apis/agent_api.py
+COPY api/apps/restful_apis/chat_api.py      /ragflow/api/apps/restful_apis/chat_api.py
+COPY api/apps/restful_apis/connector_api.py /ragflow/api/apps/restful_apis/connector_api.py
+COPY api/apps/restful_apis/openai_api.py      /ragflow/api/apps/restful_apis/openai_api.py
+COPY api/apps/restful_apis/search_api.py      /ragflow/api/apps/restful_apis/search_api.py
+COPY api/apps/restful_apis/mcp_api.py         /ragflow/api/apps/restful_apis/mcp_api.py
+COPY api/apps/restful_apis/task_api.py        /ragflow/api/apps/restful_apis/task_api.py
+COPY api/apps/restful_apis/file2document_api.py /ragflow/api/apps/restful_apis/file2document_api.py
+COPY api/apps/restful_apis/langfuse_api.py    /ragflow/api/apps/restful_apis/langfuse_api.py
+COPY api/apps/restful_apis/plugin_api.py      /ragflow/api/apps/restful_apis/plugin_api.py
+COPY api/apps/restful_apis/stats_api.py       /ragflow/api/apps/restful_apis/stats_api.py
+
+# SDK doc.py: replace with local newer version. The base image's sdk/doc.py registers
+# /datasets/<id>/documents/<id>/chunks under @token_required. Because SDK blueprints
+# register before restful_apis (see api/apps/__init__.py), those rules win and the
+# frontend's session-auth requests get rejected with 401. The local sdk/doc.py has
+# already removed those document-level chunks routes — they live in chunk_api.py now.
+COPY api/apps/sdk/doc.py /ragflow/api/apps/sdk/doc.py
+
+# ssrf_guard.py: new dependency used by document_api.py's _upload_web_document
+# (calls assert_url_is_safe before fetching remote URLs). Pure-stdlib module.
+COPY common/ssrf_guard.py /ragflow/common/ssrf_guard.py
+
+# dataset_api.py imports from api/apps/services/ (new abstraction layer, not in v0.25.0 base).
+# All transitive deps (api/db/services/, api/constants.py) are unchanged v0.25.0 files.
+COPY api/apps/services/ /ragflow/api/apps/services/
+
+# validation_utils.py: request validation helpers used by dataset_api.py (not in v0.25.0 base).
+COPY api/utils/validation_utils.py /ragflow/api/utils/validation_utils.py
 
 # tenant_api.py imports send_invite_email at module level — copy our web_utils.py
 # which adds that function (other contents are identical to v0.25.0 base).

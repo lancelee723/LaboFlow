@@ -1,5 +1,6 @@
+ARG DOCKER_MIRROR=docker.1ms.run
 ARG DEBIAN_MIRROR=deb.debian.org
-FROM docker.1ms.run/library/python:3.12-slim
+FROM ${DOCKER_MIRROR}/library/python:3.12-slim
 
 ARG DEBIAN_MIRROR
 

@@ -1,7 +1,8 @@
 # ─── Backend Dockerfile (Optimized) ─────────────────────
 # Multi-stage: deps → production
+ARG DOCKER_MIRROR=docker.1ms.run
 ARG DEBIAN_MIRROR=deb.debian.org
-FROM docker.1ms.run/library/python:3.12-slim AS deps
+FROM ${DOCKER_MIRROR}/library/python:3.12-slim AS deps
 
 ARG DEBIAN_MIRROR
 
@@ -25,7 +26,7 @@ RUN if [ -n "$CLAWITH_PIP_INDEX_URL" ] && [ -n "$CLAWITH_PIP_TRUSTED_HOST" ]; th
     fi
 
 # ─── Production ─────────────────────────────────────────
-FROM docker.1ms.run/library/python:3.12-slim AS production
+FROM ${DOCKER_MIRROR}/library/python:3.12-slim AS production
 
 ARG DEBIAN_MIRROR
 

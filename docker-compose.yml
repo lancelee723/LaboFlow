@@ -53,7 +53,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
       RAGFLOW_URL: ${RAGFLOW_URL:-/kb}
       DOCKER_NETWORK: laboflow
-      RAGFLOW_MCP_URL: http://ragflow-cpu:9382/mcp
+      RAGFLOW_MCP_URL: http://nginx/internal/mcp
     volumes:
       - agent_data:/data/agents
     depends_on:
@@ -75,6 +75,8 @@ services:
       - laboflow
 
   aippt:
+    # Private aippt image currently publishes amd64 manifest only.
+    platform: ${AIPPT_PLATFORM:-linux/amd64}
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-latest}
     restart: unless-stopped
     networks:
