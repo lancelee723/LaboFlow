@@ -1,9 +1,11 @@
 # Dockerfile.laboflow
 #
 # Builds a LaboFlow-customized RAGFlow image by patching the official release.
-# Two changes from upstream:
+# Changes from upstream:
 #   1. LaboFlow-branded web frontend (logo, UI text, SSO landing page)
-#   2. Clawith SSO endpoint: POST /v1/user/auth/sso/clawith
+#   2. Selective restful_apis patches: Clawith SSO (user_api), system/config
+#      (system_api), and tenant listing (tenant_api) + web_utils dependency
+#   3. DISABLE_PASSWORD_LOGIN + REGISTER_ENABLED settings  (common/settings.py)
 #
 # Pre-requisite: build the web frontend locally before running docker build:
 #   cd ragflow/web && npm install --legacy-peer-deps && npm run build
@@ -20,8 +22,22 @@ ENV RAGFLOW_BASE_PATH=/kb
 RUN rm -rf /ragflow/logs/* /ragflow/.docling_tmp/* /ragflow/docker/ragflow-logs/* \
 	&& find /ragflow -maxdepth 6 \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" -o -name "*.sqlite-wal" -o -name "*.sqlite-shm" \) -delete
 
-# SSO backend: replace user_api.py which adds POST /v1/user/auth/sso/clawith
-COPY api/apps/restful_apis/user_api.py /ragflow/api/apps/restful_apis/user_api.py
+# Selective restful_apis patches:
+#   - user_api.py   : Clawith SSO (/auth/sso/clawith, /auth/login/channels)
+#   - system_api.py : system/config endpoint (not in v0.25.0 base)
+#   - tenant_api.py : /tenants endpoint needed by frontend
+# Intentionally NOT copying document_api.py or others — our local versions call
+# symbols (update_chunk_method) that don't exist in v0.25.0's service layer.
+COPY api/apps/restful_apis/user_api.py   /ragflow/api/apps/restful_apis/user_api.py
+COPY api/apps/restful_apis/system_api.py /ragflow/api/apps/restful_apis/system_api.py
+COPY api/apps/restful_apis/tenant_api.py /ragflow/api/apps/restful_apis/tenant_api.py
+
+# tenant_api.py imports send_invite_email at module level — copy our web_utils.py
+# which adds that function (other contents are identical to v0.25.0 base).
+COPY api/utils/web_utils.py /ragflow/api/utils/web_utils.py
+
+# Settings: adds DISABLE_PASSWORD_LOGIN and REGISTER_ENABLED used by system_api
+COPY common/settings.py /ragflow/common/settings.py
 
 # Web frontend: replace compiled dist with our branded build (pre-built locally)
 COPY web/dist /ragflow/web/dist

@@ -52,6 +52,9 @@ services:
     env_file: .env
     environment:
       RAGFLOW_BASE_PATH: ${RAGFLOW_BASE_PATH:-/kb}
+      # Mirrors JWT_SECRET_KEY from the top-level LaboFlow .env so that
+      # the Clawith SSO token (signed with JWT_SECRET_KEY) can be verified here.
+      CLAWITH_JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
     networks:
       - ragflow
     restart: unless-stopped

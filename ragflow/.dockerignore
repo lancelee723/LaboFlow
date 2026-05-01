@@ -45,12 +45,14 @@ docker/seekdb/
 **/*.sqlite-shm
 
 # User-generated content caches (defensive defaults)
+# Note: **/chunk/ was removed — it would also exclude web/dist/chunk/ (Vite output).
+# Instead, list the specific runtime data paths that should never go into the image.
 **/uploads/
 **/upload/
 **/datasets/
 **/dataset/
-**/chunks/
-**/chunk/
+docker/**/chunks/
+docker/**/chunk/
 **/user_data/
 **/userdata/
 
