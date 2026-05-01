@@ -3,6 +3,11 @@ server {
     server_name _;
     root /ragflow/web/dist;
 
+    # Strip /kb/ prefix when deployed behind a sub-path reverse proxy.
+    location /kb/ {
+        rewrite ^/kb/(.*)$ /$1 last;
+    }
+
     gzip on;
     gzip_min_length 1k;
     gzip_comp_level 9;
