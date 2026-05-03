@@ -36,7 +36,7 @@ services:
       - laboflow
 
   clawith-backend:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-backend:${TAG:-latest}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-backend:${TAG:-1.0}
     restart: unless-stopped
     dns:
       - 223.5.5.5
@@ -67,7 +67,7 @@ services:
           - backend
 
   clawith-frontend:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-frontend:${TAG:-latest}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-frontend:${TAG:-1.0}
     restart: unless-stopped
     depends_on:
       - clawith-backend
@@ -77,13 +77,13 @@ services:
   aippt:
     # Private aippt image currently publishes amd64 manifest only.
     platform: ${AIPPT_PLATFORM:-linux/amd64}
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-latest}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-1.0}
     restart: unless-stopped
     networks:
       - laboflow
 
   nginx:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-nginx:${TAG:-latest}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-nginx:${TAG:-1.0}
     restart: unless-stopped
     ports:
       - "${NGINX_PORT:-3008}:80"
