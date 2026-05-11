@@ -3434,6 +3434,22 @@ WEKNORA_TOOLS = [
                         "paginate through long documents. E.g. chunk_offset=5, match_count=5 → chunks #5-9."
                     ),
                 },
+                "tag_id": {
+                    "type": "string",
+                    "description": "Optional tag ID (UUID) to filter by. Use list_tags=true first to see available tags.",
+                },
+                "tag_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional tag name to fuzzy-match. The tool will search for a tag whose name "
+                        "contains this text (e.g. '苏州地铁财务' matches '苏州地铁财务数据'). "
+                        "More convenient than tag_id — no need to look up UUIDs."
+                    ),
+                },
+                "list_tags": {
+                    "type": "boolean",
+                    "description": "Set to true to list available tags (names and IDs) in a knowledge base.",
+                },
                 "match_count": {
                     "type": "integer",
                     "description": "Number of results to return. Default 5, max 20.",
