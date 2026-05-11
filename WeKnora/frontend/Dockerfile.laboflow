@@ -1,0 +1,32 @@
+# LaboFlow custom build of WeKnora frontend with /kb/ base path
+FROM node:24-alpine AS build-stage
+
+WORKDIR /app
+
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+ENV VITE_IS_DOCKER=true
+# Build with /kb/ base path for LaboFlow nginx sub-path proxying
+ENV VITE_BASE_URL=/kb/
+
+COPY package*.json ./
+COPY pnpm-workspace.yaml ./
+COPY packages/xlsx-0.20.2.tgz ./packages/xlsx-0.20.2.tgz
+
+RUN npm ci
+
+COPY . .
+
+RUN npm run build
+
+FROM nginx:stable-alpine AS production-stage
+
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+ENV MAX_FILE_SIZE_MB=50
+
+EXPOSE 80
+
+ENTRYPOINT ["/docker-entrypoint.sh"]

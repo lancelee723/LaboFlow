@@ -9,6 +9,8 @@
 !aippt/**
 !Clawith/
 !Clawith/**
+!WeKnora/
+!WeKnora/**
 # Only track ragflow docker config + build files, NOT the full 5.1GB source
 !ragflow/
 ragflow/*
