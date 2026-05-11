@@ -332,10 +332,6 @@ export default function ChannelConfig({ mode, agentId, canManage = true, values,
     const [atlassianTesting, setAtlassianTesting] = useState(false);
     const [atlassianTestResult, setAtlassianTestResult] = useState<{ ok: boolean; message?: string; tool_count?: number; error?: string } | null>(null);
     const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-    // AgentBay test connection state
-    const [agentbayTesting, setAgentbayTesting] = useState(false);
-    const [agentbayTestResult, setAgentbayTestResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null);
     const [wechatQr, setWechatQr] = useState<{ qrcode: string; qrcode_img_content: string } | null>(null);
     const [wechatQrImageSrc, setWechatQrImageSrc] = useState('');
     const [wechatQrStatus, setWechatQrStatus] = useState('');
@@ -478,7 +474,6 @@ export default function ChannelConfig({ mode, agentId, canManage = true, values,
                 : [[`${ch.apiSlug}`, agentId]];
             keys.forEach(k => queryClient.invalidateQueries({ queryKey: k }));
             if (ch.id === 'atlassian') setAtlassianTestResult(null);
-            if (ch.id === 'agentbay') setAgentbayTestResult(null);
             setEditing(ch.id, false);
             setActionFeedback({
                 type: 'success',
@@ -1262,13 +1257,6 @@ export default function ChannelConfig({ mode, agentId, canManage = true, values,
                     {actionFeedback.text}
                 </div>
             )}
-            <div style={{
-                padding: '10px 14px', borderRadius: '8px', marginBottom: '16px',
-                background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)',
-                fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6',
-            }}>
-                {t('agent.settings.channel.syncHint', 'Before configuring the Feishu bot, please sync your organization structure in Enterprise Settings → Org Structure first. This ensures the bot can identify message senders.')}
-            </div>
             {CHANNEL_REGISTRY.map(renderEditChannel)}
         </div>
     );

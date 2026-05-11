@@ -54,10 +54,7 @@ async def _start_ss_local() -> None:
     # Load proxy nodes from config file (gitignored, mounted as Docker volume)
     import json as _json
     cfg_file = os.environ.get("SS_CONFIG_FILE", "/data/ss-nodes.json")
-    # isfile(), not exists(): Docker auto-creates the bind-mount source as a
-    # *directory* when the host-side file is missing, so a bare exists() check
-    # passes and the subsequent open() crashes with IsADirectoryError on boot.
-    if os.path.isfile(cfg_file):
+    if os.path.exists(cfg_file):
         # Guard against empty or malformed config file — both produce a clear
         # warning and a clean exit rather than an unhandled JSONDecodeError.
         try:
@@ -97,18 +94,6 @@ async def _start_ss_local() -> None:
     logger.warning("[Proxy] All SS nodes failed — Discord API calls will run without proxy")
 
 
-async def _playwright_cleanup_loop():
-    """Every 60 seconds, reap idle Playwright sessions."""
-    from app.services.playwright_client import cleanup_playwright_sessions
-
-    while True:
-        try:
-            await cleanup_playwright_sessions()
-        except Exception as e:
-            logger.warning(f"[Playwright] cleanup loop iteration failed: {e}")
-        await asyncio.sleep(60)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
@@ -117,13 +102,6 @@ async def lifespan(app: FastAPI):
     intercept_standard_logging()
     logger.info("[startup] Logging configured")
     _log_bwrap_startup_status()
-
-    # Warn about default JWT secrets in production
-    if "change-me" in settings.SECRET_KEY.lower() or "change-me" in settings.JWT_SECRET_KEY.lower():
-        logger.warning(
-            "[startup] WARNING: SECRET_KEY or JWT_SECRET_KEY contains default 'change-me' value. "
-            "This is insecure for production. Set unique secrets in your .env file."
-        )
 
     # Warn about default JWT secrets in production
     if "change-me" in settings.SECRET_KEY.lower() or "change-me" in settings.JWT_SECRET_KEY.lower():
@@ -167,11 +145,12 @@ async def lifespan(app: FastAPI):
         import app.models.participant    # noqa
         import app.models.chat_session   # noqa
         import app.models.trigger        # noqa
+        import app.models.focus          # noqa
         import app.models.notification   # noqa
         import app.models.gateway_message # noqa
         import app.models.agent_credential  # noqa
-        import app.models.presentation   # noqa
-        import app.models.ppt_template    # noqa
+        import app.models.okr            # noqa  OKR system tables
+        import app.models.onboarding     # noqa
 
         import app.models.identity       # noqa
         async with engine.begin() as conn:
@@ -179,8 +158,6 @@ async def lifespan(app: FastAPI):
         logger.info("[startup] Database tables ready")
     except Exception as e:
         logger.warning(f"[startup] create_all failed: {e}")
-
-
     # Startup: seed data — each step isolated so one failure doesn't block others
     logger.info("[startup] seeding...")
 
@@ -223,10 +200,9 @@ async def lifespan(app: FastAPI):
         print(f"[startup] ⚠️ enterprise_info migration failed: {e}", flush=True)
 
     try:
-        from app.services.tool_seeder import seed_builtin_tools, clean_orphaned_mcp_tools, purge_lightrag_tools
+        from app.services.tool_seeder import seed_builtin_tools, clean_orphaned_mcp_tools
         await seed_builtin_tools()
         await clean_orphaned_mcp_tools()
-        await purge_lightrag_tools()
     except Exception as e:
         logger.warning(f"[startup] Builtin tools seed or cleanup failed: {e}")
 
@@ -297,7 +273,6 @@ async def lifespan(app: FastAPI):
             ("wecom_stream", wecom_stream_manager.start_all()),
             ("wechat_poll", wechat_poll_manager.start_all()),
             ("discord_gw", discord_gateway_manager.start_all()),
-            ("playwright_cleanup", _playwright_cleanup_loop()),
         ]:
             task = asyncio.create_task(coro, name=name)
             task.add_done_callback(_bg_task_error)
@@ -344,7 +319,6 @@ from app.api.agents import router as agents_router
 from app.api.tasks import router as tasks_router
 from app.api.files import router as files_router
 from app.api.websocket import router as ws_router
-from app.api.bridge_ws import router as bridge_ws_router
 from app.api.feishu import router as feishu_router
 from app.api.sso import router as sso_router
 from app.api.organization import router as org_router
@@ -370,6 +344,7 @@ from app.api.wecom import router as wecom_router
 from app.api.wechat import router as wechat_router
 from app.api.teams import router as teams_router
 from app.api.triggers import router as triggers_router
+from app.api.focus import router as focus_router
 
 from app.api.atlassian import router as atlassian_router
 
@@ -381,9 +356,7 @@ from app.api.pages import router as pages_router, public_router as pages_public_
 from app.api.agent_credentials import router as credentials_router
 from app.api.agentbay_control import router as agentbay_control_router
 from app.api.okr import router as okr_router
-
-from app.api.presentations import router as presentations_router
-from app.api.templates import router as templates_router
+from app.api.onboarding import router as onboarding_router
 
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(agents_router, prefix=settings.API_PREFIX)
@@ -416,12 +389,12 @@ app.include_router(teams_router, prefix=settings.API_PREFIX)
 app.include_router(atlassian_router, prefix=settings.API_PREFIX)
 
 app.include_router(triggers_router)
+app.include_router(focus_router, prefix=settings.API_PREFIX)
 app.include_router(chat_sessions_router)
 app.include_router(plaza_router)
 app.include_router(notification_router, prefix=settings.API_PREFIX)
 app.include_router(webhooks_router)  # Public endpoint, no API prefix
 app.include_router(ws_router)
-app.include_router(bridge_ws_router)
 app.include_router(gateway_router, prefix=settings.API_PREFIX)
 app.include_router(admin_router, prefix=settings.API_PREFIX)
 app.include_router(pages_router, prefix=settings.API_PREFIX)
@@ -429,8 +402,7 @@ app.include_router(pages_public_router)  # Public endpoint for /p/{short_id}, no
 app.include_router(credentials_router, prefix=settings.API_PREFIX)
 app.include_router(agentbay_control_router, prefix=settings.API_PREFIX)
 app.include_router(okr_router)  # OKR — self-prefixed at /api/okr
-app.include_router(presentations_router, prefix=settings.API_PREFIX)
-app.include_router(templates_router, prefix=settings.API_PREFIX)
+app.include_router(onboarding_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["health"])

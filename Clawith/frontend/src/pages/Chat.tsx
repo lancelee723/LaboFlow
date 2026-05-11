@@ -4,11 +4,13 @@ import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import AgentBayLivePanel, { LivePreviewState } from '../components/AgentBayLivePanel';
-import { agentApi, enterpriseApi, uploadFileWithProgress } from '../services/api';
+import ModelSwitcher from '../components/ModelSwitcher';
+import { agentApi, enterpriseApi, tenantApi, uploadFileWithProgress } from '../services/api';
 import { IconPaperclip, IconSend } from '@tabler/icons-react';
 import { formatFileSize } from '../utils/formatFileSize';
 import { useAuthStore } from '../stores';
 import { useDropZone } from '../hooks/useDropZone';
+import { useToast } from '../components/Toast/ToastProvider';
 
 /* ── Inline SVG Icons ── */
 const Icons = {
@@ -45,22 +47,6 @@ interface ToolCall {
     result?: string;
 }
 
-interface DiffFile {
-    path: string;
-    '+'?: number;
-    '-'?: number;
-    status?: string;
-}
-
-interface DiffSummary {
-    files_changed: number;
-    insertions: number;
-    deletions: number;
-    files: DiffFile[];
-    note?: string;
-    warning?: string;
-}
-
 interface Message {
     role: 'user' | 'assistant';
     content: string;
@@ -70,10 +56,6 @@ interface Message {
     imageUrl?: string;
     timestamp?: string;
     _isToolGroup?: boolean;
-    diffSummary?: DiffSummary;
-    bridgeAdapter?: string;  // e.g. "claude_code", "hermes", "openclaw"
-    fileChanges?: Array<{ path: string; kind: string }>;
-    sessionError?: string;   // set when the bridge session failed mid-way
 }
 
 // CSS keyframe for the pulse/breathing LED — injected once into <head>
@@ -83,119 +65,13 @@ if (typeof document !== 'undefined' && !document.getElementById(PULSE_STYLE_ID))
     s.id = PULSE_STYLE_ID;
     s.textContent = `
         @keyframes cw-pulse-led {
-            0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(99,102,241,0.6); }
-            50%       { opacity: 0.55; transform: scale(1.5); box-shadow: 0 0 0 4px rgba(99,102,241,0); }
+            0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(107,114,128,0.45); }
+            50%       { opacity: 0.55; transform: scale(1.5); box-shadow: 0 0 0 4px rgba(107,114,128,0); }
         }
         .cw-running-led { animation: cw-pulse-led 1.4s ease-in-out infinite; }
     `;
     document.head.appendChild(s);
 }
-
-function DiffSummaryBlock({ summary, adapter }: { summary: DiffSummary; adapter?: string }) {
-    const [expanded, setExpanded] = useState(false);
-    const files = summary.files || [];
-    const totalIns = summary.insertions || 0;
-    const totalDel = summary.deletions || 0;
-    const n = summary.files_changed ?? files.length;
-    if (!n) return null;
-    return (
-        <div style={{
-            marginTop: '8px',
-            fontSize: '12px',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '8px',
-            background: 'rgba(99, 102, 241, 0.04)',
-        }}>
-            <button
-                type="button"
-                onClick={() => setExpanded(v => !v)}
-                style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    width: '100%', padding: '8px 12px',
-                    background: 'transparent', border: 'none', cursor: 'pointer',
-                    color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 500,
-                }}
-            >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>📂</span>
-                    <span>{adapter ? `${adapter} session` : 'Session'} changed {n} file{n === 1 ? '' : 's'}</span>
-                    {totalIns > 0 && <span style={{ color: '#22c55e' }}>+{totalIns}</span>}
-                    {totalDel > 0 && <span style={{ color: '#ef4444' }}>-{totalDel}</span>}
-                </span>
-                <span style={{ opacity: 0.6, fontSize: '11px' }}>{expanded ? '▾' : '▸'}</span>
-            </button>
-            {expanded && (
-                <div style={{ padding: '0 12px 8px', maxHeight: '220px', overflow: 'auto' }}>
-                    {files.slice(0, 200).map((f, idx) => (
-                        <div key={`${f.path}-${idx}`} style={{
-                            display: 'flex', justifyContent: 'space-between', gap: '12px',
-                            padding: '2px 0',
-                            color: 'var(--text-secondary)',
-                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                            fontSize: '11px',
-                        }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {f.status ? <span style={{ opacity: 0.5, marginRight: 4 }}>[{f.status}]</span> : null}
-                                {f.path}
-                            </span>
-                            <span style={{ flexShrink: 0 }}>
-                                {(f['+'] ?? 0) > 0 && <span style={{ color: '#22c55e' }}>+{f['+']} </span>}
-                                {(f['-'] ?? 0) > 0 && <span style={{ color: '#ef4444' }}>-{f['-']}</span>}
-                            </span>
-                        </div>
-                    ))}
-                    {(summary.note || summary.warning) && (
-                        <div style={{ marginTop: 4, fontSize: '10px', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-                            {summary.note || summary.warning}
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
-
-
-function SessionErrorBlock({ message }: { message: string }) {
-    if (!message) return null;
-    return (
-        <div style={{
-            marginTop: '8px', padding: '8px 12px',
-            fontSize: '12px',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            borderRadius: 8,
-            background: 'rgba(239, 68, 68, 0.06)',
-            color: '#b91c1c',
-            display: 'flex', alignItems: 'flex-start', gap: 6,
-        }}>
-            <span>⚠️</span>
-            <span style={{ flex: 1, wordBreak: 'break-word' }}>{message}</span>
-        </div>
-    );
-}
-
-
-function FileChangesBlock({ changes }: { changes: Array<{ path: string; kind: string }> }) {
-    if (!changes || changes.length === 0) return null;
-    return (
-        <div style={{
-            marginTop: '6px', fontSize: '11px', color: 'var(--text-tertiary)',
-            display: 'flex', flexWrap: 'wrap', gap: '4px',
-        }}>
-            {changes.slice(0, 8).map((c, i) => (
-                <span key={i} style={{
-                    padding: '2px 6px', borderRadius: 4,
-                    background: 'rgba(0,0,0,0.06)',
-                    fontFamily: 'ui-monospace, monospace',
-                }}>
-                    {c.kind === 'created' ? '+' : c.kind === 'deleted' ? '-' : '~'} {c.path}
-                </span>
-            ))}
-            {changes.length > 8 && <span>+{changes.length - 8} more</span>}
-        </div>
-    );
-}
-
 
 function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
     const { t } = useTranslation();
@@ -215,8 +91,8 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
     return (
         <div style={{
             borderRadius: '8px',
-            background: 'rgba(99,102,241,0.06)',
-            border: `1px solid ${isRunning ? 'rgba(99,102,241,0.32)' : 'rgba(99,102,241,0.18)'}`,
+            background: isRunning ? 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))' : 'var(--bg-primary)',
+            border: `1px solid ${isRunning ? 'var(--border-default)' : 'var(--border-subtle)'}`,
             fontSize: '12px',
             overflow: 'hidden',
             marginBottom: '6px',
@@ -229,13 +105,13 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                     background: 'none', border: 'none', cursor: 'pointer',
                     width: '100%', display: 'flex', alignItems: 'center', gap: '6px',
                     padding: '7px 10px',
-                    color: 'var(--accent-text, #818cf8)',
+                    color: 'var(--text-secondary)',
                 }}
             >
                 {/* Left label: title + running-tool indicator */}
                 <span style={{ flex: 1, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                    <span style={{ fontWeight: 500, flexShrink: 0 }}>{t('agent.chat.toolCallChain')}</span>
-                    <span style={{ color: 'rgba(99,102,241,0.4)', flexShrink: 0 }}>·</span>
+                    <span style={{ fontWeight: 500, flexShrink: 0, color: 'var(--text-primary)' }}>{t('agent.chat.toolCallChain')}</span>
+                    <span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>·</span>
                     {isRunning && activeTool ? (
                         <>
                             {/* Pulse LED: breathing dot while a tool runs */}
@@ -245,7 +121,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                                     display: 'inline-block',
                                     width: '6px', height: '6px',
                                     borderRadius: '50%',
-                                    background: '#818cf8',
+                                    background: 'var(--text-tertiary)',
                                     flexShrink: 0,
                                 }}
                             />
@@ -253,7 +129,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                             <span style={{
                                 fontFamily: 'var(--font-mono)',
                                 fontSize: '11px',
-                                color: '#a5b4fc',
+                                color: 'var(--text-secondary)',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
@@ -276,7 +152,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
 
                 {/* Count badge */}
                 <span style={{
-                    background: 'rgba(99,102,241,0.18)', color: '#818cf8',
+                    background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
                     borderRadius: '10px', padding: '1px 7px',
                     fontSize: '10px', fontWeight: 600, flexShrink: 0,
                 }}>
@@ -299,10 +175,10 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                         const running = !tc.result;
                         return (
                             <span key={i} style={{
-                                background: running ? 'rgba(99,102,241,0.14)' : 'rgba(99,102,241,0.08)',
-                                border: `1px solid ${running ? 'rgba(99,102,241,0.28)' : 'rgba(99,102,241,0.14)'}`,
+                                background: running ? 'var(--bg-secondary)' : 'var(--bg-primary)',
+                                border: '1px solid var(--border-subtle)',
                                 borderRadius: '4px', padding: '1px 6px',
-                                fontSize: '10px', color: running ? '#818cf8' : '#a5b4fc',
+                                fontSize: '10px', color: 'var(--text-secondary)',
                                 fontFamily: 'var(--font-mono)',
                                 display: 'inline-flex', alignItems: 'center', gap: '4px',
                             }}>
@@ -313,7 +189,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                                             display: 'inline-block',
                                             width: '4px', height: '4px',
                                             borderRadius: '50%',
-                                            background: '#818cf8',
+                                            background: 'var(--text-tertiary)',
                                             flexShrink: 0,
                                         }}
                                     />
@@ -327,13 +203,13 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
 
             {/* ── Expanded: each tool's full detail row ── */}
             {expanded && (
-                <div style={{ borderTop: '1px solid rgba(99,102,241,0.15)' }}>
+                <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
                     {toolCalls.map((tc, i) => {
                         const running = !tc.result;
                         return (
                             <div key={i} style={{
                                 padding: '7px 10px',
-                                borderBottom: i < toolCalls.length - 1 ? '1px solid rgba(99,102,241,0.10)' : 'none',
+                                borderBottom: i < toolCalls.length - 1 ? '1px solid var(--border-subtle)' : 'none',
                             }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '4px' }}>
                                     {/* Status dot: amber + pulse = running; green = done */}
@@ -347,7 +223,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                                             flexShrink: 0,
                                         }}
                                     />
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#818cf8', fontWeight: 600 }}>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>
                                         {tc.name}
                                     </span>
                                     {running && (
@@ -361,7 +237,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                                         fontFamily: 'var(--font-mono)', fontSize: '10px',
                                         color: 'var(--text-tertiary)', whiteSpace: 'pre-wrap',
                                         wordBreak: 'break-all', maxHeight: '80px', overflowY: 'auto',
-                                        background: 'rgba(0,0,0,0.12)', borderRadius: '4px',
+                                        background: 'var(--bg-secondary)', borderRadius: '4px',
                                         padding: '4px 6px', marginBottom: tc.result ? '4px' : 0,
                                     }}>
                                         {JSON.stringify(tc.args, null, 2)}
@@ -372,7 +248,7 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
                                         fontSize: '10px', color: 'var(--text-secondary)',
                                         whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                                         maxHeight: '80px', overflowY: 'auto',
-                                        borderTop: '1px solid rgba(99,102,241,0.10)', paddingTop: '4px',
+                                        borderTop: '1px solid var(--border-subtle)', paddingTop: '4px',
                                     }}>
                                         {tc.result.length > 500 ? tc.result.slice(0, 500) + '…' : tc.result}
                                     </div>
@@ -387,7 +263,8 @@ function ChatToolChain({ toolCalls }: { toolCalls: ToolCall[] }) {
 }
 
 export default function Chat() {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
+    const toast = useToast();
     const { id } = useParams<{ id: string }>();
     const token = useAuthStore((s) => s.token);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -407,16 +284,19 @@ export default function Chat() {
     const [wsSessionId, setWsSessionId] = useState<string>('');
     const wsRef = useRef<WebSocket | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const isNearBottomRef = useRef(true);
+    const userPinnedAwayFromBottomRef = useRef(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     // Ref to the chat textarea for direct DOM height manipulation
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const pendingToolCalls = useRef<ToolCall[]>([]);
     const streamContent = useRef('');
     const thinkingContent = useRef('');
-    const pendingDiffSummary = useRef<DiffSummary | null>(null);
-    const pendingBridgeAdapter = useRef<string | null>(null);
-    const pendingFileChanges = useRef<Array<{ path: string; kind: string }>>([]);
-    const pendingSessionError = useRef<string | null>(null);
+    // Track history load + whether we've already fired the one-shot onboarding
+    // trigger so the agent greets the user at most once per mount.
+    const historyLoaded = useRef(false);
+    const onboardingKickoffSent = useRef(false);
 
     const { data: agent } = useQuery({
         queryKey: ['agent', id],
@@ -424,14 +304,47 @@ export default function Chat() {
         enabled: !!id,
     });
 
-    const { data: llmModels = [] } = useQuery({
-        queryKey: ['llm-models'],
-        queryFn: () => enterpriseApi.llmModels(),
-        enabled: !!agent?.primary_model_id,
+    // Tenant default model — used to render the "默认" tag and as a visual
+    // fallback when an agent has no explicit primary model.
+    const { data: myTenant } = useQuery({
+        queryKey: ['tenant', 'me'],
+        queryFn: () => tenantApi.me(),
+        staleTime: 5 * 60 * 1000,
+        refetchOnMount: 'always',
     });
 
-    const supportsVision = !!agent?.primary_model_id && llmModels.some(
-        (m: any) => m.id === agent.primary_model_id && m.supports_vision
+    // Chat-side selected model is a per-session override. It is sent with each
+    // message over WebSocket and should not require permission to edit the agent.
+    // Re-sync on session changes so new conversations start from the saved agent
+    // model rather than a stale prior override.
+    const [overrideModelId, setOverrideModelId] = useState<string | null>(null);
+    useEffect(() => {
+        if (agent?.primary_model_id && agent.primary_model_id !== overrideModelId) {
+            setOverrideModelId(agent.primary_model_id);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [agent?.primary_model_id, wsSessionId]);
+
+    const handleModelChange = useCallback(async (newModelId: string | null) => {
+        setOverrideModelId(newModelId);
+    }, []);
+
+    const { data: llmModels = [], isLoading: llmModelsLoading } = useQuery({
+        queryKey: ['llm-models'],
+        queryFn: () => enterpriseApi.llmModels(),
+        enabled: !!agent,
+        refetchOnMount: 'always',
+    });
+
+    const enabledLlmModels = (llmModels as any[]).filter((m: any) => m.enabled);
+    const effectiveChatModelId = overrideModelId
+        || agent?.primary_model_id
+        || myTenant?.default_model_id
+        || enabledLlmModels[0]?.id
+        || null;
+    const effectiveModelReady = !!effectiveChatModelId && enabledLlmModels.some((m: any) => m.id === effectiveChatModelId);
+    const supportsVision = !!effectiveChatModelId && llmModels.some(
+        (m: any) => m.id === effectiveChatModelId && m.supports_vision
     );
 
     const parseMessage = (msg: Message): Message => {
@@ -527,8 +440,30 @@ export default function Chat() {
                     setMessages(processed);
                 }
             })
-            .catch(() => { /* ignore */ });
+            .catch(() => { /* ignore */ })
+            .finally(() => { historyLoaded.current = true; });
     }, [id, token]);
+
+    // Per-(user, agent) onboarding kickoff: if this viewer has never been
+    // onboarded to this agent and the conversation is empty, fire a tagged
+    // trigger the backend treats as "agent greets first" — no visible user
+    // bubble, no DB write for the placeholder turn. One-shot per mount.
+    useEffect(() => {
+        if (onboardingKickoffSent.current) return;
+        if (!connected || !wsRef.current) return;
+        if (!agent || agent.onboarded_for_me !== false) return;
+        if (!historyLoaded.current) return;
+        if (llmModelsLoading || !effectiveModelReady || !effectiveChatModelId) return;
+        if (messages.length > 0) return;
+        onboardingKickoffSent.current = true;
+        setIsWaiting(true);
+        setStreaming(true);
+        wsRef.current.send(JSON.stringify({
+            content: '',
+            kind: 'onboarding_trigger',
+            model_id: effectiveChatModelId,
+        }));
+    }, [connected, agent, messages.length, llmModelsLoading, effectiveModelReady, effectiveChatModelId]);
 
     useEffect(() => {
         if (!id || !token) return;
@@ -538,7 +473,8 @@ export default function Chat() {
         const connect = () => {
             if (cancelled) return;
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/chat/${id}?token=${token}`;
+            const lang = (i18n.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+            const wsUrl = `${protocol}//${window.location.host}/ws/chat/${id}?token=${token}&lang=${lang}`;
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
@@ -702,82 +638,27 @@ export default function Chat() {
                             setLivePanelVisible(true);
                         }
                     }
-                } else if (data.type === 'status') {
-                    // Bridge session lifecycle markers. We care most about
-                    // state=done which carries diff_summary and stats —
-                    // stash it so the next 'done' / final text can render it.
-                    if (data.adapter) pendingBridgeAdapter.current = data.adapter;
-                    if (data.state === 'done' && data.diff_summary) {
-                        pendingDiffSummary.current = data.diff_summary as DiffSummary;
-                    }
-                    if (data.state === 'error' && data.error) {
-                        console.warn('[bridge-session error]', data.error);
-                        pendingSessionError.current = String(data.error);
-                    }
-                } else if (data.type === 'file_change') {
-                    if (data.path) {
-                        pendingFileChanges.current.push({
-                            path: String(data.path),
-                            kind: String(data.kind || data.status || 'changed'),
-                        });
-                    }
-                } else if (data.type === 'bridge_event') {
-                    // Forward-compat: log unknown bridge event kinds without
-                    // crashing the UI. New kinds the server adds will show up
-                    // here until we add explicit handling.
-                    console.debug('[bridge-event]', data.kind, data.payload);
                 } else if (data.type === 'done') {
                     // Final response — replace streaming message with final + tool calls
                     const toolCalls = pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined;
                     const thinking = thinkingContent.current || undefined;
-                    const diffSummary = pendingDiffSummary.current || undefined;
-                    const bridgeAdapter = pendingBridgeAdapter.current || undefined;
-                    const fileChanges = pendingFileChanges.current.length > 0 ? [...pendingFileChanges.current] : undefined;
-                    const sessionError = (data.session_error as string | undefined) || pendingSessionError.current || undefined;
                     pendingToolCalls.current = [];
                     streamContent.current = '';
                     thinkingContent.current = '';
-                    pendingDiffSummary.current = null;
-                    pendingBridgeAdapter.current = null;
-                    pendingFileChanges.current = [];
-                    pendingSessionError.current = null;
                     setStreaming(false);
                     setMessages(prev => {
                         const updated = [...prev];
                         // Replace the last streaming assistant message
                         if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
-                            updated[updated.length - 1] = {
-                                role: 'assistant',
-                                content: data.content,
-                                toolCalls,
-                                thinking,
-                                diffSummary,
-                                bridgeAdapter,
-                                fileChanges,
-                                sessionError,
-                            };
+                            updated[updated.length - 1] = { role: 'assistant', content: data.content, toolCalls, thinking };
                         } else {
-                            updated.push({
-                                role: 'assistant',
-                                content: data.content,
-                                toolCalls,
-                                thinking,
-                                diffSummary,
-                                bridgeAdapter,
-                                fileChanges,
-                                sessionError,
-                            });
+                            updated.push({ role: 'assistant', content: data.content, toolCalls, thinking });
                         }
                         return updated;
                     });
-                } else if (data.role && data.content) {
+                } else {
                     // Legacy format: {role, content}
                     setMessages(prev => [...prev, { role: data.role, content: data.content }]);
-                } else {
-                    // Unknown event with no role/content — e.g. Anthropic SDK
-                    // control frames (rate_limit_event, ping, message_start).
-                    // Dropping them prevents phantom user messages in the UI.
-                    console.debug('[stream] skip unknown event', data.type, data);
                 }
             };
         };
@@ -800,8 +681,31 @@ export default function Chat() {
         }
     }, [connected]);
 
+    const handleMessagesScroll = () => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        isNearBottomRef.current = distFromBottom < 120;
+        userPinnedAwayFromBottomRef.current = distFromBottom > 220;
+    };
+
+    const handleMessagesWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        if (event.deltaY < 0 && el.scrollTop > 0) {
+            userPinnedAwayFromBottomRef.current = true;
+            isNearBottomRef.current = false;
+        }
+    };
+
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (userPinnedAwayFromBottomRef.current || !isNearBottomRef.current) return;
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        requestAnimationFrame(() => {
+            if (userPinnedAwayFromBottomRef.current) return;
+            el.scrollTop = el.scrollHeight;
+        });
     }, [messages]);
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -831,7 +735,7 @@ export default function Chat() {
             });
         } catch (err: any) {
             if (err?.message !== 'Upload cancelled') {
-                alert(t('agent.upload.failed') + (err?.message ? `: ${err.message}` : ''));
+                toast.error(t('agent.upload.failed'), { details: String(err?.message || '') });
             }
         } finally {
             if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -848,6 +752,8 @@ export default function Chat() {
         pendingToolCalls.current = [];
         streamContent.current = '';
         thinkingContent.current = '';
+        userPinnedAwayFromBottomRef.current = false;
+        isNearBottomRef.current = true;
         setIsWaiting(true);
         setStreaming(true);
 
@@ -888,7 +794,7 @@ export default function Chat() {
             imageUrl: attachedFile?.imageUrl,
             timestamp: new Date().toISOString(),
         }]);
-        wsRef.current.send(JSON.stringify({ content: contentForLLM, display_content: userMsg, file_name: attachedFile?.name || '' }));
+        wsRef.current.send(JSON.stringify({ content: contentForLLM, display_content: userMsg, file_name: attachedFile?.name || '', model_id: effectiveChatModelId }));
         setInput('');
         setAttachedFile(null);
     };
@@ -935,7 +841,7 @@ export default function Chat() {
             });
         } catch (err: any) {
             if (err?.message !== 'Upload cancelled') {
-                alert(t('agent.upload.failed') + (err?.message ? `: ${err.message}` : ''));
+                toast.error(t('agent.upload.failed'), { details: String(err?.message || '') });
             }
         } finally {
             if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -969,13 +875,18 @@ export default function Chat() {
                 {/* Drop overlay */}
                 {isChatDragging && (
                     <div className="drop-zone-overlay">
-                        <div className="drop-zone-overlay__icon">📎</div>
+                        <div className="drop-zone-overlay__icon"><IconPaperclip size={28} stroke={1.8} /></div>
                         <div className="drop-zone-overlay__text">{t('agent.upload.dropToAttach', 'Drop file to attach')}</div>
                     </div>
                 )}
                 {/* Wrap chat area in a column so it coexists with the live panel in flex-row */}
                 <div className="chat-main">
-                <div className="chat-messages">
+                <div
+                    ref={messagesContainerRef}
+                    className="chat-messages"
+                    onScroll={handleMessagesScroll}
+                    onWheelCapture={handleMessagesWheelCapture}
+                >
                     {messages.length === 0 && (
                         <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-tertiary)' }}>
                             <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'center' }}>{Icons.chat}</div>
@@ -1009,29 +920,17 @@ export default function Chat() {
                                             <img src={msg.imageUrl} alt={msg.fileName} style={{ maxWidth: '240px', maxHeight: '180px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }} />
                                         </div>);
                                     }
-                                    const fi = fe === 'pdf' ? '\uD83D\uDCC4' : (fe === 'csv' || fe === 'xlsx' || fe === 'xls') ? '\uD83D\uDCCA' : (fe === 'docx' || fe === 'doc') ? '\uD83D\uDCDD' : '\uD83D\uDCCE';
-                                    return (<div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'rgba(0,0,0,0.08)', borderRadius: '6px', padding: '4px 8px', marginBottom: msg.content ? '4px' : '0', fontSize: '11px', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}><span>{fi}</span><span style={{ fontWeight: 500, color: 'var(--text-primary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{msg.fileName}</span></div>);
+                                    return (<div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'rgba(0,0,0,0.08)', borderRadius: '6px', padding: '4px 8px', marginBottom: msg.content ? '4px' : '0', fontSize: '11px', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}><IconPaperclip size={13} stroke={1.8} /><span style={{ fontWeight: 500, color: 'var(--text-primary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{msg.fileName}</span></div>);
                                 })()}
                                 {msg.thinking && (
-                                    <details style={{
-                                        marginBottom: '8px', fontSize: '12px',
-                                        background: 'rgba(147, 130, 220, 0.08)', borderRadius: '6px',
-                                        border: '1px solid rgba(147, 130, 220, 0.15)',
-                                    }}>
-                                        <summary style={{
-                                            padding: '6px 10px', cursor: 'pointer',
-                                            color: 'rgba(147, 130, 220, 0.9)', fontWeight: 500,
-                                            userSelect: 'none', display: 'flex', alignItems: 'center', gap: '4px',
-                                        }}>
-                                            Thinking
+                                    <details className="thinking-panel">
+                                        <summary className="thinking-summary">
+                                            <span className="thinking-status-dot" />
+                                            {streaming && i === messages.length - 1 && !msg.content
+                                                ? t('agent.chat.thinkingLabel', '思考中')
+                                                : t('agent.chat.thoughtLabel', '已思考')}
                                         </summary>
-                                        <div style={{
-                                            padding: '4px 10px 8px',
-                                            fontSize: '12px', lineHeight: '1.6',
-                                            color: 'var(--text-secondary)',
-                                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                                            maxHeight: '300px', overflow: 'auto',
-                                        }}>
+                                        <div className="thinking-content">
                                             {msg.thinking}
                                         </div>
                                     </details>
@@ -1040,7 +939,7 @@ export default function Chat() {
                                     <ChatToolChain toolCalls={msg.toolCalls} />
                                 )}
                                 {msg.role === 'assistant' ? (
-                                    streaming && !msg.content && i === messages.length - 1 ? (
+                                    streaming && !msg.content && !msg.thinking && i === messages.length - 1 ? (
                                         <div className="thinking-indicator">
                                             <div className="thinking-dots">
                                                 <span /><span /><span />
@@ -1051,16 +950,7 @@ export default function Chat() {
                                         <MarkdownRenderer content={msg.content} />
                                     )
                                 ) : (
-                                    <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-                                )}
-                                {msg.role === 'assistant' && msg.fileChanges && msg.fileChanges.length > 0 && (
-                                    <FileChangesBlock changes={msg.fileChanges} />
-                                )}
-                                {msg.role === 'assistant' && msg.diffSummary && (
-                                    <DiffSummaryBlock summary={msg.diffSummary} adapter={msg.bridgeAdapter} />
-                                )}
-                                {msg.role === 'assistant' && msg.sessionError && (
-                                    <SessionErrorBlock message={msg.sessionError} />
+                                    <MarkdownRenderer content={msg.content} />
                                 )}
                                 {msg.timestamp && (
                                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '4px', opacity: 0.7 }}>
@@ -1159,6 +1049,13 @@ export default function Chat() {
                             >
                                 <IconPaperclip size={16} stroke={1.75} />
                             </button>
+                            <ModelSwitcher
+                                value={overrideModelId}
+                                onChange={handleModelChange}
+                                tenantDefaultId={myTenant?.default_model_id || null}
+                                disabled={!connected}
+                            />
+                            <div style={{ flex: 1 }} />
                             {(streaming || isWaiting) ? (
                                 <button
                                     type="button"

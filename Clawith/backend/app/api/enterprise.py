@@ -90,12 +90,12 @@ def _request_origin_parts(request: Request) -> tuple[str, str, int | None]:
     return scheme, host, port
 
 
-def _resolve_browser_ragflow_url(configured_url: str, request: Request) -> str:
-    """Resolve a browser-reachable RAGFlow base URL for SSO redirection.
+def _resolve_browser_kb_url(configured_url: str, request: Request) -> str:
+    """Resolve a browser-reachable knowledge base URL for SSO redirection.
 
-    If RAGFLOW_URL points to localhost/loopback, replace host (and scheme) with
-    the current request origin so external users won't be redirected to their own
-    local machine.
+    If the configured URL points to localhost/loopback, replace host (and scheme)
+    with the current request origin so external users are not redirected to their
+    own local machine.
     """
     raw = (configured_url or "").strip()
     if not raw:
@@ -124,6 +124,10 @@ def _resolve_browser_ragflow_url(configured_url: str, request: Request) -> str:
 
     netloc = f"{host}:{port}" if port else host
     return urlunparse((scheme, netloc, parsed.path.rstrip("/"), "", "", "")).rstrip("/")
+
+def _is_platform_admin_user(user: User) -> bool:
+    """Return true for tenant-role or identity-level platform admins."""
+    return user.role == "platform_admin" or bool(getattr(getattr(user, "identity", None), "is_platform_admin", False))
 
 
 # ─── Public: Check Email Exists ────────────────────────
@@ -159,26 +163,27 @@ async def list_llm_providers(
     return get_provider_manifest()
 
 
-# ─── RAGFlow SSO Token ──────────────────────────────────
 
-@router.get("/ragflow/sso-token")
-async def get_ragflow_sso_token(
+# ─── WeKnora SSO Token ──────────────────────────────────
+
+@router.get("/weknora/sso-token")
+async def get_weknora_sso_token(
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
     """Mint a short-lived SSO JWT for the authenticated Clawith user.
 
-    The frontend opens ``{ragflow_url}/sso?token=<jwt>`` to automatically log
-    the user into RAGFlow without requiring a separate credential.
+    The frontend opens ``{weknora_url}/sso?token=<jwt>`` to automatically log
+    the user into WeKnora without requiring a separate credential.
     """
     token = create_sso_token(
         user_id=str(current_user.id),
         email=current_user.email or "",
-        audience="ragflow",
+        audience="weknora",
         role=getattr(current_user, "role", "user"),
     )
-    ragflow_url = _resolve_browser_ragflow_url(settings.RAGFLOW_URL, request)
-    return {"token": token, "ragflow_url": ragflow_url}
+    weknora_url = _resolve_browser_kb_url(settings.WEKNORA_URL, request)
+    return {"token": token, "weknora_url": weknora_url}
 
 
 class LLMTestRequest(BaseModel):
@@ -289,7 +294,66 @@ async def add_llm_model(
     )
     db.add(model)
     await db.flush()
+
+    # First enabled model for a tenant becomes that tenant's default.
+    # Admins can later reassign via PATCH /llm-models/{id}/set-default.
+    if model.tenant_id and model.enabled:
+        from app.models.tenant import Tenant
+        t_result = await db.execute(select(Tenant).where(Tenant.id == model.tenant_id))
+        tenant = t_result.scalar_one_or_none()
+        if tenant and tenant.default_model_id is None:
+            tenant.default_model_id = model.id
+
     return LLMModelOut.model_validate(model)
+
+
+@router.post("/llm-models/{model_id}/set-default", status_code=status.HTTP_204_NO_CONTENT)
+async def set_default_llm_model(
+    model_id: uuid.UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark this model as the tenant's default for new agents."""
+    result = await db.execute(select(LLMModel).where(LLMModel.id == model_id))
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    if not model.tenant_id:
+        raise HTTPException(status_code=400, detail="Model is not tenant-scoped")
+    if not model.enabled:
+        raise HTTPException(status_code=400, detail="Model is disabled")
+
+    from app.models.tenant import Tenant
+    t_result = await db.execute(select(Tenant).where(Tenant.id == model.tenant_id))
+    tenant = t_result.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Track the previous default so we can migrate agents that were
+    # following it. Without this, an admin who switches the company
+    # default would have to manually update every existing agent — and
+    # users would never see the new default reflected in chat.
+    previous_default = tenant.default_model_id
+    tenant.default_model_id = model.id
+
+    # Migrate agents whose primary_model_id matches the OLD tenant
+    # default. They were "implicitly following the default" — make them
+    # follow the new one. Agents whose model is something else (the user
+    # explicitly picked it) are left alone.
+    if previous_default and previous_default != model.id:
+        from app.models.agent import Agent
+        await db.execute(
+            update(Agent)
+            .where(Agent.tenant_id == tenant.id)
+            .where(Agent.primary_model_id == previous_default)
+            .values(primary_model_id=model.id)
+        )
+        logger.info(
+            f"[set_default_llm_model] Migrated agents in tenant {tenant.id} "
+            f"from {previous_default} -> {model.id}"
+        )
+
+    await db.commit()
 
 
 @router.delete("/llm-models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -643,11 +707,32 @@ async def send_test_email_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     """Send a test email to verify SMTP configuration (admin only)."""
+    import smtplib
+    import socket
+    import ssl
+
     from app.services.system_email_service import send_test_email
 
     try:
         await send_test_email(data.email, db=db)
         return {"success": True, "message": f"Test email sent to {data.email}"}
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "SMTP authentication failed. Please check that the SMTP username is the full email address "
+                "and that the password/app password is valid for this mailbox."
+            ),
+        )
+    except (TimeoutError, socket.timeout, ssl.SSLError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"SMTP TLS/connect timed out: {e}. Please verify the SMTP host, port, and SSL/TLS mode. "
+                "For Zoho, the SMTP host depends on the account data center, for example smtp.zoho.com "
+                "or smtp.zoho.com.cn."
+            ),
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -725,10 +810,11 @@ async def get_notification_bar_public(
     )
     setting = result.scalar_one_or_none()
     if not setting or not setting.value:
-        return {"enabled": False, "text": ""}
+        return {"enabled": False, "text": "", "updated_at": None}
     return {
         "enabled": setting.value.get("enabled", False),
         "text": setting.value.get("text", ""),
+        "updated_at": setting.updated_at.isoformat() if setting.updated_at else None,
     }
 
 
@@ -755,7 +841,7 @@ async def update_system_setting(
 ):
     """Create or update a system setting."""
     # Platform-level settings (e.g. PUBLIC_BASE_URL) require platform_admin
-    if key == "platform" and current_user.role != "platform_admin":
+    if key == "platform" and not _is_platform_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Only platform admin can modify platform settings")
     result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
     setting = result.scalar_one_or_none()
@@ -770,7 +856,12 @@ async def update_system_setting(
     if key == "platform" and data.value.get("public_base_url"):
         await _regenerate_all_sso_domains(db)
 
-    return {"key": setting.key, "value": setting.value}
+    await db.refresh(setting)
+    return {
+        "key": setting.key,
+        "value": setting.value,
+        "updated_at": setting.updated_at.isoformat() if setting.updated_at else None,
+    }
 
 
 # ─── AI PPT LLM Config ────────────────────────────────
@@ -1021,28 +1112,28 @@ async def _regenerate_all_sso_domains(db: AsyncSession):
 @router.get("/identity-providers", response_model=list[IdentityProviderOut])
 async def list_identity_providers(
     tenant_id: str | None = None,
+    global_only: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List identity providers configured for the tenant."""
     # Authorization: non-platform admins can only see their own tenant's providers
-    if tenant_id and current_user.role != "platform_admin":
+    if tenant_id and not _is_platform_admin_user(current_user):
         if str(current_user.tenant_id) != tenant_id:
             raise HTTPException(status_code=403, detail="Cannot access other tenant's providers")
 
     query = select(IdentityProvider).order_by(IdentityProvider.created_at.desc())
     tid = tenant_id or (str(current_user.tenant_id) if current_user.tenant_id else None)
 
-    # Require tenant context
-    if not tid:
-        if current_user.role == "platform_admin":
-            # Admin without tenant_id filter sees all
-            pass
-        else:
-            raise HTTPException(status_code=400, detail="tenant_id is required for identity providers")
-    else:
+    if global_only:
+        if not _is_platform_admin_user(current_user):
+            raise HTTPException(status_code=403, detail="Only platform admin can access global identity providers")
+        query = query.where(IdentityProvider.tenant_id.is_(None))
+    elif tid:
         import uuid as _uuid
         query = query.where(IdentityProvider.tenant_id == _uuid.UUID(tid))
+    elif not _is_platform_admin_user(current_user):
+        raise HTTPException(status_code=400, detail="tenant_id is required for identity providers")
 
     result = await db.execute(query)
     providers = []
@@ -1146,6 +1237,11 @@ def validate_provider_config(provider_type: str, config: dict):
     """Validate identity provider config. Specific field checks are handled by the frontend."""
     if not isinstance(config, dict):
         raise HTTPException(status_code=422, detail="Configuration must be a JSON object")
+    if provider_type in {"google", "github"}:
+        client_id = config.get("client_id") or config.get("app_id")
+        client_secret = config.get("client_secret") or config.get("app_secret")
+        if not client_id or not client_secret:
+            raise HTTPException(status_code=422, detail=f"{provider_type} requires client_id and client_secret")
     return
 
 
@@ -1182,7 +1278,8 @@ async def create_identity_provider(
     
     # Validate and determine tenant_id
     tid = data.tenant_id
-    if current_user.role == "platform_admin":
+    is_platform_admin = _is_platform_admin_user(current_user)
+    if is_platform_admin:
         # Platform admins can use any tenant_id (including None for global providers)
         pass
     else:
@@ -1193,7 +1290,7 @@ async def create_identity_provider(
             # Validate they can only manage their own tenant
             raise HTTPException(status_code=403, detail="Can only create providers for your own tenant")
 
-    if not tid:
+    if not tid and not (is_platform_admin and data.provider_type in {"google", "github"}):
         raise HTTPException(status_code=400, detail="tenant_id is required to create an identity provider")
         
     if data.sso_login_enabled:
@@ -1243,7 +1340,7 @@ async def create_oauth2_provider(
 
     # Validate and determine tenant_id
     tid = data.tenant_id
-    if current_user.role == "platform_admin":
+    if _is_platform_admin_user(current_user):
         # Platform admins can use any tenant_id (including None for global providers)
         pass
     else:
@@ -1301,7 +1398,7 @@ async def update_oauth2_provider(
     if provider.provider_type != "oauth2":
         raise HTTPException(status_code=400, detail="Provider is not an OAuth2 provider")
 
-    if current_user.role != "platform_admin" and provider.tenant_id != current_user.tenant_id:
+    if not _is_platform_admin_user(current_user) and provider.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to update this provider")
 
     # Update name and is_active
@@ -1366,7 +1463,7 @@ async def update_identity_provider(
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
         
-    if current_user.role != "platform_admin" and provider.tenant_id != current_user.tenant_id:
+    if not _is_platform_admin_user(current_user) and provider.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to update this provider")
         
     if data.name is not None:
@@ -1421,7 +1518,7 @@ async def delete_identity_provider(
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
         
-    if current_user.role != "platform_admin" and provider.tenant_id != current_user.tenant_id:
+    if not _is_platform_admin_user(current_user) and provider.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this provider")
         
     try:
@@ -1625,7 +1722,7 @@ async def trigger_org_sync(
     if not provider.tenant_id:
         raise HTTPException(status_code=400, detail="Provider must be bound to a tenant")
 
-    if current_user.role != "platform_admin" and provider.tenant_id != current_user.tenant_id:
+    if not _is_platform_admin_user(current_user) and provider.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Cannot sync other tenant's provider")
 
     return await org_sync_service.sync_provider(db, provider_id)

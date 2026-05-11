@@ -14,6 +14,7 @@ COPY . .
 # Build with /ppt/ as deploy base path to match gateway routing.
 ARG APP_BASE_PATH=/ppt/
 ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN BASE_PATH=${APP_BASE_PATH} VITE_OUT_DIR=dist pnpm build
 
 FROM ${DOCKER_MIRROR}/library/nginx:1.27.1-alpine AS runtime

@@ -1,2 +1,0 @@
-# Allow .env in this directory (overrides ragflow/.gitignore's .env rule)
-!.env

@@ -22,9 +22,6 @@ class AgentActivityLog(Base):
             "chat_reply", "tool_call", "feishu_msg_sent", "agent_msg_sent",
             "web_msg_sent", "task_created", "task_updated", "file_written", "error",
             "schedule_run", "heartbeat", "plaza_post",
-            "bridge_attached", "bridge_detached", "bridge_installer_download",
-            "local_session_start", "local_session_done", "local_session_error",
-            "reverse_tool_call", "reverse_tool_result",
             name="activity_action_enum",
             create_constraint=False,
         ),
@@ -45,6 +42,11 @@ class DailyTokenUsage(Base):
     agent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
     date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_creation_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

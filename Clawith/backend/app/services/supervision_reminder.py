@@ -109,7 +109,6 @@ async def _get_agent_reply(target_agent, message: str, db) -> str | None:
         get_provider_base_url,
         create_llm_client,
         LLMMessage,
-        LLMError,
         get_model_api_key,
     )
 

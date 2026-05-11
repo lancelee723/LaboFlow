@@ -107,8 +107,8 @@ class Settings(BaseSettings):
     # Exa AI (Search API)
     EXA_API_KEY: str = ""
 
-    # RAGFlow integration
-    RAGFLOW_URL: str = "/kb"
+    # WeKnora integration
+    WEKNORA_URL: str = "/kb"
 
     # Sandbox configuration
     SANDBOX_TYPE: SandboxType = SandboxType.SUBPROCESS

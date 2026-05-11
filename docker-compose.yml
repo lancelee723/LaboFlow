@@ -1,8 +1,8 @@
 include:
-  # RAGFlow and its dependencies (MySQL, Elasticsearch, MinIO, Redis)
-  # Variable substitution uses ragflow/docker/.env
-  - path: ragflow/docker/docker-compose.yml
-    env_file: ragflow/docker/.env
+  # WeKnora and its dependencies (PostgreSQL, Redis, DocReader)
+  # Variable substitution uses WeKnora/.env
+  - path: WeKnora/docker-compose.yml
+    env_file: WeKnora/.env
 
 services:
   postgres:
@@ -51,9 +51,8 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       CORS_ORIGINS: '["*"]'
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
-      RAGFLOW_URL: ${RAGFLOW_URL:-/kb}
+      WEKNORA_URL: ${WEKNORA_URL:-/kb}
       DOCKER_NETWORK: laboflow
-      RAGFLOW_MCP_URL: http://nginx/internal/mcp
     volumes:
       - agent_data:/data/agents
     depends_on:
@@ -82,6 +81,42 @@ services:
     networks:
       - laboflow
 
+  # Override WeKnora's frontend with LaboFlow custom build (/kb/ base path).
+  # Same service name as the included WeKnora/docker-compose.yml so it takes
+  # precedence and avoids port conflicts.
+  frontend:
+    build:
+      context: ./WeKnora/frontend
+      dockerfile: Dockerfile.laboflow
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-frontend:${TAG:-1.0}
+    container_name: WeKnora-frontend
+    ports:
+      - "${WEKNORA_FRONTEND_PORT:-8800}:80"
+    environment:
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - APP_HOST=${APP_HOST:-app}
+      - APP_PORT=${APP_BACKEND_PORT:-8080}
+      - APP_SCHEME=${APP_SCHEME:-http}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
+  # MinerU self-hosted document parser (better quality than default docreader)
+  mineru:
+    image: opendatalab/mineru:latest
+    container_name: WeKnora-mineru
+    ports:
+      - "${MINERU_PORT:-9930}:9930"
+    restart: unless-stopped
+    networks:
+      - WeKnora-network
+    profiles:
+      - mineru
+      - full
+
   nginx:
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-nginx:${TAG:-1.0}
     restart: unless-stopped
@@ -95,7 +130,7 @@ services:
       - aippt
     networks:
       - laboflow
-      - ragflow  # must reach ragflow-cpu on its own network
+      - WeKnora-network  # must reach frontend (WeKnora) on its own network
 
 volumes:
   pgdata:
@@ -105,6 +140,5 @@ volumes:
 networks:
   laboflow:
     driver: bridge
-  # ragflow network is declared in ragflow/docker/docker-compose-base.yml (via include);
-  # referenced here so nginx can join it and reach ragflow-cpu by service name
-  ragflow: {}
+  # WeKnora-network is declared in WeKnora/docker-compose.yml (via include);
+  # nginx joins it below to reach frontend (WeKnora) by service name — do not re-declare here.

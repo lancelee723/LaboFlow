@@ -104,6 +104,7 @@ class TenantChoice(BaseModel):
     tenant_id: uuid.UUID | None
     tenant_name: str
     tenant_slug: str
+    logo_url: str | None = None
 
 
 class MultiTenantResponse(BaseModel):
@@ -139,24 +140,6 @@ class IdentityOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class PPTTemplateOut(BaseModel):
-    id: str
-    name: str
-    category: str = "business"
-    preview: str | None = None
-    width: int = 960
-    height: int = 540
-    slideCount: int = Field(0, alias="slide_count")
-    isPremium: bool = Field(False, alias="is_premium")
-    source: str | None = None
-    tags: list | None = None
-    data: dict | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-    model_config = {"from_attributes": True, "populate_by_name": True}
-
-
 class UserOut(BaseModel):
     id: uuid.UUID
     identity_id: uuid.UUID | None = None
@@ -165,6 +148,7 @@ class UserOut(BaseModel):
     display_name: str
     avatar_url: str | None = None
     role: str
+    is_platform_admin: bool = False
     tenant_id: uuid.UUID | None = None
     title: str | None = None
     primary_mobile: str | None = None
@@ -198,6 +182,7 @@ class OAuthAuthorizeResponse(BaseModel):
 class OAuthCallbackRequest(BaseModel):
     code: str
     state: str
+    redirect_uri: str | None = None
 
 
 class IdentityBindRequest(BaseModel):
@@ -223,11 +208,6 @@ class UserUpdate(BaseModel):
 class AgentCreate(BaseModel):
     name: str = Field(min_length=2, max_length=100, description="Agent name, 2-100 characters")
     agent_type: str = "native"  # native | openclaw
-    bridge_adapter: str | None = Field(
-        default=None,
-        pattern="^(claude_code|openclaw|hermes)$",
-        description="claude_code | openclaw | hermes (only for agent_type=openclaw)",
-    )
     role_description: str = Field(default="", max_length=500, description="Role description, max 500 characters")
     bio: str | None = None
     welcome_message: str | None = None
@@ -239,7 +219,7 @@ class AgentCreate(BaseModel):
     primary_model_id: uuid.UUID | None = None
     fallback_model_id: uuid.UUID | None = None
     # Permissions
-    permission_scope_type: str = "company"  # company | user
+    permission_scope_type: str = "company"  # company | user | custom
     permission_scope_ids: list[uuid.UUID] = []
     permission_access_level: str = "use"  # use | manage
     # Target tenant (admin-only override; otherwise ignored)
@@ -271,6 +251,12 @@ class AgentOut(BaseModel):
     tokens_used_today: int
     tokens_used_month: int
     tokens_used_total: int = 0
+    cache_read_tokens_today: int = 0
+    cache_read_tokens_month: int = 0
+    cache_read_tokens_total: int = 0
+    cache_creation_tokens_today: int = 0
+    cache_creation_tokens_month: int = 0
+    cache_creation_tokens_total: int = 0
     max_tokens_per_day: int | None = None
     max_tokens_per_month: int | None = None
     context_window_size: int = 100
@@ -286,15 +272,21 @@ class AgentOut(BaseModel):
     expires_at: datetime | None = None
     is_expired: bool = False
     is_system: bool = False
+    access_mode: str = "company"
+    company_access_level: str = "use"
     llm_calls_today: int = 0
-    max_llm_calls_per_day: int = 100
+    max_llm_calls_per_day: int = 1000
     agent_type: str = "native"
-    bridge_adapter: str | None = None
     openclaw_last_seen: datetime | None = None
-    bridge_mode: str = "disabled"
     unread_count: int = 0
     has_api_key: bool = False
     api_key_hash: str | None = None
+    # True when the current viewer already has an onboarding row for this
+    # agent. Computed per-request by the API layer from the junction table;
+    # not an ORM attribute, so callers must set it explicitly. Defaults to
+    # True so list endpoints that don't care about onboarding don't leak
+    # stale "needs onboarding" UI to users they shouldn't prompt.
+    onboarded_for_me: bool = True
     created_at: datetime
     last_active_at: datetime | None = None
 
@@ -322,8 +314,6 @@ class AgentUpdate(BaseModel):
     heartbeat_active_hours: str | None = None
     timezone: str | None = None
     expires_at: datetime | None = None  # Admin only — extend agent expiry
-    bridge_mode: str | None = Field(default=None, pattern="^(disabled|enabled|auto)$")
-    bridge_adapter: str | None = Field(default=None, pattern="^(claude_code|openclaw|hermes)$")
 
 
 class AgentStatusOut(BaseModel):
@@ -601,66 +591,3 @@ class GatewaySendMessageRequest(BaseModel):
     target: str  # Name of target person or agent
     content: str = Field(min_length=1)
     channel: str | None = None  # Optional: "feishu", "agent", etc. Auto-detected if omitted.
-
-
-# ─── Presentation (AIPPT) ──────────────────────────────
-
-class PresentationCreate(BaseModel):
-    title: str = Field(default="未命名演示文稿", max_length=500)
-    description: str | None = None
-    content: dict | None = None
-    thumbnail: str | None = None
-    is_public: bool = False
-
-
-class PresentationUpdate(BaseModel):
-    title: str | None = Field(None, max_length=500)
-    description: str | None = None
-    content: dict | None = None
-    thumbnail: str | None = None
-    is_public: bool | None = None
-    page_settings: dict | None = None
-
-
-class PresentationOut(BaseModel):
-    id: uuid.UUID
-    title: str
-    description: str | None = None
-    content: dict | None = None
-    thumbnail: str | None = None
-    is_public: bool = False
-    page_settings: dict | None = None
-    creator_id: uuid.UUID
-    tenant_id: uuid.UUID | None = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class PresentationVersionCreate(BaseModel):
-    content: dict | None = None
-    title: str | None = None
-    description: str | None = None
-    is_auto_save: bool = False
-    author: str | None = None
-
-
-class PresentationVersionUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
-
-
-class PresentationVersionOut(BaseModel):
-    id: uuid.UUID
-    presentation_id: uuid.UUID
-    content: dict | None = None
-    title: str | None = None
-    description: str | None = None
-    is_auto_save: bool = False
-    author: str | None = None
-    size: int = 0
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}

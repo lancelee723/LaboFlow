@@ -8,7 +8,7 @@
 # Steps:
 #   1. Ensure top-level .env exists (copy from .env.example)
 #   2. Clawith:  run its own setup.sh
-#   3. RAGFlow:  poll port 8880 for Docker service readiness
+#   3. WeKnora:  start Docker services
 #   4. AIPPT:    pnpm install (skip if node_modules exists)
 #   5. Sanity check: required tools present (nginx, uv, pnpm)
 # ─────────────────────────────────────────────────────────────
@@ -123,56 +123,63 @@ else
     warn "To install manually:  Clawith/backend/.venv/bin/pip install playwright && Clawith/backend/.venv/bin/playwright install chromium"
 fi
 
-# ── 4. RAGFlow ───────────────────────────────────────────────
-step "[4/5] RAGFlow — starting Docker service"
-: "${RAGFLOW_PORT:=8880}"
-RAGFLOW_COMPOSE="-f $ROOT/ragflow/docker/docker-compose.yml --profile cpu"
+# ── 4. WeKnora ──────────────────────────────────────────────
+step "[4/5] WeKnora — dev environment setup"
 
-# Start RAGFlow if not already reachable
-if ! curl -s -o /dev/null -m 2 "http://localhost:$RAGFLOW_PORT" 2>/dev/null \
-   && ! (command -v nc &>/dev/null && nc -z 127.0.0.1 "$RAGFLOW_PORT" 2>/dev/null); then
-    warn "RAGFlow not running — starting via docker compose..."
-    docker compose $RAGFLOW_COMPOSE up -d 2>&1 | tail -3 || { warn "docker compose up failed — start RAGFlow manually"; }
+# Check Go (required for local backend)
+if ! have go; then
+    warn "Go not found — install with: brew install go (macOS) or apt install golang"
+    warn "WeKnora backend will NOT start without Go. Skipping Go-dependent steps."
+    GO_MISSING=true
 else
-    ok "RAGFlow already running on :$RAGFLOW_PORT"
+    ok "Go $(go version | awk '{print $3}') available"
+    GO_MISSING=false
 fi
 
-# Poll for readiness (RAGFlow stack: MySQL + ES + app = ~2-4 min cold start)
-RAGFLOW_TIMEOUT=240
-ok "Waiting up to ${RAGFLOW_TIMEOUT}s for RAGFlow on :$RAGFLOW_PORT ..."
-RAGFLOW_READY=false
-for i in $(seq 1 "$RAGFLOW_TIMEOUT"); do
-    if curl -s -o /dev/null -m 1 "http://localhost:$RAGFLOW_PORT" 2>/dev/null \
-       || (command -v nc &>/dev/null && nc -z 127.0.0.1 "$RAGFLOW_PORT" 2>/dev/null); then
-        RAGFLOW_READY=true
-        ok "RAGFlow is reachable on :$RAGFLOW_PORT (${i}s)"
-        break
+# Ensure WeKnora .env exists
+if [ ! -f "$ROOT/WeKnora/.env" ]; then
+    cp "$ROOT/WeKnora/.env.example" "$ROOT/WeKnora/.env"
+    ok "Created WeKnora/.env from .env.example"
+    warn "Edit WeKnora/.env to set JWT_SECRET (must match JWT_SECRET_KEY in .env)"
+else
+    ok "WeKnora/.env already exists"
+fi
+
+# Align JWT_SECRET for SSO
+if [ -n "$JWT_SECRET_KEY" ] && [ "$JWT_SECRET_KEY" != "change-me-to-a-long-random-secret" ]; then
+    current_weknora_jwt=$(grep "^JWT_SECRET=" "$ROOT/WeKnora/.env" 2>/dev/null | cut -d= -f2)
+    if [ "$current_weknora_jwt" != "$JWT_SECRET_KEY" ]; then
+        warn "WeKnora JWT_SECRET differs from JWT_SECRET_KEY — updating for SSO compatibility"
+        sed -i.bak "s/^JWT_SECRET=.*/JWT_SECRET=${JWT_SECRET_KEY}/" "$ROOT/WeKnora/.env"
+        rm -f "$ROOT/WeKnora/.env.bak"
     fi
-    sleep 1
-done
-if [ "$RAGFLOW_READY" = false ]; then
-    warn "RAGFlow did not become available within ${RAGFLOW_TIMEOUT}s."
-    warn "Check logs: docker compose $RAGFLOW_COMPOSE logs --tail=30"
 fi
 
-# RAGFlow MCP module sanity check
-if [ -f "$ROOT/ragflow/mcp/server/server.py" ]; then
-    ok "RAGFlow MCP server script present"
-    if [ -f "$ROOT/ragflow/.venv/bin/python" ] && \
-       "$ROOT/ragflow/.venv/bin/python" -c "import click, starlette" 2>/dev/null; then
-        ok "RAGFlow MCP dependencies installed"
+# Start WeKnora Docker infrastructure (postgres, redis, docreader)
+# Only the dependency services run in Docker; backend + frontend run locally
+WEKNORA_DEPS_READY=false
+if command -v nc &>/dev/null && nc -z 127.0.0.1 5432 2>/dev/null && nc -z 127.0.0.1 50051 2>/dev/null; then
+    WEKNORA_DEPS_READY=true
+    ok "WeKnora Docker infrastructure already running (postgres:5432, docreader:50051)"
+fi
+
+if [ "$WEKNORA_DEPS_READY" = false ]; then
+    warn "Starting WeKnora Docker infrastructure (postgres + redis + docreader) ..."
+    docker compose -f "$ROOT/WeKnora/docker-compose.dev.yml" up -d 2>&1 | tail -5 \
+        || { warn "docker compose up failed — start WeKnora infra manually"; }
+else
+    ok "WeKnora Docker infrastructure ready"
+fi
+
+# Install WeKnora frontend dependencies
+if [ -f "$ROOT/WeKnora/frontend/package.json" ]; then
+    if [ ! -d "$ROOT/WeKnora/frontend/node_modules" ]; then
+        warn "Installing WeKnora frontend dependencies (npm install)..."
+        (cd "$ROOT/WeKnora/frontend" && npm install --silent) \
+            || warn "WeKnora frontend npm install failed — run manually"
     else
-        warn "RAGFlow MCP deps may be missing — re-run 'cd ragflow && uv sync --all-extras'"
+        ok "WeKnora frontend node_modules already exists"
     fi
-else
-    warn "ragflow/mcp/server/server.py missing — RAGFlow checkout incomplete"
-fi
-
-# Verify docker-compose has MCP enabled (production deploy readiness, optional)
-if grep -q "^[[:space:]]*- --enable-mcpserver" "$ROOT/ragflow/docker/docker-compose.yml" 2>/dev/null; then
-    ok "RAGFlow MCP enabled in docker-compose (production deploy ready)"
-else
-    warn "RAGFlow MCP NOT enabled in docker-compose.yml — fine for dev, required for docker prod deploy"
 fi
 
 # ── 5. AIPPT ─────────────────────────────────────────────────

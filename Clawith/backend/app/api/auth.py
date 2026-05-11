@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token, decode_access_token, get_authenticated_user, get_current_user, hash_password, verify_password
+from app.core.security import create_access_token, get_authenticated_user, get_current_user, hash_password, verify_password
 from app.database import get_db
 from app.models.user import Identity, User
 from app.schemas.schemas import (
@@ -402,15 +402,18 @@ async def _handle_normal_register(data: UserRegister, background_tasks: Backgrou
         except Exception as e:
             logger.warning(f"Failed to seed default agents: {e}")
 
-    # Send verification email
-    await _send_verification_email_task(user, background_tasks, settings, db)
+    # Send verification email only when the identity still needs it. If the
+    # platform has no system email configured, registration_service auto-verifies
+    # the identity so local/self-hosted installs are not blocked.
+    if not identity.email_verified:
+        await _send_verification_email_task(user, background_tasks, settings, db)
 
     return RegisterInitResponse(
         user_id=user.id,
         email=user.email,
         access_token=create_access_token(str(user.id), user.role),
         user=UserOut.model_validate(user),
-        message="Registration successful. Please verify your email.",
+        message="Registration successful. Please verify your email." if not identity.email_verified else "Registration successful.",
         needs_company_setup=user.tenant_id is None,
     )
 
@@ -452,23 +455,37 @@ async def login(data: UserLogin, background_tasks: BackgroundTasks, db: AsyncSes
 
     if not identity.email_verified:
         from app.config import get_settings
-        # Find any user record (just for the task)
-        user_res = await db.execute(select(User).where(User.identity_id == identity.id).limit(1))
-        user = user_res.scalar_one_or_none()
-        
-        # Trigger email delivery in background
-        if user:
-            await _send_verification_email_task(user, background_tasks, get_settings(), db)
-        
-        # Consistent with identity-first flow: Return 403 Forbidden with verification intent
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "needs_verification": True,
-                "email": identity.email,
-                "message": "Please verify your email to continue."
-            }
-        )
+        from sqlalchemy import update
+        from app.services.system_email_service import resolve_email_config_async
+
+        email_config = await resolve_email_config_async(db)
+        if not email_config:
+            identity.email_verified = True
+            identity.is_active = True
+            await db.execute(
+                update(User)
+                .where(User.identity_id == identity.id)
+                .values(is_active=True)
+            )
+            await db.flush()
+        else:
+            # Find any user record (just for the task)
+            user_res = await db.execute(select(User).where(User.identity_id == identity.id).limit(1))
+            user = user_res.scalar_one_or_none()
+            
+            # Trigger email delivery in background
+            if user:
+                await _send_verification_email_task(user, background_tasks, get_settings(), db)
+            
+            # Consistent with identity-first flow: Return 403 Forbidden with verification intent
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "needs_verification": True,
+                    "email": identity.email,
+                    "message": "Please verify your email to continue."
+                }
+            )
 
     # 3. Find all User records (tenants)
     result = await db.execute(select(User).where(User.identity_id == identity.id).options(selectinload(User.identity)))
@@ -500,6 +517,7 @@ async def login(data: UserLogin, background_tasks: BackgroundTasks, db: AsyncSes
                     tenant_id=u.tenant_id,
                     tenant_name=tenant.name if tenant else "Create or Join Organization",
                     tenant_slug=tenant.slug if tenant else "",
+                    logo_url=tenant.logo_url if tenant else None,
                 ))
 
             return MultiTenantResponse(
@@ -662,7 +680,9 @@ async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user: User = Depends(get_authenticated_user)):
     """Get current user profile."""
-    return UserOut.model_validate(current_user)
+    data = UserOut.model_validate(current_user)
+    data.is_platform_admin = bool(getattr(getattr(current_user, "identity", None), "is_platform_admin", False))
+    return data
 
 
 @router.patch("/me", response_model=UserOut)
@@ -759,7 +779,8 @@ async def get_my_tenants(
         TenantChoice(
             tenant_id=t.id,
             tenant_name=t.name,
-            tenant_slug=t.slug
+            tenant_slug=t.slug,
+            logo_url=t.logo_url,
         ) for t in tenants
     ]
 
@@ -912,7 +933,7 @@ async def oauth_callback(
 
     try:
         # Exchange code for token
-        token_data = await auth_provider.exchange_code_for_token(data.code)
+        token_data = await auth_provider.exchange_code_for_token(data.code, data.redirect_uri)
         access_token = token_data.get("access_token")
         if not access_token:
             raise HTTPException(status_code=400, detail="Failed to get access token from provider")
@@ -972,7 +993,7 @@ async def bind_identity(
         user_info = await auth_provider.get_user_info(access_token)
 
         # Check if identity is already linked to another user
-        lookup_provider_user_id = user_info.provider_union_id or user_info.provider_user_id
+        lookup_provider_user_id = user_info.provider_user_id
         existing_user = await sso_service.check_duplicate_identity(
             db,
             provider,
@@ -1126,47 +1147,3 @@ async def resend_verification(
         await _send_verification_email_task(user, background_tasks, settings, db)
 
     return generic_response
-
-
-# ─── SSO Verification Endpoint ──────────────────────────────────────
-
-
-@router.post("/sso/verify")
-async def sso_verify_token(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Verify a Clawith JWT and return user info.
-
-    Used by external services (AIPPT) that have no backend of their own.
-    Accepts {"token": "<jwt>"} and returns user info in AIPPT-compatible format.
-    """
-    body = await request.json()
-    token = body.get("token")
-    if not token:
-        raise HTTPException(status_code=400, detail="token is required")
-
-    payload = decode_access_token(token)
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    result = await db.execute(
-        select(User).where(User.id == uuid.UUID(user_id))
-    )
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
-
-    return {
-        "code": 200,
-        "data": {
-            "token": token,
-            "user": {
-                "id": str(user.id),
-                "email": user.email,
-                "username": user.username or user.display_name,
-                "role": user.role,
-            },
-        },
-    }
