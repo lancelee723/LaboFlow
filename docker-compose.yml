@@ -5,7 +5,7 @@ include:
     env_file: WeKnora/.env
 
 services:
-  postgres:
+  clawith-postgres:
     image: postgres:15.12-alpine
     restart: unless-stopped
     environment:
@@ -42,7 +42,7 @@ services:
       - 223.5.5.5
       - 114.114.114.114
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-clawith}:${POSTGRES_PASSWORD:-clawith}@postgres:5432/${POSTGRES_DB:-clawith}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-clawith}:${POSTGRES_PASSWORD:-clawith}@clawith-postgres:5432/${POSTGRES_DB:-clawith}
       REDIS_URL: redis://clawith-redis:6379/0
       AGENT_DATA_DIR: /data/agents
       AGENT_TEMPLATE_DIR: /app/agent_template
@@ -56,7 +56,7 @@ services:
     volumes:
       - agent_data:/data/agents
     depends_on:
-      postgres:
+      clawith-postgres:
         condition: service_healthy
       clawith-redis:
         condition: service_healthy
@@ -80,6 +80,23 @@ services:
     restart: unless-stopped
     networks:
       - laboflow
+
+  # Override WeKnora images to use LaboFlow registry tags.
+  app:
+    build:
+      context: ./WeKnora
+      dockerfile: docker/Dockerfile.app
+      args:
+        - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-app:${TAG:-1.0}
+
+  docreader:
+    build:
+      context: ./WeKnora
+      dockerfile: docker/Dockerfile.docreader
+      args:
+        - APT_MIRROR=${APT_MIRROR:-}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-docreader:${TAG:-1.0}
 
   # Override WeKnora's frontend with LaboFlow custom build (/kb/ base path).
   # Same service name as the included WeKnora/docker-compose.yml so it takes
@@ -127,6 +144,7 @@ services:
     depends_on:
       - clawith-frontend
       - clawith-backend
+      - frontend
       - aippt
     networks:
       - laboflow

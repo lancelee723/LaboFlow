@@ -42,8 +42,8 @@ def upgrade() -> None:
     # Backfill from chat history: any pair that has ever exchanged messages is
     # considered already onboarded — don't re-greet established relationships.
     op.execute("""
-        INSERT INTO agent_user_onboardings (agent_id, user_id, onboarded_at)
-        SELECT agent_id, user_id, MIN(created_at)
+        INSERT INTO agent_user_onboardings (agent_id, user_id, onboarded_at, phase)
+        SELECT agent_id, user_id, MIN(created_at), 'completed'
         FROM chat_messages
         WHERE agent_id IS NOT NULL AND user_id IS NOT NULL
         GROUP BY agent_id, user_id

@@ -47,7 +47,9 @@
 
 ### 1.1 产品定位
 
-LaboFlow 是一款面向咨询行业的 AI 工作台，旨在为咨询从业者提供高效、智能的一站式工作环境。它基于 **Clawith**（多智能体协作主平台）、**LightRAG**（RAG 知识库引擎）和 **AIPPT**（AI PPT 演示文稿生成）三个开源组件集成构建，通过 NGINX 反向代理统一到单一入口，实现统一认证和无缝的用户体验。
+LaboFlow 是一款面向咨询行业的 AI 工作台，旨在为咨询从业者提供高效、智能的一站式工作环境。它基于 **Clawith**（多智能体协作主平台）、**WeKnora**（知识库）和 **AIPPT**（AI PPT 演示文稿生成）三个开源组件集成构建，通过 NGINX 反向代理统一到单一入口，实现统一认证和无缝的用户体验。
+
+当前项目同时提供两套 Docker 生产编排：完整版包含 Clawith、WeKnora 与 AIPPT；精简版 `docker-compose-withoutppt.yml` 则保留主平台与知识库，适合不需要 PPT 能力的场景。
 
 LaboFlow 不仅仅是一个 AI 聊天工具，它将 AI Agent 定义为组织中的"数字员工"——每个 Agent 拥有独立的身份、长期记忆和私有工作空间，能够在组织架构中与人和其他 Agent 协同工作。
 
@@ -61,11 +63,11 @@ LaboFlow 不仅仅是一个 AI 聊天工具，它将 AI Agent 定义为组织中
 - 广场（Plaza）：智能体之间共享发现、评论彼此工作的实时知识流
 - 组织级控制：多租户 RBAC、即时通讯频道集成、用量配额、审批工作流、审计日志
 
-**RAG 知识库**
-- 双层检索：向量检索 + 知识图谱双重检索机制
-- 多存储后端：支持 PostgreSQL、MongoDB、Neo4j、OpenSearch 等多种存储方案
-- 交互式 WebUI：文档索引、知识图谱可视化、简单 RAG 查询界面
-- Reranker 集成：混合查询模式下自动启用重排模型
+**WeKnora 知识库**
+- 文档解析：内置 DocReader，复杂 PDF 场景可选接入 MinerU
+- 多策略检索：支持向量检索、关键词检索、混合检索和按知识库启用 GraphRAG / Wiki
+- 多存储后端：支持 PostgreSQL、Qdrant、Milvus、Elasticsearch、Weaviate 等多种向量存储
+- Agent 问答：支持在知识库内直接问答，也可结合 Agent 与 MCP 工具完成复杂任务
 
 **AI PPT 演示文稿**
 - 多 LLM 支持：DeepSeek、GPT、Claude、Gemini、Kimi、通义千问等
@@ -87,7 +89,7 @@ LaboFlow 采用 NGINX 反向代理架构，将三个组件统一到单一入口�
 | NGINX 统一入口 | **3008** | — |
 | Clawith 前端 | 3080 | `/` |
 | Clawith 后端 | 8008 | `/api`, `/ws` |
-| LightRAG | 9621 | `/kb/` |
+| WeKnora | 8800 | `/kb/` |
 | AIPPT | 5173 | `/ppt/` |
 
 ### 1.4 核心模块概览
@@ -97,7 +99,7 @@ LaboFlow 由以下核心模块组成：
 | 模块 | 说明 |
 |------|------|
 | **Clawith** | 主平台，负责多智能体协作、任务管理、用户认证、系统设置等 |
-| **LightRAG** | 知识库引擎，提供 RAG 检索增强生成和知识图谱功能 |
+| **WeKnora** | 知识库子系统，负责文档解析、索引、检索、知识图谱与 Wiki 能力 |
 | **AIPPT** | AI PPT 工具，支持智能生成和编辑演示文稿 |
 | **Pro Charts** | 在线图表生成工具，用于创建专业数据可视化图表 |
 | **Pro Slides** | 在线 AI PPT 生成工具，支持实时渲染和编辑 |
@@ -112,45 +114,58 @@ Docker 部署是推荐的一键安装方式，适用于快速体验和生产环�
 
 **前置要求**
 - 已安装 Docker 和 Docker Compose
-- 系统资源：最低 2 核 CPU / 4 GB 内存 / 30 GB 磁盘
+- 系统资源：
+   - 无 PPT 精简版建议至少 2 核 CPU / 4 GB 内存 / 30 GB 磁盘
+   - 完整版建议至少 4 核 CPU / 8 GB 内存 / 40 GB 磁盘
 
 **安装步骤**
 
 **第一步：获取项目代码**
 
 ```bash
-git clone https://github.com/your-repo/LaboFlow.git
+git clone https://github.com/lancelee723/LaboFlow.git
 cd LaboFlow
 ```
 
 > **提示**：如果 `git clone` 速度较慢，可以使用浅克隆：
 > ```bash
-> git clone --depth 1 https://github.com/your-repo/LaboFlow.git
+> git clone --depth 1 https://github.com/lancelee723/LaboFlow.git
 > ```
 
 **第二步：配置环境变量**
 
 ```bash
 cp .env.example .env
+cp WeKnora/.env.example WeKnora/.env
 ```
 
-编辑 `.env` 文件，设置以下必填项：
+编辑 `.env` 和 `WeKnora/.env` 文件，至少确认以下配置：
 
 ```bash
-# JWT 密钥（必须修改）
+# .env
 JWT_SECRET_KEY=your-jwt-secret-key
 
 # 生成 JWT 密钥的命令：
 python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 
-# LLM API 密钥（根据你的模型提供商配置）
-LIGHTRAG_LLM_BINDING_API_KEY=your-api-key
+# WeKnora/.env
+JWT_SECRET=your-jwt-secret-key
 ```
 
-**第三步：启动服务**
+> **重要**：`WeKnora/.env` 中的 `JWT_SECRET` 必须与根目录 `.env` 中的 `JWT_SECRET_KEY` 保持一致，否则知识库 SSO 无法工作。
+
+**第三步：选择部署方式并启动服务**
+
+完整版（含 AIPPT）：
 
 ```bash
 docker compose up -d
+```
+
+无 PPT 精简版：
+
+```bash
+docker compose -f docker-compose-withoutppt.yml up -d
 ```
 
 启动后，通过以下地址访问：
@@ -159,10 +174,18 @@ docker compose up -d
 - **知识库**：http://localhost:3008/kb/
 - **AI PPT**：http://localhost:3008/ppt/
 
+> **说明**：使用 `docker-compose-withoutppt.yml` 时，`/ppt/` 路径不会提供服务。
+
 **停止服务**
 
 ```bash
 docker compose down
+```
+
+若使用无 PPT 精简版：
+
+```bash
+docker compose -f docker-compose-withoutppt.yml down
 ```
 
 **更新版本**
@@ -173,6 +196,23 @@ docker compose down
 git pull
 docker compose up -d --build
 ```
+
+如需更新无 PPT 精简版：
+
+```bash
+git pull
+docker compose -f docker-compose-withoutppt.yml up -d --build
+```
+
+**可选：构建并推送私有镜像**
+
+如果你维护的是私有化部署环境，需要重新打包并推送镜像，可运行：
+
+```bash
+./docker-image-manager.sh
+```
+
+脚本当前支持构建和推送 Clawith、WeKnora、AIPPT 与 NGINX 的 LaboFlow 定制镜像。
 
 > **中国用户注意**：如果 Docker 镜像拉取超时，请配置 Docker 镜像加速器：
 > ```bash
@@ -200,8 +240,9 @@ docker compose up -d --build
 | Node.js | 20+ | `brew install node` (macOS) |
 | pnpm | 最新 | `npm install -g pnpm` |
 | uv | 最新 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Go | 1.23+ | `brew install go` (macOS) / `sudo apt install golang` |
 | nginx | 最新 | `brew install nginx` (macOS) / `sudo apt install nginx` (Linux) |
-| PostgreSQL | 15+ | 脚本可自动安装，也可使用已有实例 |
+| Docker & Docker Compose | 最新 | Docker Desktop / Docker Engine |
 
 **安装步骤**
 
@@ -210,6 +251,7 @@ docker compose up -d --build
 ```bash
 cd LaboFlow
 cp .env.example .env
+cp WeKnora/.env.example WeKnora/.env
 ```
 
 生成 JWT 密钥并填入 `.env`：
@@ -217,6 +259,8 @@ cp .env.example .env
 ```bash
 python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 ```
+
+并确保 `WeKnora/.env` 中的 `JWT_SECRET` 与之保持一致。
 
 **第二步：安装所有依赖**
 
@@ -228,7 +272,7 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 
 1. 检查系统工具（nginx、uv、pnpm、python3）是否已安装
 2. Clawith：安装 Python 虚拟环境、Node 依赖、配置 PostgreSQL
-3. LightRAG：使用 `uv sync` 同步 Python 依赖并生成 `.env`
+3. WeKnora：准备 `.env`、启动开发依赖容器（postgres / redis / docreader）、安装前端依赖
 4. AIPPT：使用 `pnpm install` 安装前端依赖
 
 **第三步：启动开发环境**
@@ -247,7 +291,7 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
   Direct access (debugging):
     Clawith frontend  http://localhost:3080
     Clawith backend   http://localhost:8008/api/health
-    LightRAG          http://localhost:9621
+      WeKnora           http://localhost:8800
     AIPPT             http://localhost:5173
 
   Logs:   tail -f .data/log/*.log
@@ -272,9 +316,11 @@ tail -f .data/log/*.log
 |------|----------|
 | 端口被占用 | 运行 `./stop.sh` 清理端口；仍占用可手动 `lsof -i:3008` |
 | NGINX 启动失败 | 检查 `include /etc/nginx/mime.types` 路径是否正确 |
-| LightRAG 启动失败 | 确认 `LightRAG/.env` 存在且 LLM API Key 已配置 |
+| WeKnora 启动失败 | 优先检查 `.data/log/weknora-app.log` 和 `.data/log/weknora-infra.log` |
+| WeKnora 文档解析失败 | 确认开发依赖容器已启动：`docker compose -f WeKnora/docker-compose.dev.yml -f docker-compose.dev-override.yml ps` |
 | AIPPT 子路径 404 | 确保 `VITE_BASE=/ppt/` 环境变量已正确传入 |
-| 数据库连接失败 | 确认 PostgreSQL 已启动，`DATABASE_URL` 配置正确 |
+| Clawith 数据库连接失败 | 确认本机 PostgreSQL 已启动，且 `.env` 中 `DATABASE_URL` 配置正确 |
+| WeKnora 数据库连接失败 | 开发模式下 WeKnora 默认连接 `localhost:5433`，确认开发依赖容器已正常启动 |
 
 ---
 
@@ -404,16 +450,16 @@ LaboFlow 的用户权限分为两个级别：
 
 ### 4.3 知识库
 
-点击左侧导航栏中的 **知识库** 按钮，即可跳转至知识库页面。
+点击左侧导航栏中的 **知识库** 按钮，系统会通过 SSO 打开 WeKnora 知识库页面。
 
-知识库基于 LightRAG 引擎构建，提供强大的 RAG（检索增强生成）能力和知识图谱支持。
+知识库由 WeKnora 提供，负责文档解析、索引、检索、知识图谱与 Wiki 能力。
 
 **主要功能**
 
-- 文档上传与索引
-- 向量检索与知识图谱双重检索
-- 知识图谱可视化
-- RAG 查询与问答
+- 知识库创建、文档上传与异步解析
+- 向量检索、关键词检索与混合检索
+- 按知识库开启 GraphRAG / Wiki / 向量库绑定
+- RAG 查询、Agent 问答与来源引用查看
 
 > **详细说明**：关于知识库的详细使用方法，请参阅本手册 [第七章：知识库](#七知识库)。
 
@@ -698,97 +744,99 @@ Agent 关系管理是 LaboFlow 最具特色的功能之一。作为组织中的�
 
 ## 七、知识库
 
-知识库模块基于 LightRAG 引擎构建，提供强大的 RAG（检索增强生成）能力和知识图谱功能。通过向量检索与知识图谱双重检索机制，大幅提升查询准确性和多样性。
+知识库模块由 WeKnora 提供。LaboFlow 负责统一入口与 SSO，WeKnora 负责文档解析、索引构建、检索、知识图谱、Wiki 与知识问答。
 
 **访问入口**
 
-在 LaboFlow 主页左侧导航栏中点击 **知识库**，或直接访问 `http://localhost:3008/kb/`，即可进入知识库 WebUI 界面。
+在 LaboFlow 主页左侧导航栏中点击 **知识库**，或直接访问 `http://localhost:3008/kb/`，即可进入 WeKnora Web 界面。首次进入时系统会自动完成 SSO 登录。
 
-### 7.1 上传文件
+### 7.1 新建知识库与上传文件
 
 **支持的格式**
 
-知识库支持上传多种格式的文档，LightRAG 已集成 RAG-Anything 多模态处理能力，可处理：
+WeKnora 支持上传多种类型的知识内容，可处理：
 - **文本文件**：TXT、Markdown 等
 - **办公文档**：PDF、Word（DOCX）、Excel、PowerPoint 等
-- **多媒体内容**：图片、表格、公式等
+- **结构化内容**：CSV、JSON、FAQ 条目等
+- **图像内容**：图片、扫描件与复杂版式文档（解析质量取决于所选解析器）
+
+**推荐流程**
+
+1. 进入知识库页面后，先创建一个新的知识库（Knowledge Base）
+2. 为该知识库选择名称、描述和需要启用的检索能力
+3. 如管理员已配置多个向量库或对象存储，可按知识库选择对应后端
+4. 进入知识库详情页后上传文件
 
 **上传步骤**
 
-1. 进入知识库 WebUI 界面
-2. 在页面中找到 **文档上传（Upload / Insert）** 区域
+1. 进入目标知识库详情页
+2. 在页面中找到 **上传文档** 或 **新增文档** 区域
 3. 选择本地文件或通过拖拽方式将文件添加到上传列表
 4. 确认文件列表无误后，点击 **上传** 按钮
 
-> **提示**：上传的文件会存储在 `LightRAG/.inputs/` 目录中。上传完成后，文件尚处于"已存储"状态，需要执行索引操作后才能用于检索和问答。
+> **提示**：上传的原始文件会进入 WeKnora 当前配置的存储后端（默认可为本地存储，也可以是 MinIO / S3 / COS 等对象存储），不再依赖 LaboFlow 根目录下的固定输入文件夹。
 
-### 7.2 开始分析（文档索引）
+### 7.2 开始分析（文档解析与索引）
 
-上传文件后，需要对其进行索引（Indexing）才能构建知识图谱和向量索引，使其可以被查询。
+上传文件后，需要执行解析与索引，系统才会构建可检索的内容。
 
-**索引过程**
+**处理过程**
 
-LightRAG 的索引流程如下：
+WeKnora 的典型流程如下：
 
-1. 系统读取已上传的文档内容
-2. LLM 对文档进行实体和关系提取，构建知识图谱
-3. 文档内容同时被切分并进行 Embedding 向量化，存储到向量数据库中
+1. 解析器读取原始文档并提取文本、图片和结构化内容
+2. 系统对内容进行分块、Embedding 和索引写入
+3. 如果知识库启用了关键词检索、GraphRAG 或 Wiki，相关结构会异步构建
+4. 完成后文档状态会更新为可检索
 
-**执行索引**
+**执行解析 / 索引**
 
 在 WebUI 界面中：
-1. 找到 **索引/处理** 相关按钮或操作区
-2. 点击 **开始索引** 或 **插入文档** 按钮，系统将自动对已上传的文档进行分析和索引
-3. 索引进度和状态可在界面中查看
+1. 找到文档列表中的 **解析**、**重新解析** 或同类操作按钮
+2. 触发后系统会异步处理文档，无需保持页面停留
+3. 处理进度、失败原因和最终状态可在界面中查看
 
-> **LLM 配置要求**：LightRAG 对 LLM 能力要求较高。建议使用至少 32B 参数量的模型，上下文长度至少 32KB（推荐 64KB）。索引阶段不建议使用推理模型（Reasoning Models），因为它们会显著增加处理时间。
+> **解析器说明**：默认解析由 DocReader 提供；如果管理员已启用 MinerU，则复杂扫描 PDF 或版式文档通常能获得更好的解析结果。
 
-> **Embedding 模型注意**：Embedding 模型必须在首次索引前确定，且查询阶段必须使用相同的模型。更换 Embedding 模型需要删除已有向量表并重建。
+### 7.3 检索、问答与知识图谱 / Wiki
 
-### 7.3 构建知识图谱
+WeKnora 的检索能力按知识库独立配置，不同知识库可以启用不同的能力组合。
 
-知识图谱是 LightRAG 的核心特性，提供超越传统 RAG 的检索能力。
+**常见能力**
 
-**自动构建**
+- **向量检索**：基于 Embedding 的语义检索
+- **关键词检索**：适合精确关键词和术语查找
+- **混合检索**：同时结合语义与关键词召回
+- **GraphRAG**：按知识库开启实体关系抽取与图谱增强检索
+- **Wiki 模式**：由 Agent 从文档中沉淀结构化知识页面与关系图谱
 
-知识图谱在文档索引过程中自动构建，无需手动操作。LLM 会从文档中提取实体（Entities）和关系（Relationships），形成结构化的知识网络。
+**常见使用方式**
 
-**知识图谱可视化**
-
-知识库 WebUI 提供了完整的知识图谱可视化功能：
-
-- **图谱浏览**：以图形化方式展示实体节点和它们之间的关联关系
-- **布局调整**：支持多种力导向布局（gravity layouts），可调整节点排列方式
-- **节点查询**：点击特定节点可查看该实体的详细信息
-- **子图过滤**：以某个节点为中心，筛选和展示其关联的子图结构
-- **交互式探索**：通过缩放、拖拽等操作自由探索知识图谱
-
-**查询模式**
-
-LightRAG 支持多种查询模式：
-- **向量检索**：基于语义相似度的传统 RAG 检索
-- **图谱检索**：基于知识图谱的实体和关系检索
-- **混合模式（Mix Mode）**：同时使用向量和图谱检索，并在开启 Reranker 后自动进行结果重排，推荐作为默认查询模式
+1. 在知识库详情页直接提问，查看回答与引用来源
+2. 在文档管理页查看每份文档的解析结果和索引状态
+3. 如果知识库启用了图谱或 Wiki，可进入相应界面查看实体关系或页面网络
+4. 在 Agent 场景中，将知识库绑定到 Agent 后，可复用同一套检索结果与引用
 
 ### 7.4 管理数据
 
-**删除文档**
+**常见管理操作**
 
-LightRAG 支持文档删除功能，删除文档后系统会**自动重新生成知识图谱**，确保查询性能最优。
+- 删除单个或批量文档
+- 重新解析失败或配置变更后的文档
+- 调整知识库级别的检索、向量库和存储配置
+- 查看文档来源、标签、状态与最近更新时间
 
-删除步骤：
-1. 在知识库 WebUI 中找到已索引的文档列表
-2. 找到需要删除的文档
-3. 点击 **删除** 按钮确认删除操作
-4. 系统将自动移除该文档的相关数据并重建知识图谱
+**删除与重建说明**
 
-**LLM 缓存管理**
+1. 在知识库文档列表中选择目标文档
+2. 点击 **删除** 或批量删除按钮确认操作
+3. 系统会异步清理相应的索引和关联结构
 
-索引和查询过程中，LLM 的响应会被缓存以避免重复调用。如需清理缓存：
-- 缓存文件存储在 `dickens`（或对应数据目录）中
-- 如要保留 LLM 缓存但清理向量数据，可保留 `kv_store_llm_response_cache.json` 文件，清除数据目录中的其他内容
+**配置变更说明**
 
-> **重要提示**：如果更换了 Embedding 模型，必须清除整个数据目录（保留 LLM 缓存除外），否则程序会因向量维度不匹配而报错。
+- 如果更换了 Embedding、向量库或索引策略，通常需要重新解析已有文档
+- 如果切换了存储后端或对象存储凭证，应先确认新后端连通性，再执行批量重建
+- 若管理员启用了新的解析器（例如 MinerU），建议对复杂 PDF 执行重新解析以提升结果质量
 
 ---
 
@@ -818,26 +866,35 @@ Pro Charts 是一个简洁、直观的在线式图表生成工具。
 
 ### A. 环境变量说明
 
-主要环境变量配置在 `.env` 文件中：
+主要环境变量分为两层：根目录 `.env` 用于 LaboFlow 统一入口和 Clawith / AIPPT，`WeKnora/.env` 用于知识库子系统。
 
 ```bash
-# 统一入口
+# 根目录 .env
 NGINX_PORT=3008
 PUBLIC_BASE_URL=http://localhost:3008
 
 # Clawith
+CLAWITH_FRONTEND_PORT=3080
 JWT_SECRET_KEY=your-jwt-secret-key
 CLAWITH_BACKEND_PORT=8008
-
-# LightRAG
-LIGHTRAG_PORT=9621
-LIGHTRAG_LLM_BINDING_API_KEY=your-api-key
-LIGHTRAG_EMBEDDING_MODEL=text-embedding-3-small
+WEKNORA_URL=/kb
+WEKNORA_FRONTEND_PORT=8800
+AIPPT_PORT=5173
+DATABASE_URL=postgresql+asyncpg://clawith:clawith@localhost:5432/clawith?ssl=disable
 
 # AIPPT
 VITE_JWT_SECRET=${JWT_SECRET_KEY}
 VITE_CUSTOM_LLM_URL=http://localhost:8008/api/v1/llm-proxy
+
+# WeKnora/.env
+DB_USER=postgres
+DB_PASSWORD=your-weknora-db-password
+DB_NAME=WeKnora
+REDIS_PASSWORD=your-weknora-redis-password
+JWT_SECRET=your-jwt-secret-key
 ```
+
+> **说明**：开发模式下 `dev.sh` 会将 WeKnora 的数据库地址覆盖为 `localhost:5433`，以避开 Clawith 默认使用的本机 PostgreSQL 端口。
 
 ### B. 端口规划
 
@@ -846,14 +903,16 @@ VITE_CUSTOM_LLM_URL=http://localhost:8008/api/v1/llm-proxy
 | NGINX 统一入口 | **3008** | — |
 | Clawith 前端 | 3080 | `/` |
 | Clawith 后端 | 8008 | `/api`, `/ws` |
-| LightRAG | 9621 | `/kb/` |
+| WeKnora 前端 | 8800 | `/kb/` |
+| WeKnora 后端（开发直连） | 8080 | — |
+| WeKnora DocReader | 50051 | — |
 | AIPPT | 5173 | `/ppt/` |
 
 ### C. 推荐系统配置
 
 | 场景 | CPU | 内存 | 磁盘 | 说明 |
 |------|-----|------|------|------|
-| 个人体验/Demo | 1 核 | 2 GB | 20 GB | 使用 SQLite，跳过 Agent 容器 |
-| 完整体验（1-2 个 Agent） | 2 核 | 4 GB | 30 GB | 推荐入门配置 |
-| 小团队（3-5 个 Agent） | 2-4 核 | 4-8 GB | 50 GB | 使用 PostgreSQL |
-| 生产环境 | 4+ 核 | 8+ GB | 50+ GB | 多租户，高并发 |
+| 无 PPT 精简体验 | 2 核 | 4 GB | 30 GB | 使用 `docker-compose-withoutppt.yml` |
+| 完整体验（1-2 个 Agent） | 4 核 | 8 GB | 40 GB | Clawith + WeKnora + AIPPT |
+| 小团队（3-5 个 Agent） | 4-8 核 | 8-16 GB | 80 GB | 建议使用对象存储与定期数据库备份 |
+| 生产环境 | 8+ 核 | 16+ GB | 100+ GB | 建议分别备份 Clawith 与 WeKnora 两套 PostgreSQL 数据 |

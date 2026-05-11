@@ -407,8 +407,8 @@ export default function Login() {
             <div className="login-hero">
                 <div className="login-hero-bg" />
                 <div className="login-hero-mark" aria-hidden="true">
-                    <img src="/logo-black.png" className="login-hero-mark-logo" alt="" />
-                    <span>Clawith</span>
+                    <img src="/laboflow-logo.svg" className="login-hero-mark-logo" alt="" />
+                    <span>LaboFlow</span>
                     <span className="login-hero-mark-divider" />
                     <span>{t('login.hero.mark')}</span>
                 </div>

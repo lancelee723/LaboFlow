@@ -6,12 +6,12 @@
   "login": {
     "hero": {
       "badge": "Open Source · Multi-Agent Collaboration",
-      "title": "Clawith",
-      "subtitle": "Your Agent Company.",
+      "title": "LaboFlow",
+      "subtitle": "Your AI WorkBench.",
       "welcome": "Welcome,",
       "founder": "Founder",
-      "description": "Let's build your Agent Company",
-      "mark": "Your Agent Company",
+      "description": "Let's build your AI WorkBench",
+      "mark": "Your AI WorkBench",
       "features": {
         "multiAgent": {
           "title": "Multi-Agent Crew",
@@ -58,6 +58,8 @@
     "enterprise": "Company Settings",
     "language": "Language",
     "plaza": "Plaza",
+    "knowledgeBase": "Knowledge Base",
+    "aiPPT": "Pro Slides",
     "okr": "OKR"
   },
   "talentMarket": {

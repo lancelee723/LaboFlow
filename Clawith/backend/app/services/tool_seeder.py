@@ -3393,7 +3393,9 @@ WEKNORA_TOOLS = [
             "When asked to look something up in the knowledge base, call this tool "
             "with the user's question. Optionally narrow the search to specific "
             "knowledge bases by passing knowledge_base_ids. "
-            "Pass an empty query to list all available knowledge bases."
+            "Pass an empty query to list all available knowledge bases. "
+            "Tag workflow: use list_tags=true to discover tags, then filter files by tag_id. "
+            "Wiki: use wiki_list_pages to browse, wiki_search_pages to search, wiki_get_page to read."
         ),
         "category": "knowledge",
         "icon": "📚",
@@ -3448,7 +3450,19 @@ WEKNORA_TOOLS = [
                 },
                 "list_tags": {
                     "type": "boolean",
-                    "description": "Set to true to list available tags (names and IDs) in a knowledge base.",
+                    "description": "Set to true to list available tags (names, IDs, colors, file counts) in a knowledge base. Use this first in the tag workflow: list_tags=true → pick tag_id → list files with that tag.",
+                },
+                "wiki_list_pages": {
+                    "type": "boolean",
+                    "description": "Set to true to list wiki pages in a knowledge base. Shows slug, title, type, status, and summary for each page. Requires the knowledge base to have the Wiki feature enabled.",
+                },
+                "wiki_get_page": {
+                    "type": "string",
+                    "description": "Slug of a wiki page to retrieve its full markdown content. Use wiki_list_pages=true first to discover available slugs.",
+                },
+                "wiki_search_pages": {
+                    "type": "string",
+                    "description": "Search query to find matching wiki pages by full-text search. Returns matching pages with their slugs and summaries.",
                 },
                 "match_count": {
                     "type": "integer",

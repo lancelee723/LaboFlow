@@ -8,6 +8,8 @@
 - [核心功能](#核心功能)
 - [系统架构](#系统架构)
 - [快速开始](#快速开始)
+- [部署变体](#部署变体)
+- [镜像构建与推送](#镜像构建与推送)
 - [开发指南](#开发指南)
 - [WeKnora 集成说明](#weknora-集成说明)
 
@@ -26,6 +28,8 @@ LaboFlow 由三个核心组件构成：
 | **AIPPT** | Vue 3 + Vite | AI PPT：智能生成演示文稿、在线编辑与导出 |
 
 LaboFlow 通过 NGINX 反向代理将三个组件统一到单一入口（默认端口 3008），实现统一认证和无缝的用户体验。
+
+当前 Docker 生产编排保留了 Clawith 与 WeKnora 各自独立的 PostgreSQL/Redis 依赖，并提供完整版与无 PPT 精简版两套编排文件。
 
 ---
 
@@ -109,6 +113,8 @@ LaboFlow/
 ├── nginx.conf                # NGINX 反向代理配置（开发）
 ├── nginx/docker.conf         # NGINX 反向代理配置（生产）
 ├── docker-compose.yml        # Docker 一键部署配置
+├── docker-compose-withoutppt.yml  # 无 AIPPT 的精简部署配置
+├── docker-image-manager.sh   # 镜像构建 / 推送脚本
 ├── dev.sh                    # 开发模式启动脚本
 └── stop.sh                   # 停止所有服务
 ```
@@ -124,9 +130,9 @@ LaboFlow/
 - Go 1.23+ (WeKnora)
 - `uv`：`curl -LsSf https://astral.sh/uv/install.sh | sh`
 - `nginx`：macOS `brew install nginx`，Debian/Ubuntu `sudo apt install nginx`
-- Docker & Docker Compose（WeKnora 依赖服务通过 Docker 运行）
+- Docker & Docker Compose（WeKnora 开发依赖服务和生产编排都通过 Docker 运行）
 
-### 方法一：Docker 一键启动（推荐）
+### 方法一：Docker 一键启动（完整版，推荐）
 
 ```bash
 # 克隆项目
@@ -143,6 +149,9 @@ cp WeKnora/.env.example WeKnora/.env
 
 # 一键启动所有服务
 docker compose up -d
+
+# 查看服务状态
+docker compose ps
 ```
 
 启动后访问：
@@ -152,6 +161,61 @@ docker compose up -d
 - **AI PPT**：http://localhost:3008/ppt/
 
 停止服务：`docker compose down`
+
+### 方法二：Docker 一键启动（无 PPT 精简版）
+
+如果当前环境不需要 AIPPT，可直接使用精简编排：
+
+```bash
+cp .env.example .env
+cp WeKnora/.env.example WeKnora/.env
+
+# 同样需要保证 JWT_SECRET_KEY 与 WeKnora/.env 中的 JWT_SECRET 一致
+docker compose -f docker-compose-withoutppt.yml up -d
+```
+
+启动后访问：
+
+- **统一入口**：http://localhost:3008
+- **知识库**：http://localhost:3008/kb/
+
+说明：该模式下 `/ppt/` 不提供服务。
+
+停止服务：`docker compose -f docker-compose-withoutppt.yml down`
+
+## 部署变体
+
+| 编排文件 | 适用场景 | 包含服务 |
+|------|------|------|
+| `docker-compose.yml` | 完整体验 / 生产部署 | Clawith + WeKnora + AIPPT + NGINX |
+| `docker-compose-withoutppt.yml` | 无 PPT 精简部署 | Clawith + WeKnora + NGINX |
+| `docker-compose.dev-override.yml` | 本地开发辅助 | 仅用于 `dev.sh` 覆盖 WeKnora 开发端口 |
+
+说明：主编排通过 `include` 引入 `WeKnora/docker-compose.yml`，并在根目录覆盖 LaboFlow 定制镜像与 NGINX 路由。
+
+## 镜像构建与推送
+
+仓库提供交互式脚本 [docker-image-manager.sh](docker-image-manager.sh)，用于本地构建、远程推送和清理 Buildx 缓存。
+
+当前脚本管理的镜像包括：
+
+- `docker-clawith-backend`
+- `docker-clawith-frontend`
+- `docker-clawith-bridge`
+- `docker-aippt`
+- `docker-weknora-app`
+- `docker-weknora-docreader`
+- `docker-weknora-frontend`
+- `docker-nginx`
+
+运行方式：
+
+```bash
+chmod +x docker-image-manager.sh
+./docker-image-manager.sh
+```
+
+推送到私有仓库后，可通过 `REGISTRY` 和 `TAG` 环境变量让 Compose 编排直接拉取对应版本镜像。
 
 ---
 
@@ -233,7 +297,7 @@ WEKNORA_FRONTEND_PORT=8800
 | NGINX 启动失败 | 检查 `include /etc/nginx/mime.types` 路径是否正确 |
 | WeKnora 文档解析失败 | 确认 DocReader 已启动：`docker compose ps docreader` |
 | WeKnora 知识库不可用 | 确认向量存储引擎（默认 pgvector）已就绪 |
-| 数据库连接失败 | 确认 Docker 依赖服务已启动：`docker compose up -d postgres` |
+| 数据库连接失败 | 确认所需数据库容器已启动：`docker compose up -d clawith-postgres postgres` |
 | SSO 登录失败 | 确认 JWT_SECRET_KEY 与 WeKnora/.env 中的 JWT_SECRET 一致 |
 
 查看日志：

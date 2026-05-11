@@ -1053,7 +1053,7 @@ export default function Layout() {
                 <div className="sidebar-top">
                     <div className="sidebar-logo">
                         <img className="sidebar-logo-image" src="/laboflow-logo.svg" alt="LaboFlow" />
-                        <span className="sidebar-logo-text">LaboFlow</span>                        <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
+                        <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
                             padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             marginLeft: 'auto', color: 'var(--text-tertiary)',
                         }} title={isSidebarCollapsed ? t('common.expandSidebar') : t('common.collapseSidebar')}>
@@ -1096,7 +1096,7 @@ export default function Layout() {
                             <span className="sidebar-item-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                                 <IconPresentation size={14} stroke={1.5} />
                             </span>
-                            <span className="sidebar-item-text">{t('nav.aiPPT', 'AI PPT')}</span>
+                            <span className="sidebar-item-text">{t('nav.aiPPT', 'Pro Slides')}</span>
                             <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
                         </a>
                         <NavLink

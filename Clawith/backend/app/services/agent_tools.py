@@ -4391,6 +4391,12 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
     query = (arguments.get("query") or "").strip()
     kb_ids = arguments.get("knowledge_base_ids") or []
     knowledge_ids = arguments.get("knowledge_ids") or []
+    tag_id = (arguments.get("tag_id") or "").strip()
+    tag_name = (arguments.get("tag_name") or "").strip()
+    list_tags = bool(arguments.get("list_tags"))
+    wiki_list_pages = bool(arguments.get("wiki_list_pages"))
+    wiki_get_page = (arguments.get("wiki_get_page") or "").strip()
+    wiki_search_pages = (arguments.get("wiki_search_pages") or "").strip()
     chunk_offset = max(0, int(arguments.get("chunk_offset", 0)))
     match_count = min(int(arguments.get("match_count", 5)), 20)
 
@@ -4415,15 +4421,196 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
+        # ── Resolve tag_name → tag_id (fuzzy match) ──
+        if tag_name and not tag_id:
+            for kb_id in (kb_ids or []):
+                try:
+                    tag_resp = await client.get(
+                        f"{base_url}/knowledge-bases/{kb_id}/tags",
+                        headers=headers,
+                        params={"keyword": tag_name, "page": 1, "page_size": 10},
+                    )
+                    tag_resp.raise_for_status()
+                    tags = (tag_resp.json().get("data") or {}).get("data", [])
+                    if not isinstance(tags, list):
+                        tags = []
+                    # Fuzzy match: find tag whose name contains tag_name
+                    for t in tags:
+                        tname = t.get("name", "")
+                        if tag_name.lower() in tname.lower():
+                            tag_id = t.get("id", "")
+                            tag_name_resolved = tname
+                            break
+                    if tag_id:
+                        break
+                except Exception:
+                    pass
+            if not tag_id:
+                return (
+                    f"No tag matching '{tag_name}' found. "
+                    f"Use list_tags=true to see available tags in this knowledge base."
+                )
+
+        # ── List tags mode ──
+        if list_tags and kb_ids:
+            all_tags = []
+            for kb_id in kb_ids[:1]:  # One KB at a time
+                try:
+                    tag_resp = await client.get(
+                        f"{base_url}/knowledge-bases/{kb_id}/tags",
+                        headers=headers,
+                        params={"page": 1, "page_size": 100},
+                    )
+                    tag_resp.raise_for_status()
+                    tags = (tag_resp.json().get("data") or {}).get("data", [])
+                    if not isinstance(tags, list):
+                        tags = []
+                    for t in tags:
+                        all_tags.append({
+                            "id": t.get("id", ""),
+                            "name": t.get("name", "(unnamed)"),
+                            "color": t.get("color", ""),
+                            "knowledge_count": t.get("knowledge_count", 0),
+                        })
+                except Exception as e:
+                    return f"Failed to list tags: {type(e).__name__}: {str(e)[:200]}"
+                break
+
+            if not all_tags:
+                return "No tags found in this knowledge base."
+            lines = [f"**Tags in Knowledge Base** `{kb_ids[0]}` ({len(all_tags)} total):\n"]
+            for t in all_tags:
+                color_tag = f" (color: {t['color']})" if t.get("color") else ""
+                lines.append(
+                    f"- **{t['name']}** `{t['id']}`{color_tag} — {t['knowledge_count']} files"
+                )
+            return "\n".join(lines)
+
+        # ── Wiki: list wiki pages ──
+        if wiki_list_pages and kb_ids:
+            try:
+                wiki_params: dict = {"page": 1, "page_size": 50}
+                wiki_resp = await client.get(
+                    f"{base_url}/knowledgebase/{kb_ids[0]}/wiki/pages",
+                    headers=headers,
+                    params=wiki_params,
+                )
+                wiki_resp.raise_for_status()
+                wiki_data = wiki_resp.json()
+            except Exception as e:
+                return f"❌ Failed to list wiki pages: {type(e).__name__}: {str(e)[:200]}"
+
+            # Response is WikiPageListResponse: {pages: [...], total, page, page_size}
+            pages = wiki_data.get("pages", [])
+            if not isinstance(pages, list) or not pages:
+                return "No wiki pages found in this knowledge base. Make sure the Wiki feature is enabled and documents have been processed."
+
+            total = wiki_data.get("total", len(pages))
+            lines = [f"**Wiki Pages in Knowledge Base** `{kb_ids[0]}` ({min(len(pages), total)} shown):\n"]
+            for p in pages:
+                slug = p.get("slug", "")
+                title = p.get("title", "(untitled)")
+                ptype = p.get("page_type", "unknown")
+                summary = (p.get("summary") or "").strip()
+                status = p.get("status", "published")
+                updated = p.get("updated_at", "")[:10] if p.get("updated_at") else ""
+                summary_preview = f" — {summary[:100]}" if summary else ""
+                lines.append(
+                    f"- `{slug}` **{title}** [{ptype}] [{status}]"
+                    + (f" {updated}" if updated else "")
+                    + (f"\n  {summary_preview}" if summary_preview else "")
+                )
+            return "\n".join(lines)
+
+        # ── Wiki: get a single wiki page by slug ──
+        if wiki_get_page and kb_ids:
+            try:
+                wiki_resp = await client.get(
+                    f"{base_url}/knowledgebase/{kb_ids[0]}/wiki/pages/{wiki_get_page}",
+                    headers=headers,
+                )
+                wiki_resp.raise_for_status()
+                page = wiki_resp.json()
+            except Exception as e:
+                return f"❌ Failed to get wiki page '{wiki_get_page}': {type(e).__name__}: {str(e)[:200]}"
+
+            # Response is WikiPage directly: {id, slug, title, content, ...}
+            if not page or not isinstance(page, dict) or not page.get("slug"):
+                return f"Wiki page `{wiki_get_page}` not found."
+
+            slug = page.get("slug", wiki_get_page)
+            title = page.get("title", "(untitled)")
+            ptype = page.get("page_type", "unknown")
+            content = page.get("content", "") or ""
+            summary = page.get("summary", "") or ""
+            aliases = page.get("aliases", []) or []
+            source_refs = page.get("source_refs", []) or []
+            in_links = page.get("in_links", []) or []
+            out_links = page.get("out_links", []) or []
+            updated = page.get("updated_at", "")[:10] if page.get("updated_at") else ""
+
+            lines = [
+                f"# {title}\n",
+                f"**Slug:** `{slug}`  **Type:** {ptype}  **Updated:** {updated}",
+            ]
+            if aliases:
+                lines.append(f"**Aliases:** {', '.join(aliases)}")
+            if summary:
+                lines.append(f"\n> {summary}\n")
+            if content:
+                lines.append(content)
+            if in_links:
+                lines.append(f"\n---\n**Backlinks ({len(in_links)}):** " + ", ".join(f"`{l}`" for l in in_links[:20]))
+            if out_links:
+                lines.append(f"**Outlinks ({len(out_links)}):** " + ", ".join(f"`{l}`" for l in out_links[:20]))
+            if source_refs:
+                lines.append(f"\n**Sources:** " + ", ".join(f"`{s}`" for s in source_refs[:10]))
+            return "\n".join(lines)
+
+        # ── Wiki: search wiki pages ──
+        if wiki_search_pages and kb_ids:
+            try:
+                wiki_resp = await client.get(
+                    f"{base_url}/knowledgebase/{kb_ids[0]}/wiki/search",
+                    headers=headers,
+                    params={"q": wiki_search_pages, "limit": 10},
+                )
+                wiki_resp.raise_for_status()
+                wiki_data = wiki_resp.json()
+            except Exception as e:
+                return f"❌ Failed to search wiki pages: {type(e).__name__}: {str(e)[:200]}"
+
+            # Response is {pages: [...]}
+            pages = wiki_data.get("pages", [])
+            if isinstance(pages, dict):
+                pages = pages.get("pages", [])
+            if not isinstance(pages, list) or not pages:
+                return f"No wiki pages found matching \"{wiki_search_pages}\"."
+
+            lines = [f"**Wiki Search Results** for \"{wiki_search_pages}\" ({len(pages)} found):\n"]
+            for p in pages:
+                slug = p.get("slug", "")
+                title = p.get("title", "(untitled)")
+                ptype = p.get("page_type", "unknown")
+                summary = (p.get("summary") or "").strip()
+                summary_preview = f" — {summary[:120]}" if summary else ""
+                lines.append(
+                    f"- `{slug}` **{title}** [{ptype}]{summary_preview}"
+                )
+            return "\n".join(lines)
+
         # ── List mode: return KB list or files in a KB ──
         if not query:
             # If a single KB ID is specified, list files within that KB
             if len(kb_ids) == 1:
                 try:
+                    list_params: dict = {"page": 1, "page_size": 100}
+                    if tag_id:
+                        list_params["tag_id"] = tag_id
                     resp = await client.get(
                         f"{base_url}/knowledge-bases/{kb_ids[0]}/knowledge",
                         headers=headers,
-                        params={"page": 1, "page_size": 100},
+                        params=list_params,
                     )
                     resp.raise_for_status()
                     data = resp.json()
@@ -4434,6 +4621,24 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
                 files = data.get("data", [])
                 if not files:
                     return f"No files found in knowledge base `{kb_ids[0]}`."
+
+                # Build tag_id → tag_name map so we can show human-readable tag names
+                tag_map: dict[str, str] = {}
+                tag_ids_in_files = {f.get("tag_id") for f in files if f.get("tag_id")}
+                if tag_ids_in_files:
+                    try:
+                        tag_resp = await client.get(
+                            f"{base_url}/knowledge-bases/{kb_ids[0]}/tags",
+                            headers=headers,
+                            params={"page": 1, "page_size": 200},
+                        )
+                        tag_resp.raise_for_status()
+                        for t in (tag_resp.json().get("data") or {}).get("data", []):
+                            tid = t.get("id")
+                            if tid and tid in tag_ids_in_files:
+                                tag_map[tid] = t.get("name", "(unnamed)")
+                    except Exception:
+                        pass  # non-critical: fall back to showing raw tag_id
 
                 lines = [f"**Files in Knowledge Base** `{kb_ids[0]}` ({len(files)} total):\n"]
                 for f in files:
@@ -4451,12 +4656,13 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
                             size_str = f"{size_bytes}B"
                     else:
                         size_str = ""
-                    tag = f.get("tag_id", "")
+                    tag_id_raw = f.get("tag_id", "")
+                    tag_display = tag_map.get(tag_id_raw, tag_id_raw)
                     lines.append(
                         f"- **{title}** `{fid}`\n"
                         f"  type={ftype}, status={status}"
                         + (f", size={size_str}" if size_str else "")
-                        + (f", tag={tag}" if tag else "")
+                        + (f", tag=\"{tag_display}\"" if tag_display else "")
                     )
                 return "\n".join(lines)
 
@@ -4533,6 +4739,26 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
             return "\n".join(lines)
 
         # ── Search mode: hybrid search across knowledge bases ──
+        # If tag_id is set, resolve it to knowledge_ids for scoping the search
+        if tag_id and not knowledge_ids:
+            knowledge_ids = []
+            for kb_id in (kb_ids or []):
+                try:
+                    tag_resp = await client.get(
+                        f"{base_url}/knowledge-bases/{kb_id}/knowledge",
+                        headers=headers,
+                        params={"tag_id": tag_id, "page": 1, "page_size": 200},
+                    )
+                    tag_resp.raise_for_status()
+                    for f in tag_resp.json().get("data", []):
+                        fid = f.get("id")
+                        if fid and fid not in knowledge_ids:
+                            knowledge_ids.append(fid)
+                except Exception:
+                    pass
+            if not knowledge_ids:
+                return f"No files found with tag_id={tag_id}."
+
         try:
             if kb_ids:
                 # Multi-KB search via knowledge-search endpoint
@@ -4540,6 +4766,8 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
                     "query": query,
                     "knowledge_base_ids": kb_ids,
                 }
+                if knowledge_ids:
+                    body["knowledge_ids"] = knowledge_ids
                 resp = await client.post(
                     f"{base_url}/knowledge-search", headers=headers, json=body
                 )
@@ -4555,6 +4783,8 @@ async def _weknora_retrieval(agent_id: uuid.UUID, arguments: dict) -> str:
                     "query": query,
                     "knowledge_base_ids": kb_ids,
                 }
+                if knowledge_ids:
+                    body["knowledge_ids"] = knowledge_ids
                 resp = await client.post(
                     f"{base_url}/knowledge-search", headers=headers, json=body
                 )

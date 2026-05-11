@@ -6,12 +6,12 @@
   "login": {
     "hero": {
       "badge": "开源 · 多智能体协作",
-      "title": "Clawith",
-      "subtitle": "Your Agent Company.",
+      "title": "LaboFlow",
+      "subtitle": "Your AI WorkBench.",
       "welcome": "欢迎，",
       "founder": "Founder",
-      "description": "来构建你的 Agent Company",
-      "mark": "Your Agent Company",
+      "description": "来构建你的 AI WorkBench",
+      "mark": "Your AI WorkBench",
       "features": {
         "multiAgent": {
           "title": "多智能体团队",
@@ -40,6 +40,8 @@
     "platformSettings": "平台设置",
     "language": "语言",
     "plaza": "广场",
+    "knowledgeBase": "知识库",
+    "aiPPT": "Pro Slides",
     "okr": "OKR"
   },
   "talentMarket": {

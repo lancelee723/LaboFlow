@@ -21,6 +21,7 @@ import AdminCompanies from './pages/AdminCompanies';
 import OAuthCallback from './pages/OAuthCallback';
 import SSOEntry from './pages/SSOEntry';
 import OKR from './pages/OKR';
+import ProCharts from './pages/ProCharts';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const token = useAuthStore((s) => s.token);
@@ -289,6 +290,7 @@ export default function App() {
                     <Route path="messages" element={<Messages />} />
                     <Route path="enterprise" element={<CompanyAdminRoute><EnterpriseSettings /></CompanyAdminRoute>} />
                     <Route path="okr" element={<OKR />} />
+                    <Route path="pro-charts" element={<ProCharts />} />
                     <Route path="invitations" element={<InvitationCodes />} />
                     <Route path="admin/platform-settings" element={<AdminCompanies />} />
                 </Route>

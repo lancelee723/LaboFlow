@@ -544,6 +544,12 @@ select:focus {
   letter-spacing: -0.02em;
 }
 
+.sidebar-logo-image {
+  width: 75%;
+  height: auto;
+  display: block;
+}
+
 .sidebar-workspace-row {
   position: relative;
   display: flex;
