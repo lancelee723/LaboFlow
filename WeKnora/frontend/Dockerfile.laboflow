@@ -3,6 +3,8 @@ FROM node:24-alpine AS build-stage
 
 WORKDIR /app
 
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV VITE_IS_DOCKER=true
 # Build with /kb/ base path for LaboFlow nginx sub-path proxying
@@ -12,7 +14,10 @@ COPY package*.json ./
 COPY pnpm-workspace.yaml ./
 COPY packages/xlsx-0.20.2.tgz ./packages/xlsx-0.20.2.tgz
 
-RUN npm ci
+RUN registry="${NPM_REGISTRY%/}" && \
+	sed -i "s#https://mirrors.tencent.com/npm#${registry}#g" package-lock.json && \
+	npm config set registry "$registry" && \
+	npm ci
 
 COPY . .
 

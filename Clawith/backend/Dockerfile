@@ -48,7 +48,7 @@ COPY --from=deps /usr/local/bin/ /usr/local/bin/
 
 # Install Chromium + system libs. `playwright install --with-deps` runs apt under the hood.
 RUN mkdir -p /ms-playwright && \
-    playwright install --with-deps chromium && \
+    python -m playwright install --with-deps chromium && \
     chmod -R a+rx /ms-playwright && \
     rm -rf /var/lib/apt/lists/*
 
