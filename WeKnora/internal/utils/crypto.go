@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -14,14 +15,27 @@ import (
 // EncPrefix marks a string as AES-256-GCM encrypted
 const EncPrefix = "enc:v1:"
 
-// GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
-// Returns nil if not set or not exactly 32 bytes.
-func GetAESKey() []byte {
-	key := []byte(os.Getenv("SYSTEM_AES_KEY"))
-	if len(key) == 32 {
-		return key
+// GetAESKeyFromEnv reads an AES-256 key from an environment variable.
+// The value may be a 64-char hex string (produced by openssl rand -hex 32)
+// or a raw 32-byte string. Returns nil if the value is missing or invalid.
+func GetAESKeyFromEnv(envName string) []byte {
+	val := os.Getenv(envName)
+	if len(val) == 64 {
+		decoded, err := hex.DecodeString(val)
+		if err == nil {
+			return decoded // 32 bytes
+		}
+	}
+	if len(val) == 32 {
+		return []byte(val)
 	}
 	return nil
+}
+
+// GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
+// Returns nil if not set or not a valid 32-byte key.
+func GetAESKey() []byte {
+	return GetAESKeyFromEnv("SYSTEM_AES_KEY")
 }
 
 // EncryptAESGCM encrypts plaintext with AES-256-GCM.

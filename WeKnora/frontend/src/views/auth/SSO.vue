@@ -63,14 +63,14 @@ onMounted(async () => {
       return
     }
 
-    // Store auth data
-    if (response.user && response.tenant && response.token) {
+    // Store auth data (tenant may be missing if SYSTEM_AES_KEY is not configured)
+    if (response.user && response.token) {
       authStore.setUser({
         id: response.user.id || '',
         username: response.user.username || '',
         email: response.user.email || '',
         avatar: response.user.avatar,
-        tenant_id: String(response.user.tenant_id || response.tenant.id || ''),
+        tenant_id: String(response.user.tenant_id || response.tenant?.id || ''),
         can_access_all_tenants: response.user.can_access_all_tenants || false,
         created_at: response.user.created_at || new Date().toISOString(),
         updated_at: response.user.updated_at || new Date().toISOString()
@@ -79,14 +79,16 @@ onMounted(async () => {
       if (response.refresh_token) {
         authStore.setRefreshToken(response.refresh_token)
       }
-      authStore.setTenant({
-        id: String(response.tenant.id) || '',
-        name: response.tenant.name || '',
-        api_key: response.tenant.api_key || '',
-        owner_id: response.user.id || '',
-        created_at: response.tenant.created_at || new Date().toISOString(),
-        updated_at: response.tenant.updated_at || new Date().toISOString()
-      })
+      if (response.tenant) {
+        authStore.setTenant({
+          id: String(response.tenant.id) || '',
+          name: response.tenant.name || '',
+          api_key: response.tenant.api_key || '',
+          owner_id: response.user.id || '',
+          created_at: response.tenant.created_at || new Date().toISOString(),
+          updated_at: response.tenant.updated_at || new Date().toISOString()
+        })
+      }
     }
 
     // Redirect to main page

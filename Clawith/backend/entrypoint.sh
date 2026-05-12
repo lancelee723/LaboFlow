@@ -20,7 +20,7 @@ echo "[entrypoint] Step 1: Running alembic migrations..."
 # Run all migrations to ensure database schema is up to date.
 # Capture exit code explicitly — do NOT let a migration failure go unnoticed.
 set +e
-ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1)
+ALEMBIC_OUTPUT=$(alembic upgrade heads 2>&1)
 ALEMBIC_EXIT=$?
 set -e
 

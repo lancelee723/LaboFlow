@@ -491,7 +491,7 @@ export default function Layout() {
             setKbLoading(false);
         }
     }, [kbLoading, isChinese, resolveWeKnoraBrowserUrl]);
-    const tenantSwitcherRef = useRef<HTMLDivElement>(null);
+    const tenantSwitcherRef = useRef<HTMLButtonElement>(null);
     const tenantMenuPortalRef = useRef<HTMLDivElement>(null);
     const [tenantMenuPos, setTenantMenuPos] = useState({ top: 0, left: 0, maxHeight: 520 });
 
@@ -1062,7 +1062,22 @@ export default function Layout() {
 
                     </div>
 
-
+                    <button
+                        ref={tenantSwitcherRef}
+                        data-tour-target="company-switcher"
+                        className="sidebar-company-btn"
+                        onClick={() => setShowTenantMenu(true)}
+                    >
+                        {currentTenantLogoUrl ? (
+                            <img src={currentTenantLogoUrl} alt="" className="sidebar-company-logo" />
+                        ) : (
+                            <span className={`sidebar-company-avatar tone-${currentTenantAvatarTone}`}>
+                                {currentTenantInitial}
+                            </span>
+                        )}
+                        <span className="sidebar-company-name">{currentTenantName}</span>
+                        <IconChevronDown size={12} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+                    </button>
 
                     <div className="sidebar-section" data-tour-target="main-nav">
                         <NavLink to="/plaza" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>

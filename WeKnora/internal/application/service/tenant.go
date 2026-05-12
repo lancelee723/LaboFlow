@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -21,7 +20,7 @@ import (
 )
 
 var apiKeySecret = func() []byte {
-	return []byte(os.Getenv("TENANT_AES_KEY"))
+	return utils.GetAESKeyFromEnv("TENANT_AES_KEY")
 }
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
