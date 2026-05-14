@@ -37,7 +37,12 @@ services:
 
   clawith-backend:
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-backend:${TAG:-1.0}
+    privileged: true
     restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
     dns:
       - 223.5.5.5
       - 114.114.114.114

@@ -107,7 +107,7 @@ class SubprocessBackend(BaseSandboxBackend):
 
     def _build_command(self, language: str, script_path: str) -> list[str]:
         if language == "python":
-            return ["python3", "-I", "-B", str(script_path)]
+            return ["python3", "-B", str(script_path)]
         if language == "bash":
             return ["bash", "--noprofile", "--norc", str(script_path)]
         return ["node", str(script_path)]
@@ -117,7 +117,6 @@ class SubprocessBackend(BaseSandboxBackend):
             "HOME": str(work_path),
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONNOUSERSITE": "1",
             "TMPDIR": str(work_path / ".tmp"),
             "NODE_PATH": "",
             "BASH_ENV": "",
@@ -191,6 +190,7 @@ class SubprocessBackend(BaseSandboxBackend):
             "--ro-bind", "/lib", "/lib",
             "--ro-bind", "/lib64", "/lib64",
             "--ro-bind", "/etc", "/etc",
+            "--ro-bind", "/usr/local", "/usr/local",
             "--bind", str(work_path), "/workspace",
             "--dev", "/dev",
             "--proc", "/proc",
@@ -198,7 +198,6 @@ class SubprocessBackend(BaseSandboxBackend):
             "--setenv", "HOME", "/workspace",
             "--setenv", "TMPDIR", "/workspace/.tmp",
             "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
-            "--setenv", "PYTHONNOUSERSITE", "1",
             "--setenv", "NODE_PATH", "",
             "--setenv", "BASH_ENV", "",
             "--setenv", "ENV", "",
