@@ -491,8 +491,12 @@ async def create_agent(
                     f"on agent {agent.id} raised: {e}"
                 )
 
-    # Start container
-    await agent_manager.start_container(db, agent)
+    # Start container (openclaw agents only; native agents run in-process)
+    if agent.agent_type == "openclaw":
+        await agent_manager.start_container(db, agent)
+    else:
+        agent.status = "idle"
+        agent.last_active_at = datetime.now(timezone.utc)
     await db.flush()
 
     from app.services.okr_agent_hook import hook_new_agent
@@ -981,7 +985,11 @@ async def start_agent(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only manager can start agent")
 
     from app.services.agent_manager import agent_manager
-    await agent_manager.start_container(db, agent)
+    if agent.agent_type == "openclaw":
+        await agent_manager.start_container(db, agent)
+    else:
+        agent.status = "idle"
+        agent.last_active_at = datetime.now(timezone.utc)
     await db.flush()
     return await _agent_to_out(db, agent, current_user.id)
 
