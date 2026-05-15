@@ -302,8 +302,8 @@ const tagPage = ref(1);
 const tagHasMore = ref(false);
 const tagLoadingMore = ref(false);
 const tagTotal = ref(0);
-let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null;
-let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
+let tagSearchDebounce: number | null = null;
+let docSearchDebounce: number | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
@@ -323,13 +323,22 @@ const fileTypeOptions = computed(() => [
   { content: 'FLAC', value: 'flac' },
   { content: 'OGG', value: 'ogg' },
 ]);
+const UNTAGGED_TAG_VALUE = '__untagged__';
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
-const tagDropdownOptions = computed(() =>
-  tagList.value.map((tag: any) => ({
+const documentTagDropdownOptions = computed(() => [
+  { content: t('knowledgeBase.untagged'), value: UNTAGGED_TAG_VALUE },
+  ...tagList.value.map((tag: any) => ({
     content: tag.name,
     value: tag.id,
   })),
-);
+]);
+const batchTagSelectOptions = computed(() => [
+  { label: t('knowledgeBase.untagged'), value: UNTAGGED_TAG_VALUE },
+  ...tagList.value.map((tag: any) => ({
+    label: tag.name,
+    value: tag.id,
+  })),
+]);
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -631,8 +640,7 @@ const confirmDeleteTag = (tag: any) => {
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) => {
   try {
-    // Pass the tag value directly (empty string means no tag)
-    const tagIdToUpdate = tagValue || null;
+    const tagIdToUpdate = !tagValue || tagValue === UNTAGGED_TAG_VALUE ? null : tagValue;
     await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIdToUpdate } });
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
     page = 1; // Reset page counter to 1 when reloading files after tag change
@@ -690,8 +698,8 @@ const loadKnowledgeList = async () => {
       }));
     
     // Merge and deduplicate by id (my KBs take precedence)
-    const myKbIds = new Set(myKbs.map(kb => kb.id));
-    const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id));
+    const myKbIds = new Set(myKbs.map((kb: { id: string }) => kb.id));
+    const uniqueSharedKbs = sharedKbs.filter((kb: { id: string }) => !myKbIds.has(kb.id));
     
     knowledgeList.value = [...myKbs, ...uniqueSharedKbs];
   } catch (error) {
@@ -1279,7 +1287,7 @@ const handleDocumentUpload = async (event: Event) => {
   const totalCount = validFiles.length;
 
   // 获取当前选中的分类ID（如果不是"未分类"则传递）
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const tagIdToUpload = selectedTagId.value !== UNTAGGED_TAG_VALUE ? selectedTagId.value : undefined;
 
   for (const file of validFiles) {
     try {
@@ -1418,7 +1426,7 @@ const handleFolderUpload = async (event: Event) => {
   // 批量上传
   let successCount = 0;
   let failCount = 0;
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const tagIdToUpload = selectedTagId.value !== UNTAGGED_TAG_VALUE ? selectedTagId.value : undefined;
 
   for (const file of validFiles) {
     const relativePath = (file as any).webkitRelativePath;
@@ -1505,7 +1513,7 @@ const handleURLImportConfirm = async () => {
   urlImporting.value = true;
   try {
     // 获取当前选中的分类ID
-    const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+    const tagIdToUpload = selectedTagId.value !== UNTAGGED_TAG_VALUE ? selectedTagId.value : undefined;
     const responseData: any = await createKnowledgeFromURL(kbId.value, { url, tag_id: tagIdToUpload });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: kbId.value }
@@ -1678,6 +1686,37 @@ const toggleSelectAll = (checked: boolean) => {
 const clearSelection = () => {
   selectedIds.value.clear();
   lastSelectedIndex = -1;
+};
+
+const batchTagDialogVisible = ref(false);
+const batchTagValue = ref('');
+
+const openBatchTagDialog = () => {
+  if (selectedIds.value.size === 0) return;
+  batchTagValue.value = '';
+  batchTagDialogVisible.value = true;
+};
+
+const handleBatchTag = async () => {
+  if (!kbId.value || selectedIds.value.size === 0 || !batchTagValue.value) return;
+
+  const tagIdToUpdate = batchTagValue.value === UNTAGGED_TAG_VALUE ? null : batchTagValue.value;
+  const updates: Record<string, string | null> = {};
+  for (const id of selectedIds.value) {
+    updates[id] = tagIdToUpdate;
+  }
+
+  try {
+    await updateKnowledgeTagBatch({ updates });
+    MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
+    clearSelection();
+    batchTagDialogVisible.value = false;
+    page = 1;
+    await loadKnowledgeFiles(kbId.value);
+    await loadTags(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.operationFailed'));
+  }
 };
 
 const openBatchDeleteDialog = () => {
@@ -2215,7 +2254,7 @@ async function createNewSession(value: string): Promise<void> {
                             size="small"
                             :checked="selectedIds.has(item.id)"
                             :title="item.file_name"
-                            @change="(checked, ctx) => onCardGridCheckboxChange(item.id, checked, ctx)"
+                            @change="(checked: boolean, ctx?: { e?: Event }) => onCardGridCheckboxChange(item.id, checked, ctx)"
                           />
                         </div>
                         <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
@@ -2358,19 +2397,19 @@ async function createNewSession(value: string): Promise<void> {
                     <div class="card-bottom">
                       <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
                       <div class="card-bottom-right">
-                        <div v-if="tagList.length" class="card-tag-selector" @click.stop>
+                        <div v-if="tagList.length || item.tag_id != null" class="card-tag-selector" @click.stop>
                           <t-dropdown
                             v-if="canEdit"
-                            :options="tagDropdownOptions"
+                            :options="documentTagDropdownOptions"
                             trigger="click"
                             @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)"
                           >
                             <t-tag size="small" variant="light-outline">
-                              <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                              <span class="tag-text">{{ getTagName(item.tag_id) || $t('knowledgeBase.untagged') }}</span>
                             </t-tag>
                           </t-dropdown>
                           <t-tag v-else size="small" variant="light-outline">
-                            <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                            <span class="tag-text">{{ getTagName(item.tag_id) || $t('knowledgeBase.untagged') }}</span>
                           </t-tag>
                         </div>
                         <div class="card-type">
@@ -2433,6 +2472,7 @@ async function createNewSession(value: string): Promise<void> {
                   @open="(item: any) => openCardDetails(item)"
                   @toggle-row="toggleSelectRow"
                   @toggle-all="toggleSelectAll"
+                  @tag-change="(item: any, value: string) => handleKnowledgeTagChange(item.id, value)"
                   @action="(action: any, item: any) => handleListAction(action, item)"
                 />
               </template>
@@ -2447,6 +2487,7 @@ async function createNewSession(value: string): Promise<void> {
                 :count="selectedIds.size"
                 :loading="batchDeleting"
                 @clear="clearSelection"
+                @tag="openBatchTagDialog"
                 @delete="openBatchDeleteDialog"
               />
             </div>
@@ -2508,6 +2549,43 @@ async function createNewSession(value: string): Promise<void> {
                 </span>
               </div>
             </div>
+          </t-dialog>
+
+          <t-dialog
+            v-model:visible="batchTagDialogVisible"
+            :header="$t('knowledgeBase.batchUpdateTag')"
+            width="480px"
+            :closeBtn="true"
+            :cancelBtn="null"
+            :confirmBtn="null"
+          >
+            <div class="batch-tag-dialog">
+              <div class="batch-tag-tip">{{ $t('knowledgeBase.batchUpdateTagTip', { count: selectedIds.size }) }}</div>
+              <div class="batch-tag-field">
+                <div class="batch-tag-label">{{ $t('knowledgeBase.tagLabel') }}</div>
+                <t-select
+                  v-model="batchTagValue"
+                  :options="batchTagSelectOptions"
+                  :placeholder="$t('knowledgeBase.tagPlaceholder')"
+                  clearable
+                  filterable
+                >
+                  <template #empty>
+                    <div class="batch-tag-empty">{{ $t('knowledgeBase.noTags') }}</div>
+                  </template>
+                </t-select>
+              </div>
+            </div>
+            <template #footer>
+              <div class="batch-tag-dialog-footer">
+                <t-button theme="default" variant="outline" @click="batchTagDialogVisible = false">
+                  {{ $t('common.cancel') }}
+                </t-button>
+                <t-button theme="primary" :disabled="!batchTagValue" @click="handleBatchTag">
+                  {{ $t('common.confirm') }}
+                </t-button>
+              </div>
+            </template>
           </t-dialog>
 
           <!-- 重建知识确认弹窗 -->
@@ -4192,6 +4270,45 @@ async function createNewSession(value: string): Promise<void> {
     margin-top: 8px;
     line-height: 1.5;
   }
+}
+
+.batch-tag-dialog {
+  padding: 8px 0;
+}
+
+.batch-tag-tip {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.batch-tag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batch-tag-label {
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.batch-tag-empty {
+  padding: 8px 12px;
+  text-align: center;
+  color: var(--td-text-color-secondary);
+  font-size: 14px;
+}
+
+.batch-tag-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 
 .knowledge-card-upload {

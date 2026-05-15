@@ -37,16 +37,22 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
+  (e: 'tag-change', item: KnowledgeItem, value: string): void;
   (e: 'action', action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem): void;
 }>();
 
 const { t } = useI18n();
+const UNTAGGED_TAG_VALUE = '__untagged__';
 
 const tagMap = computed(() => {
   const map: Record<string, Tag> = {};
   for (const tag of props.tagList) map[String(tag.id)] = tag;
   return map;
 });
+const tagDropdownOptions = computed(() => [
+  { content: t('knowledgeBase.untagged'), value: UNTAGGED_TAG_VALUE },
+  ...props.tagList.map((tag) => ({ content: tag.name, value: String(tag.id) })),
+]);
 const getTagName = (tagId?: string | number) => {
   if (!tagId && tagId !== 0) return '';
   return tagMap.value[String(tagId)]?.name || '';
@@ -159,6 +165,10 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   emit('action', action, item);
 };
 
+const handleTagChange = (item: KnowledgeItem, value: string) => {
+  emit('tag-change', item, value);
+};
+
 </script>
 
 <template>
@@ -200,7 +210,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
             size="small"
             :checked="selectedIds.has(item.id)"
             :title="item.file_name"
-            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)"
+            @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)"
           />
         </div>
 
@@ -219,11 +229,21 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
         </div>
 
 
-        <div class="cell cell-tag">
-          <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
+        <div class="cell cell-tag" @click.stop>
+          <t-dropdown
+            v-if="canEdit && (tagList.length > 0 || item.tag_id != null)"
+            :options="tagDropdownOptions"
+            trigger="click"
+            @click="(data: any) => handleTagChange(item, String(data.value ?? ''))"
+          >
+            <t-tag size="small" variant="light-outline" class="row-tag row-tag-trigger">
+              {{ getTagName(item.tag_id) || t('knowledgeBase.untagged') }}
+            </t-tag>
+          </t-dropdown>
+          <t-tag v-else-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
             {{ getTagName(item.tag_id) }}
           </t-tag>
-          <span v-else class="row-muted">--</span>
+          <span v-else class="row-muted">{{ t('knowledgeBase.untagged') }}</span>
         </div>
 
         <div class="cell cell-source">
@@ -526,6 +546,10 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
     max-width: 120px;
     display: inline-block;
   }
+}
+
+.row-tag-trigger {
+  cursor: pointer;
 }
 
 .row-muted {

@@ -267,6 +267,8 @@ export default {
     selectAll: 'Select all',
     selectedCount: '{count} selected',
     clearSelection: 'Deselect all',
+    batchUpdateTag: 'Batch Update Category',
+    batchUpdateTagTip: 'Set category for {count} selected documents',
     batchDelete: 'Delete selected',
     batchDeleteConfirmation: 'Confirm Batch Delete',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',

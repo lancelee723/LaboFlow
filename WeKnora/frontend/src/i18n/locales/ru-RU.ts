@@ -239,6 +239,8 @@ export default {
     selectAll: 'Выбрать все',
     selectedCount: 'Выбрано: {count}',
     clearSelection: 'Снять выделение',
+    batchUpdateTag: 'Пакетное обновление категории',
+    batchUpdateTagTip: 'Установить категорию для {count} выбранных документов',
     batchDelete: 'Удалить выбранные',
     batchDeleteConfirmation: 'Подтверждение пакетного удаления',
     confirmBatchDeleteDocument: 'Удалить {count} выбранных документов? Это действие нельзя отменить.',
