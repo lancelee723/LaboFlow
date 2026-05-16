@@ -8,6 +8,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'clear'): void;
+  (e: 'tag'): void;
   (e: 'delete'): void;
 }>();
 
@@ -26,9 +27,19 @@ const { t } = useI18n();
         </div>
         <div class="batch-bar-actions">
           <t-button
+            theme="primary"
+            variant="outline"
+            size="small"
+            :disabled="count === 0"
+            @click="emit('tag')"
+          >
+            {{ t('knowledgeBase.batchUpdateTag') }}
+          </t-button>
+          <t-button
             theme="danger"
             variant="outline"
             size="small"
+            :disabled="count === 0"
             :loading="loading"
             @click="emit('delete')"
           >
