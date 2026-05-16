@@ -11,7 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -969,6 +968,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
 			KnowledgeBaseID:          targetKB.ID,
+			RetryLimit:               3,
 			FilePath:                 knowledge.FilePath,
 			FileName:                 knowledge.FileName,
 			FileType:                 getFileType(knowledge.FileName),
@@ -978,14 +978,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			return fmt.Errorf("failed to marshal document process payload: %w", err)
-		}
-
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 		if err != nil {
 			return fmt.Errorf("failed to enqueue document process task: %w", err)
 		}
