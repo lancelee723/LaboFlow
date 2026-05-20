@@ -8,7 +8,7 @@
 #   3. WeKnora infra     (docker compose dev on postgres/redis/docreader)
 #      WeKnora backend   (go run on :8080)
 #      WeKnora frontend  (vite on :8800, base=/kb/)
-#   4. AIPPT frontend    (vite on :5173, base=/ppt/)
+#   4. Pro Slides frontend (vite on :8890, base=/ppt/)
 #   5. NGINX             (unified entry on :3008)
 #
 # WeKnora uses its native local-dev workflow:
@@ -90,7 +90,7 @@ fi
 : "${CLAWITH_BACKEND_PORT:=8008}"
 : "${WEKNORA_FRONTEND_PORT:=8800}"
 : "${WEKNORA_APP_PORT:=8080}"
-: "${AIPPT_PORT:=5173}"
+: "${PRO_SLIDES_PORT:=8890}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
@@ -133,10 +133,10 @@ detect_compose() {
 # ── Pre-flight cleanup ───────────────────────────────────────
 log "Cleaning up any previous processes..."
 for pidfile in "$PID_DIR"/*.pid; do
-    [ -f "$pidfile" ] && kill -9 "$(cat "$pidfile")" 2>/dev/null || true
+    [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
     rm -f "$pidfile"
 done
-for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $WEKNORA_FRONTEND_PORT $WEKNORA_APP_PORT $AIPPT_PORT; do
+for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $WEKNORA_FRONTEND_PORT $WEKNORA_APP_PORT $PRO_SLIDES_PORT; do
     cleanup_port "$port"
 done
 sleep 1
@@ -296,22 +296,15 @@ nohup env VITE_BASE_URL=/kb/ \
 echo $! > "$PID_DIR/weknora-frontend.pid"
 cd "$ROOT"
 
-# ── 4. AIPPT ─────────────────────────────────────────────────
-log "Starting AIPPT on :$AIPPT_PORT ..."
-AIPPT_DIR="$ROOT/aippt"
-cd "$AIPPT_DIR"
+# ── 4. Pro Slides ─────────────────────────────────────────────────
+log "Starting Pro Slides on :$PRO_SLIDES_PORT ..."
+PRO_SLIDES_DIR="$ROOT/Pro Slides"
+cd "$PRO_SLIDES_DIR"
 if [ ! -d "node_modules" ]; then
-    err "AIPPT node_modules missing. Run: cd aippt && pnpm install"
+    err "Pro Slides node_modules missing. Run: cd 'Pro Slides' && pnpm install"
     exit 1
 fi
-nohup env \
-    PORT="$AIPPT_PORT" \
-    VITE_BASE=/ppt/ \
-    VITE_JWT_SECRET="$JWT_SECRET_KEY" \
-    VITE_CUSTOM_LLM_URL="$VITE_CUSTOM_LLM_URL" \
-    VITE_CUSTOM_API_KEY="$VITE_CUSTOM_API_KEY" \
-    VITE_CUSTOM_MODEL="$VITE_CUSTOM_MODEL" \
-    pnpm dev --host 0.0.0.0 \
+nohup env VITE_BASE=/ppt/ pnpm dev:demo \
     > "$LOG_DIR/aippt.log" 2>&1 &
 echo $! > "$PID_DIR/aippt.pid"
 cd "$ROOT"
@@ -322,7 +315,7 @@ wait_port "$CLAWITH_BACKEND_PORT"  "Clawith backend"  30 || true
 wait_port "$CLAWITH_FRONTEND_PORT" "Clawith frontend" 20 || true
 wait_port "$WEKNORA_APP_PORT"      "WeKnora backend"  90 || true
 wait_port "$WEKNORA_FRONTEND_PORT" "WeKnora frontend" 30 || true
-wait_port "$AIPPT_PORT"            "AIPPT"            20 || true
+wait_port "$PRO_SLIDES_PORT"            "Pro Slides"            20 || true
 
 # ── 5. NGINX ─────────────────────────────────────────────────
 log "Starting NGINX on :$NGINX_PORT ..."
@@ -354,7 +347,7 @@ echo -e "    Clawith frontend  http://localhost:$CLAWITH_FRONTEND_PORT"
 echo -e "    Clawith backend   http://localhost:$CLAWITH_BACKEND_PORT/api/health"
 echo -e "    WeKnora backend   http://localhost:$WEKNORA_APP_PORT"
 echo -e "    WeKnora frontend  http://localhost:$WEKNORA_FRONTEND_PORT/kb/"
-echo -e "    AIPPT             http://localhost:$AIPPT_PORT"
+echo -e "    Pro Slides        http://localhost:$PRO_SLIDES_PORT"
 echo ""
 echo -e "  Logs:   tail -f $LOG_DIR/*.log"
 echo -e "  Stop:   ./stop.sh"

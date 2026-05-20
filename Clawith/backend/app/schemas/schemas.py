@@ -591,3 +591,91 @@ class GatewaySendMessageRequest(BaseModel):
     target: str  # Name of target person or agent
     content: str = Field(min_length=1)
     channel: str | None = None  # Optional: "feishu", "agent", etc. Auto-detected if omitted.
+
+
+# ─── Presentations ───────────────────────────────────────────────
+
+class PresentationCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = None
+    content: dict | None = None
+    thumbnail: str | None = None
+    is_public: bool = False
+
+
+class PresentationUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    content: dict | None = None
+    thumbnail: str | None = None
+    is_public: bool | None = None
+    page_settings: dict | None = None
+
+
+class PresentationOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str | None = None
+    content: dict | None = None
+    thumbnail: str | None = None
+    is_public: bool = False
+    page_settings: dict | None = None
+    creator_id: uuid.UUID
+    tenant_id: uuid.UUID | None = None
+    is_deleted: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PresentationVersionCreate(BaseModel):
+    content: dict | None = None
+    title: str | None = None
+    description: str | None = None
+    is_auto_save: bool = False
+    author: str | None = None
+
+
+class PresentationVersionUpdate(BaseModel):
+    content: dict | None = None
+    title: str | None = None
+    description: str | None = None
+    is_auto_save: bool | None = None
+
+
+class PresentationVersionOut(BaseModel):
+    id: uuid.UUID
+    presentation_id: uuid.UUID
+    content: dict | None = None
+    title: str | None = None
+    description: str | None = None
+    is_auto_save: bool = False
+    author: str | None = None
+    size: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── PPT Templates ───────────────────────────────────────────────
+
+class PPTTemplateOut(BaseModel):
+    id: str
+    name: str
+    category: str = "business"
+    preview: str | None = None
+    width: int = 960
+    height: int = 540
+    slide_count: int = 0
+    is_premium: bool = False
+    source: str | None = None
+    tags: dict | None = None
+    data: dict | None = None
+    creator_id: uuid.UUID | None = None
+    tenant_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

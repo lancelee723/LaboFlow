@@ -186,6 +186,28 @@ async def get_weknora_sso_token(
     return {"token": token, "weknora_url": weknora_url}
 
 
+# ─── Pro Slides SSO Token ──────────────────────────────────
+
+@router.get("/pro-slides/sso-token")
+async def get_pro_slides_sso_token(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Mint a short-lived SSO JWT for Pro Slides.
+
+    The frontend opens ``/ppt/sso?token=<jwt>`` to automatically log
+    the user into Pro Slides without requiring a separate credential.
+    """
+    token = create_sso_token(
+        user_id=str(current_user.id),
+        email=current_user.email or "",
+        audience="pro-slides",
+        role=getattr(current_user, "role", "user"),
+    )
+    slides_url = _resolve_browser_kb_url("/ppt", request)
+    return {"token": token, "proslides_url": slides_url}
+
+
 class LLMTestRequest(BaseModel):
     provider: str
     model: str
@@ -1000,7 +1022,7 @@ async def update_aippt_llm_config(
 
 @router.get("/aippt-llm-runtime")
 async def get_aippt_llm_runtime(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
