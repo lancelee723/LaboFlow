@@ -571,7 +571,10 @@ export default function Layout() {
         const data = await res.json();
         if (data.redirect_url) {
             localStorage.setItem('token', data.access_token);
-            const targetUrl = new URL(data.redirect_url, window.location.origin);
+            // resolveWeKnoraBrowserUrl replaces localhost/loopback with the
+            // browser's actual hostname, fixing reverse-proxy deployments where
+            // the backend returns an internal host instead of the public URL.
+            const targetUrl = new URL(resolveWeKnoraBrowserUrl(data.redirect_url), window.location.origin);
             if (targetUrl.hostname === window.location.hostname) {
                 targetUrl.protocol = window.location.protocol;
                 targetUrl.port = window.location.port;
@@ -1073,7 +1076,7 @@ export default function Layout() {
             <nav className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
                 <div className="sidebar-top">
                     <div className="sidebar-logo">
-                        <img className="sidebar-logo-image" src="/laboflow-logo.svg" alt="LaboFlow" />
+                        <img className="sidebar-logo-image" src="/laboflow-logo-transparent.svg" alt="LaboFlow" />
                         <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
                             padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             marginLeft: 'auto', color: 'var(--text-tertiary)',

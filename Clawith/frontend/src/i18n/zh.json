@@ -522,7 +522,7 @@
         "disconnectFailed": "渠道断开失败。",
         "websocketConnected": "已通过 WebSocket 连接（无需回调 URL）",
         "websocketDisconnected": "已配置为 WebSocket，但当前未连接",
-        "websocketDisconnectedHint": "重新保存一次企业微信 WebSocket 配置即可重新连接。",
+        "websocketDisconnectedHint": "重新保存一次 WebSocket 配置即可重新连接。",
         "saveChannel": "保存配置"
       },
       "danger": {

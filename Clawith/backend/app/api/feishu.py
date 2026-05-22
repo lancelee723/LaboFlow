@@ -431,7 +431,14 @@ async def get_channel_config(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="Channel not configured")
-    return ChannelConfigOut.model_validate(config)
+    config_out = ChannelConfigOut.model_validate(config)
+    if (config.extra_config or {}).get("connection_mode") == "websocket":
+        from app.services.feishu_ws import feishu_ws_manager
+
+        config_out.is_connected = feishu_ws_manager.status().get(str(agent_id), False)
+    else:
+        config_out.is_connected = False
+    return config_out
 
 
 @router.get("/agents/{agent_id}/channel/webhook-url")

@@ -43,9 +43,10 @@ services:
       - SYS_ADMIN
     security_opt:
       - seccomp=unconfined
-    dns:
-      - 223.5.5.5
-      - 114.114.114.114
+    sysctls:
+      net.ipv4.tcp_keepalive_time: 120
+      net.ipv4.tcp_keepalive_intvl: 30
+      net.ipv4.tcp_keepalive_probes: 3
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-clawith}:${POSTGRES_PASSWORD:-clawith}@clawith-postgres:5432/${POSTGRES_DB:-clawith}
       REDIS_URL: redis://clawith-redis:6379/0
