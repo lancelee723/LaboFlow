@@ -522,7 +522,7 @@
         "disconnectFailed": "渠道断开失败。",
         "websocketConnected": "已通过 WebSocket 连接（无需回调 URL）",
         "websocketDisconnected": "已配置为 WebSocket，但当前未连接",
-        "websocketDisconnectedHint": "重新保存一次企业微信 WebSocket 配置即可重新连接。",
+        "websocketDisconnectedHint": "重新保存一次 WebSocket 配置即可重新连接。",
         "saveChannel": "保存配置"
       },
       "danger": {
@@ -1543,6 +1543,12 @@
       "period": "周期",
       "agents": "数字员工",
       "ttl": "TTL",
+      "deleteUser": "删除",
+      "deleteUserTitle": "删除用户",
+      "deleteUserConfirmLabel": "输入用户名以确认",
+      "deleteUserConfirm": "此操作将从本组织中永久移除 {{name}}，且无法撤销。",
+      "deleteUserSuccess": "用户已成功移除",
+      "deleteUserError": "移除用户失败",
       "edit": "编辑",
       "clickToSort": "点击切换排序",
       "platformAdmin": "平台\n管理员",

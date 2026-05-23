@@ -8,8 +8,8 @@ import {
     IconAlertTriangle,
     IconArrowRight,
     IconCheck,
-    IconWorld,
 } from '@tabler/icons-react';
+import { AtlasFrame } from '../components/atlas';
 
 export default function Login() {
     const { t, i18n } = useTranslation();
@@ -402,12 +402,13 @@ export default function Login() {
     const shouldShowGlobalOAuth = !tenant?.sso_enabled && !isRegister && !showVerification;
 
     return (
-        <div className="login-page">
-            {/* ── Left: Branding Panel ── */}
-            <div className="login-hero">
+        <AtlasFrame onToggleLang={toggleLang}>
+            <div className="atlas-screen-split atlas-login-split">
+                {/* ── Left: Branding Panel ── */}
+                <div className="atlas-screen-plate atlas-login-hero">
                 <div className="login-hero-bg" />
                 <div className="login-hero-mark" aria-hidden="true">
-                    <img src="/laboflow-logo.svg" className="login-hero-mark-logo" alt="" />
+                    <img src="/laboflow-logo-transparent.svg" className="login-hero-mark-logo" alt="" />
                     <span>LaboFlow</span>
                     <span className="login-hero-mark-divider" />
                     <span>{t('login.hero.mark')}</span>
@@ -419,20 +420,11 @@ export default function Login() {
                     </h1>
                     <p className="login-hero-desc">{t('login.hero.description')}</p>
                 </div>
-            </div>
+                </div>
 
-            {/* ── Right: Form Panel ── */}
-            <div className="login-form-panel">
-                <div className="login-form-wrapper">
-                    <button
-                        type="button"
-                        className="login-language-switcher"
-                        onClick={toggleLang}
-                        aria-label={t('common.switchLanguage', 'Switch language')}
-                        title={t('common.switchLanguage', 'Switch language')}
-                    >
-                        <span className="login-language-switcher-icon" aria-hidden="true"><IconWorld size={18} stroke={1.8} /></span>
-                    </button>
+                {/* ── Right: Form Panel ── */}
+                <div className="atlas-screen-form atlas-login-form-pane">
+                    <div className="atlas-login-form-wrapper">
                     {checkingEmail ? (
                         // While resolving invitation email, show a minimal loading indicator
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', gap: '16px' }}>
@@ -868,8 +860,9 @@ export default function Login() {
                     )}
                     </>
                     )}
+                    </div>
                 </div>
             </div>
-        </div>
+        </AtlasFrame>
     );
 }

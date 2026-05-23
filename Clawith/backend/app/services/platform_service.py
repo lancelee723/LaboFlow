@@ -20,10 +20,10 @@ class PlatformService:
 
     async def get_public_base_url(self, db: AsyncSession | None = None, request: Request | None = None) -> str:
         """Resolve the platform's public base URL with priority lookup.
-        
+
         Priority:
         1. Environment variable (PUBLIC_BASE_URL) - from .env or docker
-        2. Incoming request's base URL (browser address)
+        2. Incoming request origin, honoring X-Forwarded-* headers from reverse proxies
         3. Hardcoded fallback (https://try.clawith.ai)
         """
         # 1. Try environment variable
@@ -31,10 +31,16 @@ class PlatformService:
         if env_url:
             return env_url.rstrip("/")
 
-        # 2. Fallback to request (browser address)
+        # 2. Fallback to request, honoring X-Forwarded-* headers so that reverse
+        #    proxy deployments (Docker, nginx, Traefik) return the public URL instead
+        #    of the internal host:port.
         if request:
-            # Note: request.base_url might include trailing slash
-            return str(request.base_url).rstrip("/")
+            xf_proto = request.headers.get("X-Forwarded-Proto")
+            xf_host = request.headers.get("X-Forwarded-Host")
+            host_header = request.headers.get("Host")
+            scheme = xf_proto or request.url.scheme or "http"
+            authority = xf_host or host_header or str(request.url.hostname) or "localhost"
+            return f"{scheme}://{authority}"
 
         # 3. Absolute fallback
         return "https://try.clawith.ai"

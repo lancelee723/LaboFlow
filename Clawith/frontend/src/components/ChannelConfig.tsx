@@ -921,9 +921,26 @@ export default function ChannelConfig({ mode, agentId, canManage = true, values,
                                 {ch.id === 'feishu' && configConnMode === 'websocket' && (
                                     <div style={{ background: 'var(--bg-secondary)', borderRadius: '6px', padding: '10px', fontSize: '12px', marginBottom: '12px' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00D6B9', display: 'inline-block' }}></span>
-                                            <span style={{ color: 'var(--text-secondary)' }}>Connected via WebSocket (No callback URL needed)</span>
+                                            <span
+                                                style={{
+                                                    width: '6px',
+                                                    height: '6px',
+                                                    borderRadius: '50%',
+                                                    background: config.is_connected ? '#07C160' : '#F59E0B',
+                                                    display: 'inline-block',
+                                                }}
+                                            ></span>
+                                            <span style={{ color: 'var(--text-secondary)' }}>
+                                                {config.is_connected
+                                                    ? t('agent.settings.channel.websocketConnected', 'Connected via WebSocket (No callback URL needed)')
+                                                    : t('agent.settings.channel.websocketDisconnected', 'Configured for WebSocket, but currently disconnected')}
+                                            </span>
                                         </div>
+                                        {!config.is_connected && (
+                                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                                {t('agent.settings.channel.websocketDisconnectedHint', 'Reconnect by saving the WebSocket configuration again.')}
+                                            </div>
+                                        )}
                                         <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>App ID: <code>{config.app_id}</code></div>
                                     </div>
                                 )}
@@ -955,7 +972,7 @@ export default function ChannelConfig({ mode, agentId, canManage = true, values,
                                         </div>
                                         {!config.is_connected && (
                                             <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                                                {t('agent.settings.channel.websocketDisconnectedHint', 'Reconnect by saving the WeCom WebSocket configuration again.')}
+                                                {t('agent.settings.channel.websocketDisconnectedHint', 'Reconnect by saving the WebSocket configuration again.')}
                                             </div>
                                         )}
                                     </div>

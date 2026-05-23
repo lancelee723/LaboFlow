@@ -458,6 +458,7 @@ export default function Layout() {
     const [tenantFormError, setTenantFormError] = useState('');
     const [allowSelfCreate, setAllowSelfCreate] = useState(true);
     const [kbLoading, setKbLoading] = useState(false);
+    const [pptLoading, setPptLoading] = useState(false);
 
     const resolveWeKnoraBrowserUrl = useCallback((rawUrl: string) => {
         try {
@@ -491,6 +492,26 @@ export default function Layout() {
             setKbLoading(false);
         }
     }, [kbLoading, isChinese, resolveWeKnoraBrowserUrl]);
+
+    const openProSlidesSSO = useCallback(async () => {
+        if (pptLoading) return;
+        setPptLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch('/api/enterprise/pro-slides/sso-token', {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const { token: ssoToken, proslides_url } = await res.json();
+            const baseUrl = resolveWeKnoraBrowserUrl(proslides_url || '/ppt');
+            window.open(`${baseUrl}/sso?token=${encodeURIComponent(ssoToken)}`, '_blank', 'noopener,noreferrer');
+        } catch (err) {
+            console.error('[Pro Slides SSO] failed:', err);
+            alert(isChinese ? '打开Pro Slides失败，请稍后重试' : 'Failed to open Pro Slides. Please try again.');
+        } finally {
+            setPptLoading(false);
+        }
+    }, [pptLoading, isChinese]);
     const tenantSwitcherRef = useRef<HTMLButtonElement>(null);
     const tenantMenuPortalRef = useRef<HTMLDivElement>(null);
     const [tenantMenuPos, setTenantMenuPos] = useState({ top: 0, left: 0, maxHeight: 520 });
@@ -550,7 +571,10 @@ export default function Layout() {
         const data = await res.json();
         if (data.redirect_url) {
             localStorage.setItem('token', data.access_token);
-            const targetUrl = new URL(data.redirect_url, window.location.origin);
+            // resolveWeKnoraBrowserUrl replaces localhost/loopback with the
+            // browser's actual hostname, fixing reverse-proxy deployments where
+            // the backend returns an internal host instead of the public URL.
+            const targetUrl = new URL(resolveWeKnoraBrowserUrl(data.redirect_url), window.location.origin);
             if (targetUrl.hostname === window.location.hostname) {
                 targetUrl.protocol = window.location.protocol;
                 targetUrl.port = window.location.port;
@@ -1052,7 +1076,7 @@ export default function Layout() {
             <nav className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
                 <div className="sidebar-top">
                     <div className="sidebar-logo">
-                        <img className="sidebar-logo-image" src="/laboflow-logo.svg" alt="LaboFlow" />
+                        <img className="sidebar-logo-image" src="/laboflow-logo-transparent.svg" alt="LaboFlow" />
                         <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
                             padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             marginLeft: 'auto', color: 'var(--text-tertiary)',
@@ -1102,18 +1126,18 @@ export default function Layout() {
                             <span className="sidebar-item-text">{t('nav.knowledgeBase', 'Knowledge Base')}</span>
                             <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
                         </button>
-                        <a
-                            href={`/ppt/?sso_token=${localStorage.getItem('token') || ''}`}
+                        <button
                             className="sidebar-item"
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            onClick={openProSlidesSSO}
+                            disabled={pptLoading}
+                            style={{ cursor: pptLoading ? 'wait' : 'pointer', width: '100%', textAlign: 'left', opacity: pptLoading ? 0.6 : 1 }}
                         >
                             <span className="sidebar-item-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                                 <IconPresentation size={14} stroke={1.5} />
                             </span>
                             <span className="sidebar-item-text">{t('nav.aiPPT', 'Pro Slides')}</span>
                             <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
-                        </a>
+                        </button>
                         <NavLink
                             to="/pro-charts"
                             className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}

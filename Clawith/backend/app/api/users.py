@@ -224,3 +224,167 @@ async def update_user_role(
     target_user.role = data.role
     await db.commit()
     return {"status": "ok", "user_id": str(user_id), "role": data.role}
+
+
+# ─── Delete User ───────────────────────────────────────
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a user from the organization.
+
+    Hard-deletes the User (tenant membership) row and all tenant-scoped data
+    owned by that user (agents, org-member channel mappings).
+    If the underlying Identity has no remaining tenant memberships it is also
+    deleted, effectively removing the account from the platform.
+
+    Permissions:
+    - Caller must be org_admin or platform_admin.
+    - Cannot delete admins (org_admin / platform_admin).
+    - Cannot delete self.
+    - org_admin can only delete users in their own tenant.
+    """
+    if current_user.role not in ("platform_admin", "org_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    result = await db.execute(
+        select(User).options(selectinload(User.identity)).where(User.id == user_id)
+    )
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if current_user.role == "org_admin" and target.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Cannot delete users outside your organization")
+
+    if target.role in ("org_admin", "platform_admin"):
+        raise HTTPException(status_code=400, detail="Cannot delete admin accounts")
+
+    # 1. Delete agents created by this user
+    agents_result = await db.execute(
+        select(Agent).where(Agent.creator_id == target.id)
+    )
+    for agent in agents_result.scalars().all():
+        await db.delete(agent)
+    await db.flush()
+
+    # 2. Delete org-member channel mappings for this user in this tenant
+    from app.models.org import OrgMember
+    org_members_result = await db.execute(
+        select(OrgMember).where(
+            OrgMember.user_id == target.id,
+            OrgMember.tenant_id == target.tenant_id,
+        )
+    )
+    for om in org_members_result.scalars().all():
+        await db.delete(om)
+    await db.flush()
+
+    # 3. Delete chat messages sent by this user
+    from app.models.audit import ChatMessage
+    chat_msgs_result = await db.execute(
+        select(ChatMessage).where(ChatMessage.user_id == target.id)
+    )
+    for msg in chat_msgs_result.scalars().all():
+        await db.delete(msg)
+    await db.flush()
+
+    # 4. Delete chat sessions owned by this user
+    from app.models.chat_session import ChatSession
+    chat_sessions_result = await db.execute(
+        select(ChatSession).where(ChatSession.user_id == target.id)
+    )
+    for session in chat_sessions_result.scalars().all():
+        await db.delete(session)
+    await db.flush()
+
+    # 5. Delete workspace edit locks held by this user
+    from app.models.workspace import WorkspaceEditLock
+    locks_result = await db.execute(
+        select(WorkspaceEditLock).where(WorkspaceEditLock.user_id == target.id)
+    )
+    for lock in locks_result.scalars().all():
+        await db.delete(lock)
+    await db.flush()
+
+    # 6. Delete tasks created by this user
+    from app.models.task import Task
+    tasks_result = await db.execute(
+        select(Task).where(Task.created_by == target.id)
+    )
+    for task in tasks_result.scalars().all():
+        await db.delete(task)
+    await db.flush()
+
+    # 7. Delete agent schedules created by this user
+    from app.models.schedule import AgentSchedule
+    schedules_result = await db.execute(
+        select(AgentSchedule).where(AgentSchedule.created_by == target.id)
+    )
+    for sched in schedules_result.scalars().all():
+        await db.delete(sched)
+    await db.flush()
+
+    # 8. Delete published pages owned by this user
+    from app.models.published_page import PublishedPage
+    pages_result = await db.execute(
+        select(PublishedPage).where(PublishedPage.user_id == target.id)
+    )
+    for page in pages_result.scalars().all():
+        await db.delete(page)
+    await db.flush()
+
+    # 9. Delete export jobs created by this user (must precede presentations)
+    from app.models.export_job import ExportJob
+    export_jobs_result = await db.execute(
+        select(ExportJob).where(ExportJob.creator_id == target.id)
+    )
+    for job in export_jobs_result.scalars().all():
+        await db.delete(job)
+    await db.flush()
+
+    # 10. Delete presentations created by this user
+    from app.models.presentation import Presentation
+    presentations_result = await db.execute(
+        select(Presentation).where(Presentation.creator_id == target.id)
+    )
+    for pres in presentations_result.scalars().all():
+        await db.delete(pres)
+    await db.flush()
+
+    # 11. Nullify supervision references to this user in tasks created by others
+    from app.models.task import Task as _Task
+    from sqlalchemy import update as _update
+    await db.execute(
+        _update(_Task)
+        .where(_Task.supervision_target_user_id == target.id)
+        .values(supervision_target_user_id=None)
+    )
+    await db.flush()
+
+    # 12. Decide whether to also remove the Identity
+    identity_id = target.identity_id
+    await db.delete(target)
+    await db.flush()
+
+    if identity_id:
+        other_result = await db.execute(
+            select(func.count()).select_from(User).where(
+                User.identity_id == identity_id,
+            )
+        )
+        remaining = other_result.scalar() or 0
+        if remaining == 0:
+            from app.models.user import Identity
+            identity = await db.get(Identity, identity_id)
+            if identity:
+                await db.delete(identity)
+
+    await db.commit()

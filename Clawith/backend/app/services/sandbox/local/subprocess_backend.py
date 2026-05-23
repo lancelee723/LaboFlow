@@ -12,12 +12,14 @@ from app.services.sandbox.base import BaseSandboxBackend, ExecutionResult, Sandb
 from app.services.sandbox.config import SandboxConfig
 from app.services.workspace_paths import WorkspacePathError, resolve_path_within_root
 
+MAX_STDOUT_CAPTURE_BYTES = 1_000_000
+MAX_STDERR_CAPTURE_BYTES = 500_000
+
 
 # Security patterns - reused from agent_tools.py
 _DANGEROUS_BASH_ALWAYS = [
     "rm -rf /", "rm -rf ~", "sudo ", "mkfs", "dd if=",
     ":(){ :", "chmod 777 /", "chown ", "shutdown", "reboot",
-    "python3 -c", "python -c",
 ]
 
 _DANGEROUS_BASH_NETWORK = [
@@ -25,18 +27,17 @@ _DANGEROUS_BASH_NETWORK = [
 ]
 
 _DANGEROUS_PYTHON_IMPORTS_ALWAYS = [
-    "subprocess", "shutil.rmtree", "os.system", "os.popen",
+    "shutil.rmtree", "os.system", "os.popen",
     "os.exec", "os.spawn",
 ]
 
 _DANGEROUS_PYTHON_IMPORTS_NETWORK = [
     "socket", "http.client", "urllib.request", "requests",
     "ftplib", "smtplib", "telnetlib", "ctypes",
-    "__import__", "importlib",
 ]
 
 _DANGEROUS_NODE_ALWAYS = [
-    "child_process", "fs.rmSync", "fs.rmdirSync", "process.exit",
+    "fs.rmSync", "fs.rmdirSync", "process.exit",
 ]
 
 _DANGEROUS_NODE_NETWORK = [
@@ -184,7 +185,7 @@ class SubprocessBackend(BaseSandboxBackend):
                 import resource
 
                 memory_bytes = int(self.config.memory_limit.rstrip("mM")) * 1024 * 1024
-                cpu_limit = max(1, min(timeout, self.config.max_timeout, 60))
+                cpu_limit = max(1, min(timeout, self.config.max_timeout))
                 resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
                 resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
                 resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
@@ -298,6 +299,7 @@ class SubprocessBackend(BaseSandboxBackend):
         **kwargs
     ) -> ExecutionResult:
         """Execute code in a subprocess."""
+        on_output = kwargs.get("on_output")
         start_time = time.time()
 
         # Validate language
@@ -392,27 +394,54 @@ class SubprocessBackend(BaseSandboxBackend):
                     **self._build_exec_kwargs(work_path, timeout),
                 )
 
+            stdout_data = bytearray()
+            stderr_data = bytearray()
+
+            async def read_stream(stream, out, label: str = "stdout"):
+                capture_limit = MAX_STDERR_CAPTURE_BYTES if label == "stderr" else MAX_STDOUT_CAPTURE_BYTES
+                while True:
+                    chunk = await stream.read(4096)
+                    if not chunk:
+                        break
+                    remaining = capture_limit - len(out)
+                    if remaining > 0:
+                        out.extend(chunk[:remaining])
+                    if on_output:
+                        try:
+                            text = chunk.decode("utf-8", errors="replace")
+                            await on_output(text, label)
+                        except Exception:
+                            pass
+
+            task1 = asyncio.create_task(read_stream(proc.stdout, stdout_data, "stdout"))
+            task2 = asyncio.create_task(read_stream(proc.stderr, stderr_data, "stderr"))
+
+            is_timeout = False
+
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout
-                )
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
             except asyncio.TimeoutError:
                 proc.kill()
-                await proc.communicate()
-                return ExecutionResult(
-                    success=False,
-                    stdout="",
-                    stderr="",
-                    exit_code=124,
-                    duration_ms=int((time.time() - start_time) * 1000),
-                    error=f"Code execution timed out after {timeout}s"
-                )
+                is_timeout = True
 
-            stdout_str = stdout.decode("utf-8", errors="replace")[:10000]
-            stderr_str = stderr.decode("utf-8", errors="replace")[:5000]
+            await asyncio.gather(task1, task2)
+            stdout = bytes(stdout_data)
+            stderr = bytes(stderr_data)
+
+            stdout_str = stdout.decode("utf-8", errors="replace")[:10000] if stdout else ""
+            stderr_str = stderr.decode("utf-8", errors="replace")[:5000] if stderr else ""
 
             duration_ms = int((time.time() - start_time) * 1000)
+
+            if is_timeout:
+                return ExecutionResult(
+                    success=False,
+                    stdout=stdout_str,
+                    stderr=stderr_str,
+                    exit_code=124,
+                    duration_ms=duration_ms,
+                    error=f"Code execution timed out after {timeout}s. If you expect this code to take longer, try calling the tool again with a higher 'timeout' parameter (up to 3600s)."
+                )
 
             return ExecutionResult(
                 success=proc.returncode == 0,

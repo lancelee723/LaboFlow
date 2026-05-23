@@ -35,6 +35,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
         ...options,
     });
     if (!res.ok) throw new Error(await res.text());
+    if (res.status === 204) return undefined as T;
     return res.json();
 }
 
@@ -65,6 +66,11 @@ export default function UserManagement() {
     const [saving, setSaving] = useState(false);
     const [toast, setToast] = useState('');
     const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null);
+
+    // Delete modal state
+    const [deletingUser, setDeletingUser] = useState<UserInfo | null>(null);
+    const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+    const [deleteLoading, setDeleteLoading] = useState(false);
 
     // Invite modal state
     const [showInviteModal, setShowInviteModal] = useState(false);
@@ -142,6 +148,24 @@ export default function UserManagement() {
             setTimeout(() => setToast(''), 4000);
         }
         setChangingRoleUserId(null);
+    };
+
+    const handleDeleteUser = async () => {
+        if (!deletingUser) return;
+        setDeleteLoading(true);
+        try {
+            await fetchJson(`/users/${deletingUser.id}`, { method: 'DELETE' });
+            setToast(isChinese ? t('enterprise.users.deleteUserSuccess', '用户已成功移除') : t('enterprise.users.deleteUserSuccess', 'User removed successfully'));
+            setTimeout(() => setToast(''), 2500);
+            setDeletingUser(null);
+            setDeleteConfirmInput('');
+            loadUsers();
+        } catch (e: any) {
+            const detail = (() => { try { return JSON.parse(e.message)?.detail; } catch { return e.message; } })();
+            setToast(`Error: ${detail || e.message}`);
+            setTimeout(() => setToast(''), 4000);
+        }
+        setDeleteLoading(false);
     };
 
     // ── Handlers ──
@@ -273,7 +297,7 @@ export default function UserManagement() {
 
                     {/* Header */}
                     <div style={{
-                        display: 'grid', gridTemplateColumns: '1.4fr 1.4fr 0.8fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr 0.8fr 100px',
+                        display: 'grid', gridTemplateColumns: '1.4fr 1.4fr 0.8fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr 0.8fr auto',
                         gap: '10px', padding: '10px 16px', fontSize: '11px', fontWeight: 600,
                         color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em',
                     }}>
@@ -299,7 +323,7 @@ export default function UserManagement() {
                     {paged.map(user => (
                         <div key={user.id}>
                             <div className="card" style={{
-                                display: 'grid', gridTemplateColumns: '1.4fr 1.4fr 0.8fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr 0.8fr 100px',
+                                display: 'grid', gridTemplateColumns: '1.4fr 1.4fr 0.8fr 0.7fr 0.7fr 0.8fr 0.8fr 0.8fr 0.8fr auto',
                                 gap: '10px', alignItems: 'center', padding: '12px 16px',
                             }}>
                                 <div>
@@ -363,14 +387,25 @@ export default function UserManagement() {
                                 <div style={{ fontSize: '12px' }}>
                                     {user.quota_agent_ttl_hours > 0 ? `${user.quota_agent_ttl_hours}h` : t('enterprise.quotas.permanent', 'Permanent')}
                                 </div>
-                                <div>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
                                     <button
                                         className="btn btn-secondary"
-                                        style={{ padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                        style={{ padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}
                                         onClick={() => editingUserId === user.id ? setEditingUserId(null) : startEdit(user)}
                                     >
                                         {editingUserId === user.id ? t('common.cancel') : <><IconEdit size={13} stroke={1.8} /> {t('common.edit')}</>}
                                     </button>
+                                    {currentUser?.role && ['platform_admin', 'org_admin'].includes(currentUser.role)
+                                        && user.role === 'member'
+                                        && user.id !== currentUser.id && (
+                                        <button
+                                            className="btn btn-ghost"
+                                            style={{ padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--error)', whiteSpace: 'nowrap' }}
+                                            onClick={() => { setDeletingUser(user); setDeleteConfirmInput(''); }}
+                                        >
+                                            {t('enterprise.users.deleteUser', '删除')}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
@@ -520,6 +555,56 @@ export default function UserManagement() {
                             </button>
                             <button className="btn btn-primary" onClick={handleSendInvites} disabled={inviting || !inviteEmails.trim()}>
                                 {inviting ? (isChinese ? '发送中...' : 'Sending...') : (isChinese ? '发送邀请' : 'Send Invitations')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Delete user confirmation modal */}
+            {deletingUser && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9998,
+                }}>
+                    <div className="card" style={{ width: '420px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <div style={{ fontWeight: 600, fontSize: '16px', color: 'var(--error)' }}>
+                            {t('enterprise.users.deleteUserTitle', '删除用户')}
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                            {isChinese
+                                ? `此操作将从本组织中永久移除 ${deletingUser.display_name || deletingUser.username}，且无法撤销。`
+                                : `This will permanently remove ${deletingUser.display_name || deletingUser.username} from this organization. This action cannot be undone.`
+                            }
+                        </div>
+                        <div className="form-group" style={{ margin: 0 }}>
+                            <label className="form-label" style={{ fontSize: '12px' }}>
+                                {isChinese
+                                    ? `输入用户名 "${deletingUser.username}" 以确认`
+                                    : `Type the username "${deletingUser.username}" to confirm`
+                                }
+                            </label>
+                            <input
+                                className="form-input"
+                                value={deleteConfirmInput}
+                                onChange={e => setDeleteConfirmInput(e.target.value)}
+                                placeholder={deletingUser.username}
+                                autoFocus
+                            />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => { setDeletingUser(null); setDeleteConfirmInput(''); }}
+                                disabled={deleteLoading}
+                            >
+                                {t('common.cancel')}
+                            </button>
+                            <button
+                                className="btn btn-danger"
+                                onClick={handleDeleteUser}
+                                disabled={deleteConfirmInput !== deletingUser.username || deleteLoading}
+                            >
+                                {deleteLoading ? t('common.loading') : t('enterprise.users.deleteUser', '删除')}
                             </button>
                         </div>
                     </div>

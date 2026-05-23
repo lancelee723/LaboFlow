@@ -20,9 +20,9 @@ settings = get_settings()
 def _log_bwrap_startup_status() -> None:
     """Emit a startup diagnostic for bubblewrap availability.
 
-    We only warn when bwrap is missing so deployments can still start in
-    degraded mode. The subprocess sandbox will fall back to the hardened local
-    execution path in that case.
+    We only warn when bwrap is missing so deployments can still start. Local
+    source runs may explicitly allow a reduced-isolation fallback, while
+    containerized deployments should keep fail-closed behavior.
     """
     in_container = Path("/.dockerenv").exists()
     bwrap_path = shutil.which("bwrap")
@@ -35,14 +35,21 @@ def _log_bwrap_startup_status() -> None:
     if in_container:
         logger.warning(
             "[startup] bubblewrap (bwrap) is not installed in the backend container. "
-            "The service will still start, but execute_code will run without bwrap filesystem isolation."
+            "The service will still start, but execute_code will fail closed unless "
+            "SANDBOX_ALLOW_UNSAFE_FALLBACK_WHEN_BWRAP_MISSING=true is explicitly set."
         )
         return
 
-    logger.warning(
-        "[startup] bubblewrap (bwrap) is not installed on the host. "
-        "The service will still start, but execute_code will run without bwrap filesystem isolation."
-    )
+    if settings.SANDBOX_ALLOW_UNSAFE_FALLBACK_WHEN_BWRAP_MISSING:
+        logger.warning(
+            "[startup] bubblewrap (bwrap) is not installed on the host. "
+            "Local execute_code will use the reduced-isolation fallback."
+        )
+    else:
+        logger.warning(
+            "[startup] bubblewrap (bwrap) is not installed on the host. "
+            "execute_code will fail closed unless SANDBOX_ALLOW_UNSAFE_FALLBACK_WHEN_BWRAP_MISSING=true is set."
+        )
 
 
 async def _start_ss_local() -> None:
@@ -151,6 +158,7 @@ async def lifespan(app: FastAPI):
         import app.models.agent_credential  # noqa
         import app.models.okr            # noqa  OKR system tables
         import app.models.onboarding     # noqa
+        import app.models.export_job    # noqa
 
         import app.models.identity       # noqa
         async with engine.begin() as conn:
@@ -357,6 +365,10 @@ from app.api.agent_credentials import router as credentials_router
 from app.api.agentbay_control import router as agentbay_control_router
 from app.api.okr import router as okr_router
 from app.api.onboarding import router as onboarding_router
+from app.api.presentations import router as presentations_router
+from app.api.templates import router as templates_router
+from app.api.ppt_llm import router as ppt_llm_router, auth_router as ppt_auth_router
+from app.api.ppt_export import router as ppt_export_router
 
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(agents_router, prefix=settings.API_PREFIX)
@@ -403,6 +415,11 @@ app.include_router(credentials_router, prefix=settings.API_PREFIX)
 app.include_router(agentbay_control_router, prefix=settings.API_PREFIX)
 app.include_router(okr_router)  # OKR — self-prefixed at /api/okr
 app.include_router(onboarding_router, prefix=settings.API_PREFIX)
+app.include_router(presentations_router, prefix=settings.API_PREFIX)
+app.include_router(templates_router, prefix=settings.API_PREFIX)
+app.include_router(ppt_llm_router, prefix=settings.API_PREFIX)
+app.include_router(ppt_auth_router, prefix=settings.API_PREFIX)
+app.include_router(ppt_export_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["health"])
