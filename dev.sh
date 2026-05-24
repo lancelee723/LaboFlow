@@ -8,7 +8,7 @@
 #   3. WeKnora infra     (docker compose dev on postgres/redis/docreader)
 #      WeKnora backend   (go run on :8080)
 #      WeKnora frontend  (vite on :8800, base=/kb/)
-#   4. Pro Slides frontend (optional, vite on :8890, base=/ppt/)
+#   4. Pro Slides daemon (Express on :7456, serves backend + static frontend)
 #   5. NGINX             (unified entry on :3008)
 #
 # WeKnora uses its native local-dev workflow:
@@ -90,7 +90,7 @@ fi
 : "${CLAWITH_BACKEND_PORT:=8008}"
 : "${WEKNORA_FRONTEND_PORT:=8800}"
 : "${WEKNORA_APP_PORT:=8080}"
-: "${PRO_SLIDES_PORT:=8890}"
+: "${PRO_SLIDES_PORT:=7456}"
 
 PRO_SLIDES_DIR="$ROOT/Pro Slides"
 PRO_SLIDES_ENABLED=false
@@ -303,14 +303,27 @@ echo $! > "$PID_DIR/weknora-frontend.pid"
 cd "$ROOT"
 
 # ── 4. Pro Slides (optional) ─────────────────────────────────────
+# Pro Slides daemon serves both the Express backend (:7456) and the
+# static Next.js frontend. For local dev we build first, then start
+# the daemon — it handles SSO verification and API routes natively.
+PRO_SLIDES_DAEMON_PORT=7456
+
 if [ "$PRO_SLIDES_ENABLED" = true ]; then
-    log "Starting Pro Slides on :$PRO_SLIDES_PORT ..."
+    log "Building Pro Slides..."
     cd "$PRO_SLIDES_DIR"
     if [ ! -d "node_modules" ]; then
         err "Pro Slides node_modules missing. Run: cd 'Pro Slides' && pnpm install"
         exit 1
     fi
-    nohup env VITE_BASE=/ppt/ pnpm dev:demo \
+    # Build all packages + daemon + web (static export)
+    PRO_SLIDES_HOME="$DATA_DIR/pro-slides" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+        pnpm build >> "$LOG_DIR/pro-slides.log" 2>&1 \
+        || { err "Pro Slides build failed. Check $LOG_DIR/pro-slides.log"; exit 1; }
+    ok "Pro Slides built"
+
+    log "Starting Pro Slides daemon on :$PRO_SLIDES_DAEMON_PORT ..."
+    PRO_SLIDES_HOME="$DATA_DIR/pro-slides" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+        nohup node apps/daemon/dist/cli.js --no-open \
         > "$LOG_DIR/pro-slides.log" 2>&1 &
     echo $! > "$PID_DIR/pro-slides.pid"
     cd "$ROOT"
