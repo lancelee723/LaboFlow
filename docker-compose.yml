@@ -79,11 +79,16 @@ services:
     networks:
       - laboflow
 
-  aippt:
-    # Private aippt image currently publishes amd64 manifest only.
-    platform: ${AIPPT_PLATFORM:-linux/amd64}
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-aippt:${TAG:-1.0}
-    restart: unless-stopped
+  pro-slides:
+    build:
+      context: "./Pro Slides"
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pro-slides:${TAG:-1.0}
+    environment:
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-secret}
+      OD_PORT: "7456"
+      PRO_SLIDES_HOME: /data
+    volumes:
+      - pro-slides-data:/data
     networks:
       - laboflow
 
@@ -157,7 +162,7 @@ services:
       - clawith-frontend
       - clawith-backend
       - frontend
-      - aippt
+      - pro-slides
     networks:
       - laboflow
       - WeKnora-network  # must reach frontend (WeKnora) on its own network

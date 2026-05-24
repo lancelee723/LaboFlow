@@ -311,8 +311,8 @@ if [ "$PRO_SLIDES_ENABLED" = true ]; then
         exit 1
     fi
     nohup env VITE_BASE=/ppt/ pnpm dev:demo \
-        > "$LOG_DIR/aippt.log" 2>&1 &
-    echo $! > "$PID_DIR/aippt.pid"
+        > "$LOG_DIR/pro-slides.log" 2>&1 &
+    echo $! > "$PID_DIR/pro-slides.pid"
     cd "$ROOT"
 else
     log "Skipping Pro Slides startup: app files not present in '$PRO_SLIDES_DIR'."
