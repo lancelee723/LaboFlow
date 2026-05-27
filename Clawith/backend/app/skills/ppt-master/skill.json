@@ -1,0 +1,14 @@
+{
+  "name": "ppt-master",
+  "version": "1.0.0",
+  "description": "AI-powered professional presentation generator. Outputs SVG slides with real-time rendering.",
+  "inputs": [
+    { "name": "topic", "type": "string", "required": true, "description": "Presentation topic" },
+    { "name": "slides_count", "type": "number", "default": 10, "description": "Target number of slides" },
+    { "name": "style", "type": "string", "enum": ["corporate", "minimal", "creative", "editorial"], "default": "corporate" },
+    { "name": "language", "type": "string", "enum": ["zh-CN", "en-US"], "default": "zh-CN" }
+  ],
+  "outputs": [
+    { "kind": "svg-deck", "renderer": "svg-deck" }
+  ]
+}
