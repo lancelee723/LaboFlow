@@ -20,6 +20,7 @@ from app.models.llm import LLMModel
 from app.models.user import User
 from app.services.chat_session_service import ensure_primary_platform_session
 from app.services.llm import call_llm, call_llm_with_failover
+from app.services.llm.caller import AskDirectionNeeded
 
 router = APIRouter(tags=["websocket"])
 
@@ -381,6 +382,14 @@ async def websocket_chat(
         if welcome_message and not history_messages:
             await websocket.send_json({"type": "done", "role": "assistant", "content": welcome_message})
 
+        # State for ask_direction pause/resume: when the LLM calls
+        # ask_direction, we pause the loop and store the pending data
+        # here. The next user message is then fed back as a tool_result.
+        session_pending_direction: dict | None = None
+        # Tracks the last ask_direction call_id/args so we can build the
+        # pending-direction state when AskDirectionNeeded is raised.
+        _last_ask_direction_info: dict | None = None
+
         while True:
             logger.info(f"[WS] Waiting for message from {agent_name}...")
             data = await websocket.receive_json()
@@ -463,8 +472,34 @@ async def websocket_chat(
                 await websocket.send_json({"type": "done", "role": "assistant", "content": f"⚠️ {ae.message}"})
                 continue
 
-            # Add user message to conversation (full LLM context)
-            conversation.append({"role": "user", "content": content})
+            # ── Handle pending ask_direction response ──
+            if session_pending_direction:
+                # The user's message is their direction choice. Inject it as
+                # the tool_result for the pending ask_direction call, then
+                # clear the pending state. The LLM loop will pick up the
+                # conversation where it left off.
+                _pd = session_pending_direction
+                conversation.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": _pd["call_id"],
+                        "type": "function",
+                        "function": {
+                            "name": "ask_direction",
+                            "arguments": json.dumps(_pd.get("ask_args", {}), ensure_ascii=False),
+                        },
+                    }],
+                })
+                conversation.append({
+                    "role": "tool",
+                    "tool_call_id": _pd["call_id"],
+                    "content": content,
+                })
+                session_pending_direction = None
+            else:
+                # Add user message to conversation (full LLM context)
+                conversation.append({"role": "user", "content": content})
 
             # Save user message to DB.
             #
@@ -630,6 +665,14 @@ async def websocket_chat(
                     
                     async def tool_call_to_ws(data: dict):
                         """Send tool call info to client and persist completed ones."""
+                        nonlocal _last_ask_direction_info
+                        # Track ask_direction call_id/args so we can resume
+                        # the conversation when the user responds.
+                        if data.get("name") == "ask_direction" and data.get("status") == "done":
+                            _last_ask_direction_info = {
+                                "call_id": data.get("call_id", ""),
+                                "ask_args": data.get("args", {}),
+                            }
                         if data.get("status") in {"running", "done"}:
                             await maybe_mark_onboarding_progress()
                         if data.get("status") == "done":
@@ -930,6 +973,20 @@ async def websocket_chat(
                     # Log activity
                     from app.services.activity_logger import log_activity
                     await log_activity(agent_id, "chat_reply", f"Replied to web chat: {assistant_response[:80]}", detail={"channel": "web", "user_text": content[:200], "reply": assistant_response[:500]})
+                except AskDirectionNeeded as e:
+                    # The ask_direction tool was called. The tool_call event
+                    # has already been sent to the client. Store pending state
+                    # so the next user message is injected as a tool_result.
+                    if _last_ask_direction_info:
+                        session_pending_direction = {
+                            "call_id": _last_ask_direction_info["call_id"],
+                            "ask_args": _last_ask_direction_info["ask_args"],
+                            "direction_data": e.direction_data,
+                        }
+                        _last_ask_direction_info = None
+                    # Continue the message loop — do NOT send "done" or
+                    # reset thinking state. The LLM session is paused.
+                    continue
                 except WebSocketDisconnect:
                     raise
                 except Exception as e:

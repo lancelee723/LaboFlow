@@ -274,6 +274,15 @@ def _tool_not_enabled_message(tool_name: str) -> str:
     )
 
 
+class AskDirectionNeeded(Exception):
+    """Raised when the agent asks the user for direction and needs to pause
+    the LLM tool-calling loop while waiting for the user's choice."""
+
+    def __init__(self, direction_data: str):
+        self.direction_data = direction_data
+        super().__init__("Agent needs user direction input")
+
+
 async def _process_tool_call(
     tc: dict,
     api_messages: list,
@@ -347,6 +356,23 @@ async def _process_tool_call(
         on_output=_on_output,
     )
     logger.debug(f"[LLM] Tool result: {result[:100]}")
+
+    # ── ask_direction: pause loop and wait for user direction input ──
+    if tool_name == "ask_direction":
+        # Send the tool_call event to the client before raising
+        if on_tool_call:
+            try:
+                await on_tool_call({
+                    "name": tool_name,
+                    "call_id": tc.get("id", ""),
+                    "args": args,
+                    "status": "done",
+                    "result": result,
+                    "reasoning_content": full_reasoning_content,
+                })
+            except Exception:
+                pass
+        raise AskDirectionNeeded(result)
 
     # ── Vision injection for screenshot tools ──
     tool_content: str | list = str(result)

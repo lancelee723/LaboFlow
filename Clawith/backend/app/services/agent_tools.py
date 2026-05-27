@@ -66,6 +66,12 @@ from app.services.llm.finish import (
     find_finish_call,
     parse_tool_arguments,
 )
+from app.services.agent_tools_ppt import (
+    PPT_TOOLS,
+    execute_ask_direction,
+    execute_generate_slides,
+    execute_export_pptx,
+)
 
 
 _settings = get_settings()
@@ -2602,6 +2608,14 @@ async def get_agent_tools_for_llm(agent_id: uuid.UUID) -> list[dict]:
                 # Strip msg_type from send_message_to_agent when async A2A is disabled
                 if not _a2a_async:
                     result = _strip_a2a_msg_type(result)
+                # Append PPT tools when the agent has the ppt-master skill
+                _agent_ws = WORKSPACE_ROOT / str(agent_id) / "skills" / "ppt-master"
+                if _agent_ws.is_dir():
+                    _ppt_names = set(t["function"]["name"] for t in result)
+                    for _pt in PPT_TOOLS:
+                        if _pt["function"]["name"] not in _ppt_names:
+                            result.append(_pt)
+                    logger.debug(f"[Tools] agent={agent_id} added PPT tools (ppt-master skill present)")
                 # Final diagnostic: log the complete tool list and assignment stats
                 final_names = sorted(t["function"]["name"] for t in result)
                 logger.info(
@@ -3548,6 +3562,13 @@ async def execute_tool(
         # ── WeKnora Knowledge Retrieval ──
         elif tool_name == "weknora_retrieval":
             result = await _weknora_retrieval(agent_id, arguments)
+        # ── PPT Master tools ──
+        elif tool_name == "ask_direction":
+            result = await execute_ask_direction(arguments, None, agent_id, user_id)
+        elif tool_name == "generate_slides":
+            result = await execute_generate_slides(arguments, None, agent_id, user_id)
+        elif tool_name == "export_pptx":
+            result = await execute_export_pptx(arguments, None, agent_id, user_id)
         else:
 
             # Try MCP tool execution
