@@ -83,12 +83,15 @@ services:
     build:
       context: "./Pro Slides"
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pro-slides:${TAG:-1.0}
+    ports:
+      - "7456"
     environment:
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-secret}
-      OD_PORT: "7456"
-      PRO_SLIDES_HOME: /data
-    volumes:
-      - pro-slides-data:/data
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - PPT_AGENT_ID=${PPT_AGENT_ID:-}
+      - NEXT_PUBLIC_PPT_AGENT_ID=${PPT_AGENT_ID:-}
+      - PORT=7456
+    labels:
+      - "traefik.enable=false"
     networks:
       - laboflow
 
