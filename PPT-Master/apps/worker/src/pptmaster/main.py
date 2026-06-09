@@ -19,7 +19,7 @@ from .api.settings import router as settings_router
 from .api.share import router as share_router
 from .api.templates import router as templates_router
 from .api.users import router as users_router
-from .auth import auth_router
+from .auth import auth_router, sso_router
 from .config import get_settings
 from .logging import setup_logging
 from .ws import ws_router
@@ -61,6 +61,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(sso_router)
 app.include_router(annotations_router)
 app.include_router(artifacts_router)
 app.include_router(projects_router)

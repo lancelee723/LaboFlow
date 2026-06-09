@@ -28,6 +28,7 @@ PUBLIC_PATHS = {
     "/api/auth/login",
     "/api/auth/accept-invite",
     "/share",
+    "/sso",
 }
 
 
