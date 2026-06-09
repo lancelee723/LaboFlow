@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "dev-not-secure-change-in-production-min-32-chars"
     jwt_algorithm: str = "HS256"
     jwt_exp_minutes: int = 1440
+    pptmaster_sso_audience: str = Field(
+        default="ppt-master",
+        alias="PPTMASTER_SSO_AUDIENCE",
+    )
     system_aes_key: str = "dev-32-bytes-aes-key-for-local-dev!"
 
     # Database
