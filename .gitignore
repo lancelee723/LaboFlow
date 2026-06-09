@@ -11,6 +11,8 @@
 !Clawith/**
 !WeKnora/
 !WeKnora/**
+!PPT-Master/
+!PPT-Master/**
 # Only track ragflow docker config + build files, NOT the full 5.1GB source
 !ragflow/
 ragflow/*
@@ -92,6 +94,7 @@ build/
 # Docker
 **/.dockerignore
 !ragflow/.dockerignore
+!PPT-Master/.dockerignore
 docker-compose.override.yml
 
 # Data & Storage

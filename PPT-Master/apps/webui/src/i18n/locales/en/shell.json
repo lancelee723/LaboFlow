@@ -1,0 +1,13 @@
+{
+  "home": "Home",
+  "templates": "Templates",
+  "settings": "Settings",
+  "profile": "Profile",
+  "llmProviders": "LLM Providers",
+  "usage": "Usage",
+  "signOut": "Sign out",
+  "localeToggle": "Switch to Chinese",
+  "localeLabel": "ENG",
+  "runningCount_one": "{{count}} running",
+  "runningCount_other": "{{count}} running"
+}

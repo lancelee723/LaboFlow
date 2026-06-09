@@ -1,0 +1,81 @@
+[project]
+name = "pptmaster-worker"
+version = "0.1.0"
+description = "PPT-Master WebUI Worker - LangGraph orchestration backend"
+requires-python = ">=3.12"
+dependencies = [
+    # --- Web framework / orchestration ---
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-postgres>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "httpx>=0.28.0",
+    "python-multipart>=0.0.17",
+    "sentry-sdk[fastapi]>=2.0.0",
+    "structlog>=24.4.0",
+    "apscheduler>=3.10.0",
+    # --- Skill scripts: SVG → PPTX (svg_to_pptx.py, finalize_svg.py) ---
+    # CairoSVG is the preferred SVG→PNG path per skill/requirements.txt §Office
+    # compatibility (full gradient/filter support). svglib+reportlab is dropped
+    # because rlpycairo→pycairo needs cairo headers to build wheels and adds
+    # platform friction without functional benefit over cairosvg.
+    "python-pptx>=1.0.0",
+    "cairosvg>=2.7.0",
+    # --- Skill scripts: source_to_md/* (PDF/DOCX/Excel/Web/Notebook → MD) ---
+    "PyMuPDF>=1.23.0",
+    "mammoth>=1.6.0",
+    "markdownify>=0.11.6",
+    "ebooklib>=0.18",
+    "nbconvert>=7.0.0",
+    "openpyxl>=3.1.0",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "curl_cffi>=0.7.0",
+    # --- Skill scripts: image_gen.py / image processing ---
+    "google-genai>=1.0.0",
+    "openai>=1.0.0",
+    "Pillow>=9.0.0",
+    "numpy>=1.20.0",
+    # --- Skill scripts: svg_editor/server.py ---
+    "flask>=3.0.0",
+    # --- Skill scripts: notes_to_audio.py (recorded narration) ---
+    "edge-tts>=7.2.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pptmaster"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
