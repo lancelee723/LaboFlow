@@ -208,3 +208,48 @@ async def clean_image_search_configs():
             await conn.execute(text("DELETE FROM pptmaster.image_search_configs"))
     finally:
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session() -> AsyncGenerator:
+    """Open a fresh DB session for tests that need DB access.
+
+    Creates a dedicated engine per test to avoid asyncpg cross-loop connection
+    reuse errors.  Cleans up test-created user rows after each test, honouring
+    FK cascade so that dependent rows (sessions, etc.) are removed first.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+    from pptmaster.config import get_settings
+
+    db_url = get_settings().database_url
+
+    # Snapshot pre-existing user IDs so teardown removes only test-added rows.
+    snap_engine = create_async_engine(db_url, echo=False)
+    async with snap_engine.connect() as conn:
+        result = await conn.execute(text("SELECT id FROM pptmaster.users"))
+        pre_existing_ids = {row[0] for row in result.fetchall()}
+    await snap_engine.dispose()
+
+    # Fresh engine + session for the test body.
+    engine = create_async_engine(db_url, echo=False)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+
+    await engine.dispose()
+
+    # Teardown: delete newly created user rows (cascade handles dependents).
+    cleanup_engine = create_async_engine(db_url, echo=False)
+    try:
+        async with cleanup_engine.begin() as conn:
+            result = await conn.execute(text("SELECT id FROM pptmaster.users"))
+            all_ids = {row[0] for row in result.fetchall()}
+            new_ids = all_ids - pre_existing_ids
+            if new_ids:
+                placeholders = ", ".join(f"'{uid}'" for uid in new_ids)
+                await conn.execute(
+                    text(f"DELETE FROM pptmaster.users WHERE id IN ({placeholders})")
+                )
+    finally:
+        await cleanup_engine.dispose()
