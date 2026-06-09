@@ -1,7 +1,6 @@
 """Unit tests for SSO token validation and user mirror."""
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -176,4 +175,18 @@ async def test_get_or_create_user_re_syncs_is_server_admin_on_every_call(db_sess
         email="someone@example.com",
         role="user",
     )
+    assert user.is_server_admin is False
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_user_handles_none_email(db_session) -> None:
+    """If the Clawith token has no email claim, a synthetic email is used."""
+    user = await get_or_create_user_by_sso(
+        db_session,
+        clawith_id="no-email-id",
+        email=None,
+        role="user",
+    )
+    assert user.external_id == "no-email-id"
+    assert user.email == "no-email-id@unknown"
     assert user.is_server_admin is False

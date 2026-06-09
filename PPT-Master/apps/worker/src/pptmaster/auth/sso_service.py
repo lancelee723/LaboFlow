@@ -11,6 +11,7 @@ from typing import Any
 
 from jose import JWTError, jwt
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pptmaster.config import get_settings
@@ -80,14 +81,29 @@ async def get_or_create_user_by_sso(
             user.external_id = clawith_id
 
     if user is None:
+        # Initialize is_server_admin=False; the re-sync block below sets the
+        # correct value uniformly for both the create and lookup paths.
         user = User(
             id=clawith_id,
             email=email or f"{clawith_id}@unknown",
             external_id=clawith_id,
-            is_server_admin=desired_admin,
+            is_server_admin=False,
         )
         session.add(user)
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Race condition: a concurrent request created this user first.
+            # Roll back, re-query to get the winner's row, and fall through to
+            # the re-sync block below.  # noqa: TRY400
+            await session.rollback()
+            result = await session.execute(
+                select(User).where(User.external_id == clawith_id)
+            )
+            user = result.scalar_one()
 
+    # Re-sync is_server_admin on every call so a Clawith-side demotion is
+    # reflected on the very next SSO login (covers both create and lookup paths).
     if user.is_server_admin != desired_admin:
         user.is_server_admin = desired_admin
 

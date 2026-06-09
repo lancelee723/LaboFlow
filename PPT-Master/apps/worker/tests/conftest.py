@@ -247,9 +247,9 @@ async def db_session() -> AsyncGenerator:
             all_ids = {row[0] for row in result.fetchall()}
             new_ids = all_ids - pre_existing_ids
             if new_ids:
-                placeholders = ", ".join(f"'{uid}'" for uid in new_ids)
                 await conn.execute(
-                    text(f"DELETE FROM pptmaster.users WHERE id IN ({placeholders})")
+                    text("DELETE FROM pptmaster.users WHERE id = ANY(:ids)"),
+                    {"ids": list(new_ids)},
                 )
     finally:
         await cleanup_engine.dispose()
