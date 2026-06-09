@@ -102,3 +102,32 @@ async def test_sso_callback_admin_role_results_in_admin_cookie(db_session) -> No
     claims = decode_token(cookie_token)
     assert claims["is_server_admin"] is True
     assert claims["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_sso_callback_handles_missing_email_claim(db_session) -> None:
+    """SSO works when the upstream token omits the email claim — synthetic email used."""
+    s = get_settings()
+    token = _mint({
+        "sub": "no-email-user",
+        # no 'email' claim
+        "role": "user",
+        "aud": s.pptmaster_sso_audience,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+    })
+
+    sso_db_ctx = _make_sso_db_session(db_session)
+
+    transport = ASGITransport(app=app)
+    with patch("pptmaster.auth.sso_routes.open_db_session", sso_db_ctx):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/sso", params={"token": token}, follow_redirects=False)
+
+    assert resp.status_code == 302
+    set_cookie = resp.headers.get("set-cookie", "")
+    cookie_token = set_cookie.split("jwt=", 1)[1].split(";", 1)[0]
+    claims = decode_token(cookie_token)
+    assert claims is not None
+    assert claims["sub"] == "no-email-user"
+    # Synthetic email applied by sso_service.get_or_create_user_by_sso
+    assert claims["email"] == "no-email-user@unknown"

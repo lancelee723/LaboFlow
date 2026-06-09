@@ -63,11 +63,19 @@ async def sso_callback(
         "is_server_admin": user.is_server_admin,
     })
 
-    response = RedirectResponse(url=redirect_url, status_code=302)
+    # Prevent open-redirect: only allow relative paths, not protocol-relative URLs.
+    safe_redirect = (
+        redirect_url
+        if redirect_url.startswith("/") and not redirect_url.startswith("//")
+        else "/projects"
+    )
+    response = RedirectResponse(url=safe_redirect, status_code=302)
     response.set_cookie(
         key="jwt",
         value=local_token,
         httponly=True,
+        # TODO(security): make this configurable via Settings.cookie_secure when
+        # we're deploying behind HTTPS in production. Mirrors auth/routes.py.
         secure=False,
         samesite="lax",
         max_age=86400 * 7,
