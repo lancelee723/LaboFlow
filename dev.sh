@@ -185,6 +185,7 @@ cd "$CLAWITH_DIR/backend"
 nohup env PYTHONUNBUFFERED=1 \
     JWT_SECRET_KEY="$JWT_SECRET_KEY" \
     DATABASE_URL="$DATABASE_URL" \
+    REDIS_URL="$REDIS_URL" \
     PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
     WEKNORA_URL="${WEKNORA_URL:-/kb}" \
     .venv/bin/uvicorn app.main:app \
@@ -259,7 +260,7 @@ LDFLAGS="$LDFLAGS -X 'google.golang.org/protobuf/reflect/protoregistry.conflictP
 
 if command -v air &>/dev/null; then
     log "Air detected — WeKnora backend will auto-reload on code changes"
-    nohup air > "$LOG_DIR/weknora-app.log" 2>&1 &
+    export CLAWITH_SSO_SECRET="${JWT_SECRET_KEY:-}"; export WEKNORA_TENANT_ENABLE_RBAC=false; nohup air > "$LOG_DIR/weknora-app.log" 2>&1 &
 else
     log "Building WeKnora backend (go build)..."
     go build -ldflags="$LDFLAGS" -o "$WEKNORA_BIN" ./cmd/server \
@@ -291,6 +292,8 @@ else
         STORAGE_TYPE=local \
         STREAM_MANAGER_TYPE=redis \
         JWT_SECRET="${WK_JWT_SECRET:-}" \
+        CLAWITH_SSO_SECRET="${JWT_SECRET_KEY:-}" \
+        WEKNORA_TENANT_ENABLE_RBAC=false \
         GIN_MODE=release \
         WEKNORA_LANGUAGE=zh-CN \
         OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
@@ -353,27 +356,42 @@ fi
 # Docker runs OS-level deps (postgres + gotenberg). Worker/webui run locally
 # so code edits hot-reload without docker rebuilds.
 if [ "$PPT_MASTER_ENABLED" = true ]; then
-    log "Starting PPT-Master postgres on :$PPTMASTER_POSTGRES_PORT (docker) ..."
-    docker run -d --name laboflow-pptmaster-postgres \
-        -p "$PPTMASTER_POSTGRES_PORT:5432" \
-        -e POSTGRES_USER="$PPTMASTER_POSTGRES_USER" \
-        -e POSTGRES_PASSWORD="$PPTMASTER_POSTGRES_PASSWORD" \
-        -e POSTGRES_DB="$PPTMASTER_POSTGRES_DB" \
-        postgres:16-alpine >> "$LOG_DIR/pptmaster-postgres.log" 2>&1 \
-        || { err "pptmaster-postgres failed to start. Check $LOG_DIR/pptmaster-postgres.log"; exit 1; }
+    # Reuse any existing container already listening on $PPTMASTER_POSTGRES_PORT.
+    # Standalone PPT-Master dev setups often leave `pptmaster-dev-postgres` running;
+    # we don't want to fight that.
+    PPTMASTER_PG_CONTAINER=$(docker ps --filter "publish=$PPTMASTER_POSTGRES_PORT" --format '{{.Names}}' | head -1)
+    if [ -n "$PPTMASTER_PG_CONTAINER" ]; then
+        ok "Reusing existing PPT-Master postgres: $PPTMASTER_PG_CONTAINER on :$PPTMASTER_POSTGRES_PORT"
+    else
+        log "Starting PPT-Master postgres on :$PPTMASTER_POSTGRES_PORT (docker) ..."
+        docker run -d --name laboflow-pptmaster-postgres \
+            -p "$PPTMASTER_POSTGRES_PORT:5432" \
+            -e POSTGRES_USER="$PPTMASTER_POSTGRES_USER" \
+            -e POSTGRES_PASSWORD="$PPTMASTER_POSTGRES_PASSWORD" \
+            -e POSTGRES_DB="$PPTMASTER_POSTGRES_DB" \
+            postgres:16-alpine >> "$LOG_DIR/pptmaster-postgres.log" 2>&1 \
+            || { err "pptmaster-postgres failed to start. Check $LOG_DIR/pptmaster-postgres.log"; exit 1; }
+        PPTMASTER_PG_CONTAINER=laboflow-pptmaster-postgres
+    fi
 
-    log "Starting PPT-Master converter (gotenberg) on :$PPTMASTER_CONVERTER_PORT (docker) ..."
-    docker run -d --name laboflow-pptmaster-converter \
-        -p "$PPTMASTER_CONVERTER_PORT:3000" \
-        gotenberg/gotenberg:8 \
-        gotenberg --api-port=3000 --api-timeout=300s --libreoffice-restart-after=10 \
-        >> "$LOG_DIR/pptmaster-converter.log" 2>&1 \
-        || { err "pptmaster-converter failed to start. Check $LOG_DIR/pptmaster-converter.log"; exit 1; }
+    PPTMASTER_CV_CONTAINER=$(docker ps --filter "publish=$PPTMASTER_CONVERTER_PORT" --format '{{.Names}}' | head -1)
+    if [ -n "$PPTMASTER_CV_CONTAINER" ]; then
+        ok "Reusing existing PPT-Master converter: $PPTMASTER_CV_CONTAINER on :$PPTMASTER_CONVERTER_PORT"
+    else
+        log "Starting PPT-Master converter (gotenberg) on :$PPTMASTER_CONVERTER_PORT (docker) ..."
+        docker run -d --name laboflow-pptmaster-converter \
+            -p "$PPTMASTER_CONVERTER_PORT:3000" \
+            gotenberg/gotenberg:8 \
+            gotenberg --api-port=3000 --api-timeout=300s --libreoffice-restart-after=10 \
+            >> "$LOG_DIR/pptmaster-converter.log" 2>&1 \
+            || { err "pptmaster-converter failed to start. Check $LOG_DIR/pptmaster-converter.log"; exit 1; }
+        PPTMASTER_CV_CONTAINER=laboflow-pptmaster-converter
+    fi
 
     # Wait for postgres to accept connections
     log "Waiting for PPT-Master postgres..."
     for i in $(seq 1 30); do
-        if docker exec laboflow-pptmaster-postgres pg_isready -U "$PPTMASTER_POSTGRES_USER" >/dev/null 2>&1; then
+        if docker exec "$PPTMASTER_PG_CONTAINER" pg_isready -U "$PPTMASTER_POSTGRES_USER" >/dev/null 2>&1; then
             ok "PPT-Master postgres ready (${i}s)"
             break
         fi
