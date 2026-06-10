@@ -30,9 +30,10 @@ export function useWebSocket({ sessionId, onEvent, enabled = true, reconnectInte
     // connection, preventing re-delivery of terminal events (e.g. agent_error).
     const cursorKey = `ws-cursor-${sessionId}`
     const lastSeenId = sessionStorage.getItem(cursorKey)
+    const wsBase = import.meta.env.BASE_URL.replace(/\/$/, "")
     const url = lastSeenId
-      ? `${protocol}//${window.location.host}/ws/sessions/${sessionId}?since=${encodeURIComponent(lastSeenId)}`
-      : `${protocol}//${window.location.host}/ws/sessions/${sessionId}`
+      ? `${protocol}//${window.location.host}${wsBase}/ws/sessions/${sessionId}?since=${encodeURIComponent(lastSeenId)}`
+      : `${protocol}//${window.location.host}${wsBase}/ws/sessions/${sessionId}`
     const ws = new WebSocket(url)
 
     ws.onopen = () => {
