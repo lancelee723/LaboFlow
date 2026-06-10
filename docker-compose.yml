@@ -95,6 +95,101 @@ services:
     networks:
       - laboflow
 
+  # ── PPT-Master DB (postgres pulled from Docker Hub) ───────
+  pptmaster-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PPTMASTER_POSTGRES_USER:-pptmaster}
+      POSTGRES_PASSWORD: ${PPTMASTER_POSTGRES_PASSWORD:-pptmaster}
+      POSTGRES_DB: ${PPTMASTER_POSTGRES_DB:-pptmaster}
+    volumes:
+      - pptmaster_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PPTMASTER_POSTGRES_USER:-pptmaster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - laboflow
+
+  # ── PPT-Master PPTX converter (gotenberg pulled from Docker Hub) ──
+  pptmaster-converter:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-port=3000
+      - --api-timeout=300s
+      - --libreoffice-restart-after=10
+    networks:
+      - laboflow
+
+  # ── PPT-Master one-shot init (alembic + bootstrap admin) ──
+  pptmaster-init:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-1.0}
+    restart: "no"
+    command: >
+      bash -c "alembic upgrade head && python -m pptmaster.bootstrap"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${PPTMASTER_POSTGRES_USER:-pptmaster}:${PPTMASTER_POSTGRES_PASSWORD:-pptmaster}@pptmaster-postgres:5432/${PPTMASTER_POSTGRES_DB:-pptmaster}
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY:-}
+      INITIAL_ADMIN_EMAIL: ${PPTMASTER_INITIAL_ADMIN_EMAIL:-admin@local.dev}
+      INITIAL_ADMIN_PASSWORD: ${PPTMASTER_INITIAL_ADMIN_PASSWORD:-change-me}
+      DEPLOYMENT_MODE: standalone
+    volumes:
+      - pptmaster_project_data:/data
+    depends_on:
+      pptmaster-postgres:
+        condition: service_healthy
+    networks:
+      - laboflow
+
+  # ── PPT-Master worker (FastAPI + LangGraph + skill bundle) ──
+  pptmaster-worker:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-1.0}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${PPTMASTER_POSTGRES_USER:-pptmaster}:${PPTMASTER_POSTGRES_PASSWORD:-pptmaster}@pptmaster-postgres:5432/${PPTMASTER_POSTGRES_DB:-pptmaster}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-secret}
+      JWT_ALGORITHM: HS256
+      JWT_EXP_MINUTES: 1440
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY:-}
+      PPTMASTER_SSO_AUDIENCE: ${PPTMASTER_SSO_AUDIENCE:-ppt-master}
+      DEPLOYMENT_MODE: standalone
+      STORAGE_BACKEND: volume
+      STORAGE_ROOT: /data
+      PPTMASTER_CONVERTER_URL: http://pptmaster-converter:3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
+      PPTMASTER_SCRIPTS_DIR: /opt/pptmaster-skill/scripts
+      PPTMASTER_TEMPLATES_DIR: /opt/pptmaster-skill/templates
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+    volumes:
+      - pptmaster_project_data:/data
+    depends_on:
+      pptmaster-postgres:
+        condition: service_healthy
+      pptmaster-converter:
+        condition: service_started
+      pptmaster-init:
+        condition: service_completed_successfully
+    networks:
+      laboflow:
+        aliases:
+          - pptmaster-worker
+
+  # ── PPT-Master webui (nginx static SPA) ──
+  pptmaster-webui:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-webui:${TAG:-1.0}
+    restart: unless-stopped
+    depends_on:
+      - pptmaster-worker
+    networks:
+      - laboflow
+
   # Override WeKnora images to use LaboFlow registry tags.
   app:
     build:
@@ -174,6 +269,8 @@ volumes:
   pgdata:
   redisdata:
   agent_data:
+  pptmaster_pg_data:
+  pptmaster_project_data:
 
 networks:
   laboflow:
