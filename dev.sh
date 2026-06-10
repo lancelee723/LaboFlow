@@ -374,11 +374,17 @@ if [ "$PPT_MASTER_ENABLED" = true ]; then
         PPTMASTER_PG_CONTAINER=laboflow-pptmaster-postgres
     fi
 
+    # Converter (gotenberg): start only if a container already exists or the image
+    # is locally cached. Don't pull from a remote registry in dev mode — if the
+    # image isn't present, skip silently and PPTX export will be unavailable
+    # until the user manually `docker pull gotenberg/gotenberg:8`.
     PPTMASTER_CV_CONTAINER=$(docker ps --filter "publish=$PPTMASTER_CONVERTER_PORT" --format '{{.Names}}' | head -1)
+    PPTMASTER_CONVERTER_AVAILABLE=false
     if [ -n "$PPTMASTER_CV_CONTAINER" ]; then
         ok "Reusing existing PPT-Master converter: $PPTMASTER_CV_CONTAINER on :$PPTMASTER_CONVERTER_PORT"
-    else
-        log "Starting PPT-Master converter (gotenberg) on :$PPTMASTER_CONVERTER_PORT (docker) ..."
+        PPTMASTER_CONVERTER_AVAILABLE=true
+    elif [ -n "$(docker images -q gotenberg/gotenberg:8 2>/dev/null)" ]; then
+        log "Starting PPT-Master converter (gotenberg, image cached) on :$PPTMASTER_CONVERTER_PORT ..."
         docker run -d --name laboflow-pptmaster-converter \
             -p "$PPTMASTER_CONVERTER_PORT:3000" \
             gotenberg/gotenberg:8 \
@@ -386,6 +392,10 @@ if [ "$PPT_MASTER_ENABLED" = true ]; then
             >> "$LOG_DIR/pptmaster-converter.log" 2>&1 \
             || { err "pptmaster-converter failed to start. Check $LOG_DIR/pptmaster-converter.log"; exit 1; }
         PPTMASTER_CV_CONTAINER=laboflow-pptmaster-converter
+        PPTMASTER_CONVERTER_AVAILABLE=true
+    else
+        log "PPT-Master converter image (gotenberg/gotenberg:8) not cached locally — skipping."
+        log "  PPTX export will be unavailable. To enable: docker pull gotenberg/gotenberg:8"
     fi
 
     # Wait for postgres to accept connections
@@ -429,6 +439,13 @@ if [ "$PPT_MASTER_ENABLED" = true ]; then
         || true  # bootstrap is idempotent — skip if already done
 
     # Start worker (FastAPI uvicorn)
+    # Only inject PPTMASTER_CONVERTER_URL when a converter container actually
+    # exists; otherwise the worker would block trying to reach a dead address.
+    if [ "$PPTMASTER_CONVERTER_AVAILABLE" = true ]; then
+        PPTMASTER_CONVERTER_URL_ENV="http://localhost:$PPTMASTER_CONVERTER_PORT"
+    else
+        PPTMASTER_CONVERTER_URL_ENV=""
+    fi
     log "Starting PPT-Master worker on :$PPTMASTER_WORKER_PORT ..."
     (cd "$WORKER_DIR" && \
         nohup env \
@@ -437,7 +454,7 @@ if [ "$PPT_MASTER_ENABLED" = true ]; then
             JWT_ALGORITHM=HS256 \
             SYSTEM_AES_KEY="${SYSTEM_AES_KEY:-dev-32-bytes-aes-key-for-local-dev!}" \
             PPTMASTER_SSO_AUDIENCE="$PPTMASTER_SSO_AUDIENCE" \
-            PPTMASTER_CONVERTER_URL="http://localhost:$PPTMASTER_CONVERTER_PORT" \
+            PPTMASTER_CONVERTER_URL="$PPTMASTER_CONVERTER_URL_ENV" \
             PUBLIC_BASE_URL="http://localhost:$NGINX_PORT/ppt-master" \
             STORAGE_BACKEND=volume \
             STORAGE_ROOT="$DATA_DIR/pptmaster" \
