@@ -1,0 +1,40 @@
+{
+  "image_panel": {
+    "title": "Image Acquisition",
+    "progress": "{{done}} / {{total}} complete",
+    "table": {
+      "page": "Page",
+      "filename": "Filename",
+      "method": "Method",
+      "status": "Status"
+    },
+    "method": {
+      "ai": "AI",
+      "web": "Web",
+      "user": "User",
+      "formula": "Formula",
+      "placeholder": "Placeholder"
+    },
+    "status": {
+      "pending": "Pending",
+      "generating": "Generating...",
+      "searching": "Searching...",
+      "generated": "Generated",
+      "sourced": "Sourced",
+      "existing": "Existing",
+      "placeholder": "Placeholder",
+      "failed": "Failed",
+      "needs_manual": "Needs Manual"
+    },
+    "actions": {
+      "copy_prompt": "Copy prompt",
+      "retry": "Retry",
+      "view_prompt": "View prompt",
+      "view_thumbnail": "View"
+    },
+    "advanced": {
+      "title": "Manifest details",
+      "summary": "AI {{generated}} generated, {{failed}} failed, {{placeholder}} placeholder · Web {{sourced}} sourced"
+    }
+  }
+}

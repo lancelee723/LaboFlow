@@ -1,0 +1,124 @@
+{
+  "profile": "个人资料",
+  "llm": "LLM 供应商",
+  "usage": "使用量",
+  "usageTitle": "Token 使用量",
+  "usageSubtitle": "所有项目消耗的 LLM token 总览。",
+  "usageLifetime": "累计总计",
+  "usagePerProject": "按项目分组",
+  "usageProjectName": "项目",
+  "usageTokensIn": "输入 Tokens",
+  "usageTokensOut": "输出 Tokens",
+  "usageTokensTotal": "总计",
+  "usageLastUsed": "最近使用",
+  "usageEmpty": "暂无 token 使用记录。运行一次 pipeline 后即可在此查看。",
+  "usageDeletedProject": "（已删除项目）",
+  "llm_providers": {
+    "title": "LLM 供应商",
+    "subtitle": "为每个 Agent 角色配置使用的 LLM 供应商，至少需要一个默认供应商。",
+    "loading": "加载中...",
+    "no_providers": "尚未配置任何 LLM 供应商",
+    "add_provider": "添加供应商",
+    "default_badge": "默认",
+    "all_roles": "全部角色",
+    "admin_only": "LLM 配置仅管理员可访问。",
+    "fields": {
+      "provider": "供应商",
+      "role_preference": "角色偏好",
+      "model": "模型",
+      "api_key": "API Key",
+      "api_key_edit_hint": "API Key（留空保留当前值）",
+      "api_key_unchanged_placeholder": "（保留不变）",
+      "endpoint": "Endpoint（可选，自托管时填写）",
+      "endpoint_short": "Endpoint（可选）"
+    },
+    "actions": {
+      "test": "测试连接",
+      "edit": "编辑",
+      "delete": "删除",
+      "save": "保存",
+      "saving": "保存中...",
+      "save_changes": "保存修改",
+      "cancel": "取消"
+    },
+    "test_state": {
+      "running": "测试中…",
+      "ok_latency": "✓ {{latency}}ms"
+    },
+    "roles": {
+      "all_default": "全部角色（默认）",
+      "strategist": "Strategist 策略师",
+      "image_generator": "Image Generator 图片生成",
+      "executor": "Executor 执行器",
+      "template_picker": "Template Picker 模板选择"
+    },
+    "add_card": {
+      "title": "添加 LLM 供应商",
+      "description": "为 Agent 角色配置新的供应商"
+    },
+    "edit_card": {
+      "title": "编辑供应商",
+      "description": "更新 {{name}}"
+    },
+    "confirm_delete": "确认删除此 LLM 配置？",
+    "errors": {
+      "save_failed": "保存失败",
+      "delete_failed": "删除失败",
+      "test_failed": "测试失败"
+    }
+  },
+  "storage": {
+    "title": "存储使用量",
+    "subtitle": "已使用 {{used}}，共 {{quota}}",
+    "active": "活跃：{{size}}",
+    "trash": "回收站：{{size}}",
+    "quota": "配额：{{size}}"
+  },
+  "image_generation": {
+    "title": "图片生成",
+    "subtitle": "Image Generator 角色使用的 AI 图片后端。未配置时静默回退为占位符。",
+    "no_backends": "未配置任何 AI 图片后端，AI 图片行将以占位符代替。",
+    "add_backend": "添加后端",
+    "fields": {
+      "backend": "后端",
+      "model": "模型（可选）",
+      "api_key": "API Key",
+      "base_url": "Base URL（可选，用于代理或私有部署）",
+      "display_name": "显示名称",
+      "is_default": "设为默认"
+    },
+    "actions": {
+      "test": "测试",
+      "set_default": "设为默认",
+      "edit": "编辑",
+      "delete": "删除",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "test_state": {
+      "running": "测试中...",
+      "ok": "成功（{{latency}}ms）",
+      "error": "失败：{{message}}"
+    },
+    "default_badge": "默认"
+  },
+  "image_search": {
+    "title": "图片搜索",
+    "subtitle": "网络图片搜索提供方。",
+    "zero_config_note": "零配置提供方（Openverse、Wikimedia Commons）始终可用。",
+    "premium_note": "配置以下提供方以提升图片质量。",
+    "providers": {
+      "pexels": "Pexels",
+      "pixabay": "Pixabay"
+    },
+    "not_configured": "未配置",
+    "configured": "已配置",
+    "actions": {
+      "save": "保存",
+      "remove": "移除",
+      "update": "更新",
+      "configure": "配置",
+      "cancel": "取消"
+    }
+  }
+}

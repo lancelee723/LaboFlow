@@ -1,0 +1,33 @@
+# === Dev artefacts ===
+.venv/
+**/.venv/
+node_modules/
+**/node_modules/
+dist/
+.dev/
+.git/
+.env
+.env.local
+.env.production
+*.log
+
+# === Python caches ===
+**/__pycache__/
+**/*.pyc
+**/.mypy_cache/
+**/.ruff_cache/
+**/.pytest_cache/
+
+# === Local DB / state ===
+*.sqlite
+*.sqlite-*
+*.db
+landppt.db
+
+# === Tests (not needed in runtime image) ===
+apps/worker/tests/
+
+# === Editor / OS noise ===
+.idea/
+.vscode/
+.DS_Store

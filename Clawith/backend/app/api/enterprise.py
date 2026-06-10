@@ -208,6 +208,28 @@ async def get_pro_slides_sso_token(
     return {"token": token, "proslides_url": slides_url}
 
 
+# ─── PPT-Master SSO Token ──────────────────────────────────
+
+@router.get("/ppt-master/sso-token")
+async def get_ppt_master_sso_token(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Mint a short-lived SSO JWT for PPT-Master.
+
+    The frontend opens ``/ppt-master/sso?token=<jwt>`` to automatically log
+    the user into PPT-Master without requiring a separate credential.
+    """
+    token = create_sso_token(
+        user_id=str(current_user.id),
+        email=current_user.email or "",
+        audience="ppt-master",
+        role=getattr(current_user, "role", "user"),
+    )
+    ppt_master_url = _resolve_browser_kb_url("/ppt-master", request)
+    return {"token": token, "ppt_master_url": ppt_master_url}
+
+
 class LLMTestRequest(BaseModel):
     provider: str
     model: str

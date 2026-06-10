@@ -91,11 +91,27 @@ fi
 : "${WEKNORA_FRONTEND_PORT:=8800}"
 : "${WEKNORA_APP_PORT:=8080}"
 : "${PRO_SLIDES_PORT:=7456}"
+: "${PPTMASTER_WEBUI_PORT:=5990}"
+: "${PPTMASTER_WORKER_PORT:=5991}"
+: "${PPTMASTER_POSTGRES_PORT:=5992}"
+: "${PPTMASTER_CONVERTER_PORT:=5993}"
+: "${PPTMASTER_POSTGRES_USER:=pptmaster}"
+: "${PPTMASTER_POSTGRES_PASSWORD:=pptmaster_dev}"
+: "${PPTMASTER_POSTGRES_DB:=pptmaster}"
+: "${PPTMASTER_SSO_AUDIENCE:=ppt-master}"
 
 PRO_SLIDES_DIR="$ROOT/Pro Slides"
 PRO_SLIDES_ENABLED=false
-if [ -f "$PRO_SLIDES_DIR/package.json" ]; then
+# LandPPT (Python/FastAPI). Earlier dev.sh assumed a pnpm/Next.js project — the
+# directory was repurposed for LandPPT; check for run.py + pyproject.toml.
+if [ -f "$PRO_SLIDES_DIR/run.py" ] && [ -f "$PRO_SLIDES_DIR/pyproject.toml" ]; then
     PRO_SLIDES_ENABLED=true
+fi
+
+PPT_MASTER_DIR="$ROOT/PPT-Master"
+PPT_MASTER_ENABLED=false
+if [ -f "$PPT_MASTER_DIR/apps/worker/pyproject.toml" ]; then
+    PPT_MASTER_ENABLED=true
 fi
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -142,9 +158,14 @@ for pidfile in "$PID_DIR"/*.pid; do
     [ -f "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
     rm -f "$pidfile"
 done
-for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $WEKNORA_FRONTEND_PORT $WEKNORA_APP_PORT $PRO_SLIDES_PORT; do
+for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $WEKNORA_FRONTEND_PORT $WEKNORA_APP_PORT $PRO_SLIDES_PORT $PPTMASTER_WEBUI_PORT $PPTMASTER_WORKER_PORT; do
     cleanup_port "$port"
 done
+
+# Pre-flight: clean up previous PPT-Master docker containers (if any)
+if [ "$PPT_MASTER_ENABLED" = true ]; then
+    docker rm -f laboflow-pptmaster-postgres laboflow-pptmaster-converter 2>/dev/null || true
+fi
 sleep 1
 
 COMPOSE=$(detect_compose)
@@ -302,33 +323,130 @@ nohup env VITE_BASE_URL=/kb/ \
 echo $! > "$PID_DIR/weknora-frontend.pid"
 cd "$ROOT"
 
-# ── 4. Pro Slides (optional) ─────────────────────────────────────
-# Pro Slides daemon serves both the Express backend (:7456) and the
-# static Next.js frontend. For local dev we build first, then start
-# the daemon — it handles SSO verification and API routes natively.
-PRO_SLIDES_DAEMON_PORT=7456
-
+# ── 4. Pro Slides (LandPPT — Python/FastAPI) ─────────────────────
+# LandPPT entrypoint is `python run.py`; HOST/PORT env vars control binding.
+# Docker compose maps to 7456; we mirror that for nginx upstream consistency.
 if [ "$PRO_SLIDES_ENABLED" = true ]; then
-    log "Building Pro Slides..."
     cd "$PRO_SLIDES_DIR"
-    if [ ! -d "node_modules" ]; then
-        err "Pro Slides node_modules missing. Run: cd 'Pro Slides' && pnpm install"
-        exit 1
+    if [ ! -d ".venv" ]; then
+        log "Creating Pro Slides (LandPPT) venv via uv..."
+        uv sync --no-dev >> "$LOG_DIR/pro-slides.log" 2>&1 \
+            || { err "uv sync failed. Check $LOG_DIR/pro-slides.log"; exit 1; }
     fi
-    # Build all packages + daemon + web (static export)
-    PRO_SLIDES_HOME="$DATA_DIR/pro-slides" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
-        pnpm build >> "$LOG_DIR/pro-slides.log" 2>&1 \
-        || { err "Pro Slides build failed. Check $LOG_DIR/pro-slides.log"; exit 1; }
-    ok "Pro Slides built"
-
-    log "Starting Pro Slides daemon on :$PRO_SLIDES_DAEMON_PORT ..."
-    PRO_SLIDES_HOME="$DATA_DIR/pro-slides" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
-        nohup node apps/daemon/dist/cli.js --no-open \
+    log "Starting Pro Slides (LandPPT) on :$PRO_SLIDES_PORT ..."
+    nohup env \
+        HOST=0.0.0.0 \
+        PORT="$PRO_SLIDES_PORT" \
+        JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+        PPT_AGENT_ID="${PPT_AGENT_ID:-}" \
+        NEXT_PUBLIC_PPT_AGENT_ID="${PPT_AGENT_ID:-}" \
+        uv run python run.py \
         > "$LOG_DIR/pro-slides.log" 2>&1 &
-    echo $! > "$PID_DIR/pro-slides.pid"
+    sleep 1
+    pgrep -f "python run.py" > "$PID_DIR/pro-slides.pid" || true
     cd "$ROOT"
 else
-    log "Skipping Pro Slides startup: app files not present in '$PRO_SLIDES_DIR'."
+    log "Skipping Pro Slides startup: run.py / pyproject.toml not present in '$PRO_SLIDES_DIR'."
+fi
+
+# ── 5. PPT-Master (optional) ─────────────────────────────────
+# Docker runs OS-level deps (postgres + gotenberg). Worker/webui run locally
+# so code edits hot-reload without docker rebuilds.
+if [ "$PPT_MASTER_ENABLED" = true ]; then
+    log "Starting PPT-Master postgres on :$PPTMASTER_POSTGRES_PORT (docker) ..."
+    docker run -d --name laboflow-pptmaster-postgres \
+        -p "$PPTMASTER_POSTGRES_PORT:5432" \
+        -e POSTGRES_USER="$PPTMASTER_POSTGRES_USER" \
+        -e POSTGRES_PASSWORD="$PPTMASTER_POSTGRES_PASSWORD" \
+        -e POSTGRES_DB="$PPTMASTER_POSTGRES_DB" \
+        postgres:16-alpine >> "$LOG_DIR/pptmaster-postgres.log" 2>&1 \
+        || { err "pptmaster-postgres failed to start. Check $LOG_DIR/pptmaster-postgres.log"; exit 1; }
+
+    log "Starting PPT-Master converter (gotenberg) on :$PPTMASTER_CONVERTER_PORT (docker) ..."
+    docker run -d --name laboflow-pptmaster-converter \
+        -p "$PPTMASTER_CONVERTER_PORT:3000" \
+        gotenberg/gotenberg:8 \
+        gotenberg --api-port=3000 --api-timeout=300s --libreoffice-restart-after=10 \
+        >> "$LOG_DIR/pptmaster-converter.log" 2>&1 \
+        || { err "pptmaster-converter failed to start. Check $LOG_DIR/pptmaster-converter.log"; exit 1; }
+
+    # Wait for postgres to accept connections
+    log "Waiting for PPT-Master postgres..."
+    for i in $(seq 1 30); do
+        if docker exec laboflow-pptmaster-postgres pg_isready -U "$PPTMASTER_POSTGRES_USER" >/dev/null 2>&1; then
+            ok "PPT-Master postgres ready (${i}s)"
+            break
+        fi
+        sleep 1
+    done
+
+    # Ensure worker .venv
+    WORKER_DIR="$PPT_MASTER_DIR/apps/worker"
+    if [ ! -d "$WORKER_DIR/.venv" ]; then
+        log "Creating PPT-Master worker venv via uv..."
+        (cd "$WORKER_DIR" && uv sync --no-dev >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
+            || { err "uv sync failed. Check $LOG_DIR/pptmaster-worker.log"; exit 1; }
+    fi
+
+    # One-shot DB migrate + bootstrap
+    log "Migrating PPT-Master DB + bootstrapping admin..."
+    PPT_MASTER_DB_URL="postgresql+asyncpg://$PPTMASTER_POSTGRES_USER:$PPTMASTER_POSTGRES_PASSWORD@localhost:$PPTMASTER_POSTGRES_PORT/$PPTMASTER_POSTGRES_DB"
+    (cd "$WORKER_DIR" && \
+        DATABASE_URL="$PPT_MASTER_DB_URL" \
+        JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+        SYSTEM_AES_KEY="${SYSTEM_AES_KEY:-dev-32-bytes-aes-key-for-local-dev!}" \
+        INITIAL_ADMIN_EMAIL="${PPTMASTER_INITIAL_ADMIN_EMAIL:-admin@local.dev}" \
+        INITIAL_ADMIN_PASSWORD="${PPTMASTER_INITIAL_ADMIN_PASSWORD:-change-me-strong}" \
+        DEPLOYMENT_MODE=standalone \
+        uv run alembic upgrade head >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
+        || { err "alembic upgrade failed. Check $LOG_DIR/pptmaster-worker.log"; exit 1; }
+    (cd "$WORKER_DIR" && \
+        DATABASE_URL="$PPT_MASTER_DB_URL" \
+        JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+        SYSTEM_AES_KEY="${SYSTEM_AES_KEY:-dev-32-bytes-aes-key-for-local-dev!}" \
+        INITIAL_ADMIN_EMAIL="${PPTMASTER_INITIAL_ADMIN_EMAIL:-admin@local.dev}" \
+        INITIAL_ADMIN_PASSWORD="${PPTMASTER_INITIAL_ADMIN_PASSWORD:-change-me-strong}" \
+        DEPLOYMENT_MODE=standalone \
+        uv run python -m pptmaster.bootstrap >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
+        || true  # bootstrap is idempotent — skip if already done
+
+    # Start worker (FastAPI uvicorn)
+    log "Starting PPT-Master worker on :$PPTMASTER_WORKER_PORT ..."
+    (cd "$WORKER_DIR" && \
+        nohup env \
+            DATABASE_URL="$PPT_MASTER_DB_URL" \
+            JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+            JWT_ALGORITHM=HS256 \
+            SYSTEM_AES_KEY="${SYSTEM_AES_KEY:-dev-32-bytes-aes-key-for-local-dev!}" \
+            PPTMASTER_SSO_AUDIENCE="$PPTMASTER_SSO_AUDIENCE" \
+            PPTMASTER_CONVERTER_URL="http://localhost:$PPTMASTER_CONVERTER_PORT" \
+            PUBLIC_BASE_URL="http://localhost:$NGINX_PORT/ppt-master" \
+            STORAGE_BACKEND=volume \
+            STORAGE_ROOT="$DATA_DIR/pptmaster" \
+            PPTMASTER_SCRIPTS_DIR="$PPT_MASTER_DIR/skills/ppt-master/scripts" \
+            PPTMASTER_TEMPLATES_DIR="$PPT_MASTER_DIR/skills/ppt-master/templates" \
+            PPTMASTER_SKILL_TEMPLATES_ROOT="$PPT_MASTER_DIR/skills/ppt-master/templates" \
+            DEPLOYMENT_MODE=standalone \
+            uv run uvicorn pptmaster.main:app --host 0.0.0.0 --port "$PPTMASTER_WORKER_PORT" \
+            > "$LOG_DIR/pptmaster-worker.log" 2>&1 &)
+    sleep 1
+    pgrep -f "uvicorn pptmaster.main:app" > "$PID_DIR/pptmaster-worker.pid" || true
+
+    # Start webui (Vite dev server)
+    log "Starting PPT-Master webui on :$PPTMASTER_WEBUI_PORT ..."
+    WEBUI_DIR="$PPT_MASTER_DIR/apps/webui"
+    if [ ! -d "$WEBUI_DIR/node_modules" ]; then
+        log "Installing PPT-Master webui deps..."
+        (cd "$WEBUI_DIR" && npm install >> "$LOG_DIR/pptmaster-webui.log" 2>&1) \
+            || { err "npm install failed. Check $LOG_DIR/pptmaster-webui.log"; exit 1; }
+    fi
+    (cd "$WEBUI_DIR" && \
+        nohup npm run dev -- --host 0.0.0.0 --port "$PPTMASTER_WEBUI_PORT" \
+        > "$LOG_DIR/pptmaster-webui.log" 2>&1 &)
+    sleep 1
+    pgrep -f "vite.*$PPTMASTER_WEBUI_PORT" > "$PID_DIR/pptmaster-webui.pid" || true
+else
+    log "Skipping PPT-Master startup: not present in '$PPT_MASTER_DIR'."
 fi
 
 # ── Wait for upstreams ───────────────────────────────────────
@@ -340,8 +458,12 @@ wait_port "$WEKNORA_FRONTEND_PORT" "WeKnora frontend" 30 || true
 if [ "$PRO_SLIDES_ENABLED" = true ]; then
     wait_port "$PRO_SLIDES_PORT" "Pro Slides" 20 || true
 fi
+if [ "$PPT_MASTER_ENABLED" = true ]; then
+    wait_port "$PPTMASTER_WORKER_PORT" "PPT-Master worker" 30 || true
+    wait_port "$PPTMASTER_WEBUI_PORT"  "PPT-Master webui"  20 || true
+fi
 
-# ── 5. NGINX ─────────────────────────────────────────────────
+# ── 6. NGINX ─────────────────────────────────────────────────
 log "Starting NGINX on :$NGINX_PORT ..."
 if ! command -v nginx &>/dev/null; then
     err "nginx not found. Install with: brew install nginx  (macOS)  or  apt install nginx  (Linux)"
@@ -369,6 +491,11 @@ if [ "$PRO_SLIDES_ENABLED" = true ]; then
 else
     echo -e "  ${CYAN}AI PPT:${NC}          disabled (Pro Slides app not present)"
 fi
+if [ "$PPT_MASTER_ENABLED" = true ]; then
+    echo -e "  ${CYAN}PPT Master:${NC}      http://localhost:$NGINX_PORT/ppt-master/"
+else
+    echo -e "  ${CYAN}PPT Master:${NC}      disabled (PPT-Master app not present)"
+fi
 echo ""
 echo -e "  ${CYAN}Direct access (debugging):${NC}"
 echo -e "    Clawith frontend  http://localhost:$CLAWITH_FRONTEND_PORT"
@@ -379,6 +506,10 @@ if [ "$PRO_SLIDES_ENABLED" = true ]; then
     echo -e "    Pro Slides        http://localhost:$PRO_SLIDES_PORT"
 else
     echo -e "    Pro Slides        disabled"
+fi
+if [ "$PPT_MASTER_ENABLED" = true ]; then
+    echo -e "    PPT-Master webui  http://localhost:$PPTMASTER_WEBUI_PORT"
+    echo -e "    PPT-Master worker http://localhost:$PPTMASTER_WORKER_PORT/health"
 fi
 echo ""
 echo -e "  Logs:   tail -f $LOG_DIR/*.log"

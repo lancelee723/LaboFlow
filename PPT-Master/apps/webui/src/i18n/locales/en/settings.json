@@ -1,0 +1,124 @@
+{
+  "profile": "Profile",
+  "llm": "LLM Providers",
+  "usage": "Usage",
+  "usageTitle": "Token Usage",
+  "usageSubtitle": "LLM token consumption across all your projects.",
+  "usageLifetime": "Lifetime Total",
+  "usagePerProject": "Per Project",
+  "usageProjectName": "Project",
+  "usageTokensIn": "Tokens In",
+  "usageTokensOut": "Tokens Out",
+  "usageTokensTotal": "Total",
+  "usageLastUsed": "Last Used",
+  "usageEmpty": "No token usage recorded yet. Run a pipeline to see usage data here.",
+  "usageDeletedProject": "(deleted project)",
+  "llm_providers": {
+    "title": "LLM Providers",
+    "subtitle": "Configure which LLM providers each agent role should use. At least one default provider is required.",
+    "loading": "Loading...",
+    "no_providers": "No LLM providers configured yet",
+    "add_provider": "Add Provider",
+    "default_badge": "Default",
+    "all_roles": "All roles",
+    "admin_only": "LLM configuration is admin-only.",
+    "fields": {
+      "provider": "Provider",
+      "role_preference": "Role Preference",
+      "model": "Model",
+      "api_key": "API Key",
+      "api_key_edit_hint": "API Key (leave blank to keep current)",
+      "api_key_unchanged_placeholder": "(unchanged)",
+      "endpoint": "Endpoint (optional, for self-hosted)",
+      "endpoint_short": "Endpoint (optional)"
+    },
+    "actions": {
+      "test": "Test connection",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "saving": "Saving...",
+      "save_changes": "Save Changes",
+      "cancel": "Cancel"
+    },
+    "test_state": {
+      "running": "Testing…",
+      "ok_latency": "✓ {{latency}}ms"
+    },
+    "roles": {
+      "all_default": "All roles (default)",
+      "strategist": "Strategist",
+      "image_generator": "Image Generator",
+      "executor": "Executor",
+      "template_picker": "Template Picker"
+    },
+    "add_card": {
+      "title": "Add LLM Provider",
+      "description": "Configure a new provider for agent roles"
+    },
+    "edit_card": {
+      "title": "Edit Provider",
+      "description": "Update {{name}}"
+    },
+    "confirm_delete": "Delete this LLM configuration?",
+    "errors": {
+      "save_failed": "Save failed",
+      "delete_failed": "Delete failed",
+      "test_failed": "Test failed"
+    }
+  },
+  "storage": {
+    "title": "Storage Usage",
+    "subtitle": "{{used}} used of {{quota}}",
+    "active": "Active: {{size}}",
+    "trash": "Trash: {{size}}",
+    "quota": "Quota: {{size}}"
+  },
+  "image_generation": {
+    "title": "Image Generation",
+    "subtitle": "AI image backends used by the Image Generator role. Missing configuration silently falls back to placeholders.",
+    "no_backends": "No AI image backend configured. AI rows will become placeholders.",
+    "add_backend": "Add Backend",
+    "fields": {
+      "backend": "Backend",
+      "model": "Model (optional)",
+      "api_key": "API Key",
+      "base_url": "Base URL (optional, for proxy / self-hosted)",
+      "display_name": "Display name",
+      "is_default": "Set as default"
+    },
+    "actions": {
+      "test": "Test",
+      "set_default": "Set Default",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "test_state": {
+      "running": "Testing...",
+      "ok": "OK ({{latency}}ms)",
+      "error": "Failed: {{message}}"
+    },
+    "default_badge": "Default"
+  },
+  "image_search": {
+    "title": "Image Search",
+    "subtitle": "Web image search providers.",
+    "zero_config_note": "Zero-config providers (Openverse, Wikimedia Commons) are always active.",
+    "premium_note": "Configure providers below to upgrade quality.",
+    "providers": {
+      "pexels": "Pexels",
+      "pixabay": "Pixabay"
+    },
+    "not_configured": "Not configured",
+    "configured": "Configured",
+    "actions": {
+      "save": "Save",
+      "remove": "Remove",
+      "update": "Update",
+      "configure": "Configure",
+      "cancel": "Cancel"
+    }
+  }
+}
