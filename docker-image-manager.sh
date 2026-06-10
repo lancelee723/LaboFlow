@@ -37,7 +37,6 @@ IMAGES=(
   "weknora-docreader|WeKnora|WeKnora/docker/Dockerfile.docreader"
   "weknora-frontend|WeKnora/frontend|WeKnora/frontend/Dockerfile.laboflow"
   "nginx|nginx|nginx/Dockerfile"
-  "aippt|aippt|aippt/Dockerfile"
   "pro-slides|Pro Slides|Pro Slides/Dockerfile"
   "pptmaster-worker|PPT-Master|PPT-Master/docker/Dockerfile.worker"
   "pptmaster-webui|PPT-Master|PPT-Master/docker/Dockerfile.webui"
