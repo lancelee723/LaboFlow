@@ -78,7 +78,11 @@ async def sso_callback(
         # we're deploying behind HTTPS in production. Mirrors auth/routes.py.
         secure=False,
         samesite="lax",
-        path="/ppt-master",
+        # Path="/" so the cookie is sent on all sub-paths. Earlier path="/ppt-master"
+        # was theoretically RFC-compliant but some browser configs (cross-tab
+        # window.open navigation, third-party cookie heuristics) failed to send
+        # it. Clawith uses Bearer auth, so the wider scope is harmless here.
+        path="/",
         max_age=86400 * 7,
     )
     return response
