@@ -13,6 +13,8 @@
 !WeKnora/**
 !PPT-Master/
 !PPT-Master/**
+!Pro Slides/
+!Pro Slides/**
 # Only track ragflow docker config + build files, NOT the full 5.1GB source
 !ragflow/
 ragflow/*
