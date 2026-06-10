@@ -415,27 +415,38 @@ if [ "$PPT_MASTER_ENABLED" = true ]; then
         (cd "$WORKER_DIR" && uv sync --no-dev >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
             || { err "uv sync failed. Check $LOG_DIR/pptmaster-worker.log"; exit 1; }
     fi
+    # alembic/env.py uses `+psycopg2` driver but upstream pyproject.toml only
+    # declares asyncpg/psycopg3 (psycopg3 comes via langgraph-checkpoint-postgres).
+    # Inject psycopg2-binary so alembic upgrade can connect.
+    if ! (cd "$WORKER_DIR" && uv pip list 2>/dev/null | grep -qE '^psycopg2(-binary)?\s'); then
+        log "Installing psycopg2-binary into worker venv (alembic dependency) ..."
+        (cd "$WORKER_DIR" && uv pip install psycopg2-binary >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
+            || { err "psycopg2-binary install failed. Check $LOG_DIR/pptmaster-worker.log"; exit 1; }
+    fi
 
     # One-shot DB migrate + bootstrap
+    # alembic.ini + alembic/ live at PPT-Master root (script_location=alembic
+    # is resolved relative to CWD); use --project to activate the worker venv
+    # from inside that root.
     log "Migrating PPT-Master DB + bootstrapping admin..."
     PPT_MASTER_DB_URL="postgresql+asyncpg://$PPTMASTER_POSTGRES_USER:$PPTMASTER_POSTGRES_PASSWORD@localhost:$PPTMASTER_POSTGRES_PORT/$PPTMASTER_POSTGRES_DB"
-    (cd "$WORKER_DIR" && \
+    (cd "$PPT_MASTER_DIR" && \
         DATABASE_URL="$PPT_MASTER_DB_URL" \
         JWT_SECRET_KEY="$JWT_SECRET_KEY" \
         SYSTEM_AES_KEY="${SYSTEM_AES_KEY:-dev-32-bytes-aes-key-for-local-dev!}" \
         INITIAL_ADMIN_EMAIL="${PPTMASTER_INITIAL_ADMIN_EMAIL:-admin@local.dev}" \
         INITIAL_ADMIN_PASSWORD="${PPTMASTER_INITIAL_ADMIN_PASSWORD:-change-me-strong}" \
         DEPLOYMENT_MODE=standalone \
-        uv run alembic upgrade head >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
+        uv run --project apps/worker alembic upgrade head >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
         || { err "alembic upgrade failed. Check $LOG_DIR/pptmaster-worker.log"; exit 1; }
-    (cd "$WORKER_DIR" && \
+    (cd "$PPT_MASTER_DIR" && \
         DATABASE_URL="$PPT_MASTER_DB_URL" \
         JWT_SECRET_KEY="$JWT_SECRET_KEY" \
         SYSTEM_AES_KEY="${SYSTEM_AES_KEY:-dev-32-bytes-aes-key-for-local-dev!}" \
         INITIAL_ADMIN_EMAIL="${PPTMASTER_INITIAL_ADMIN_EMAIL:-admin@local.dev}" \
         INITIAL_ADMIN_PASSWORD="${PPTMASTER_INITIAL_ADMIN_PASSWORD:-change-me-strong}" \
         DEPLOYMENT_MODE=standalone \
-        uv run python -m pptmaster.bootstrap >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
+        uv run --project apps/worker python -m pptmaster.bootstrap >> "$LOG_DIR/pptmaster-worker.log" 2>&1) \
         || true  # bootstrap is idempotent — skip if already done
 
     # Start worker (FastAPI uvicorn)
