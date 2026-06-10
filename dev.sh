@@ -102,7 +102,9 @@ fi
 
 PRO_SLIDES_DIR="$ROOT/Pro Slides"
 PRO_SLIDES_ENABLED=false
-if [ -f "$PRO_SLIDES_DIR/package.json" ]; then
+# LandPPT (Python/FastAPI). Earlier dev.sh assumed a pnpm/Next.js project — the
+# directory was repurposed for LandPPT; check for run.py + pyproject.toml.
+if [ -f "$PRO_SLIDES_DIR/run.py" ] && [ -f "$PRO_SLIDES_DIR/pyproject.toml" ]; then
     PRO_SLIDES_ENABLED=true
 fi
 
@@ -321,33 +323,30 @@ nohup env VITE_BASE_URL=/kb/ \
 echo $! > "$PID_DIR/weknora-frontend.pid"
 cd "$ROOT"
 
-# ── 4. Pro Slides (optional) ─────────────────────────────────────
-# Pro Slides daemon serves both the Express backend (:7456) and the
-# static Next.js frontend. For local dev we build first, then start
-# the daemon — it handles SSO verification and API routes natively.
-PRO_SLIDES_DAEMON_PORT=7456
-
+# ── 4. Pro Slides (LandPPT — Python/FastAPI) ─────────────────────
+# LandPPT entrypoint is `python run.py`; HOST/PORT env vars control binding.
+# Docker compose maps to 7456; we mirror that for nginx upstream consistency.
 if [ "$PRO_SLIDES_ENABLED" = true ]; then
-    log "Building Pro Slides..."
     cd "$PRO_SLIDES_DIR"
-    if [ ! -d "node_modules" ]; then
-        err "Pro Slides node_modules missing. Run: cd 'Pro Slides' && pnpm install"
-        exit 1
+    if [ ! -d ".venv" ]; then
+        log "Creating Pro Slides (LandPPT) venv via uv..."
+        uv sync --no-dev >> "$LOG_DIR/pro-slides.log" 2>&1 \
+            || { err "uv sync failed. Check $LOG_DIR/pro-slides.log"; exit 1; }
     fi
-    # Build all packages + daemon + web (static export)
-    PRO_SLIDES_HOME="$DATA_DIR/pro-slides" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
-        pnpm build >> "$LOG_DIR/pro-slides.log" 2>&1 \
-        || { err "Pro Slides build failed. Check $LOG_DIR/pro-slides.log"; exit 1; }
-    ok "Pro Slides built"
-
-    log "Starting Pro Slides daemon on :$PRO_SLIDES_DAEMON_PORT ..."
-    PRO_SLIDES_HOME="$DATA_DIR/pro-slides" JWT_SECRET_KEY="$JWT_SECRET_KEY" \
-        nohup node apps/daemon/dist/cli.js --no-open \
+    log "Starting Pro Slides (LandPPT) on :$PRO_SLIDES_PORT ..."
+    nohup env \
+        HOST=0.0.0.0 \
+        PORT="$PRO_SLIDES_PORT" \
+        JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+        PPT_AGENT_ID="${PPT_AGENT_ID:-}" \
+        NEXT_PUBLIC_PPT_AGENT_ID="${PPT_AGENT_ID:-}" \
+        uv run python run.py \
         > "$LOG_DIR/pro-slides.log" 2>&1 &
-    echo $! > "$PID_DIR/pro-slides.pid"
+    sleep 1
+    pgrep -f "python run.py" > "$PID_DIR/pro-slides.pid" || true
     cd "$ROOT"
 else
-    log "Skipping Pro Slides startup: app files not present in '$PRO_SLIDES_DIR'."
+    log "Skipping Pro Slides startup: run.py / pyproject.toml not present in '$PRO_SLIDES_DIR'."
 fi
 
 # ── 5. PPT-Master (optional) ─────────────────────────────────
