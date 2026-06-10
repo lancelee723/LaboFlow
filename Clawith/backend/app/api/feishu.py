@@ -4,6 +4,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from loguru import logger
@@ -12,12 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import check_agent_access, is_agent_creator, is_agent_expired
 from app.core.security import get_current_user
-from app.database import get_db
+from app.database import async_session as _async_session, get_db
 from app.models.channel_config import ChannelConfig
 from app.models.user import User
 from app.models.identity import IdentityProvider
 from app.schemas.schemas import ChannelConfigCreate, ChannelConfigOut, TokenResponse, UserOut
 from app.services.feishu_service import feishu_service
+from app.services.storage import agent_upload_key, get_storage_backend, store_agent_upload
 
 router = APIRouter(tags=["feishu"])
 
@@ -33,6 +35,21 @@ _USER_RESOLUTION_ERROR_TIP = (
     "抱歉，我暂时无法稳定识别你的飞书账号，已停止本次处理以避免重复创建账号。"
     "请稍后重试，或联系管理员检查飞书 Contact API 权限。"
 )
+
+
+def _storage_mtime(entry) -> float:
+    raw = str(getattr(entry, "modified_at", "") or "")
+    if not raw:
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+
+
 def _build_card(
     answer_text: str,
     thinking_text: str = "",
@@ -232,29 +249,18 @@ async def _save_feishu_tool_call(
     reasoning_content: str | None = None,
 ) -> None:
     """Persist a completed Feishu tool call into chat history."""
-    import json as _json
-    from app.models.audit import ChatMessage
-
-    payload = {
-        "tool_name": tool_name,
-        "arguments": arguments or {},
-        "result": result,
-        "tool_call_id": tool_call_id,
-        "status": status,
-        "reasoning_content": reasoning_content,
-    }
-    try:
-        async with db_session_factory() as _tc_db:
-            _tc_db.add(ChatMessage(
-                agent_id=agent_id,
-                user_id=user_id,
-                role="tool_call",
-                content=_json.dumps(payload, ensure_ascii=False, default=str),
-                conversation_id=conversation_id,
-            ))
-            await _tc_db.commit()
-    except Exception as e:
-        logger.warning(f"[Feishu] Failed to save tool_call: {e}")
+    from app.services.chat_session_service import save_tool_call_log
+    await save_tool_call_log(
+        agent_id=agent_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        tool_name=tool_name,
+        arguments=arguments,
+        result=result,
+        status=status,
+        tool_call_id=tool_call_id,
+        reasoning_content=reasoning_content,
+    )
 
 
 # ─── OAuth ──────────────────────────────────────────────
@@ -431,14 +437,7 @@ async def get_channel_config(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="Channel not configured")
-    config_out = ChannelConfigOut.model_validate(config)
-    if (config.extra_config or {}).get("connection_mode") == "websocket":
-        from app.services.feishu_ws import feishu_ws_manager
-
-        config_out.is_connected = feishu_ws_manager.status().get(str(agent_id), False)
-    else:
-        config_out.is_connected = False
-    return config_out
+    return ChannelConfigOut.model_validate(config)
 
 
 @router.get("/agents/{agent_id}/channel/webhook-url")
@@ -480,20 +479,23 @@ _processed_events: set[str] = set()
 async def feishu_event_webhook(
     agent_id: uuid.UUID,
     request: Request,
-    db: AsyncSession = Depends(get_db),
 ):
     """Handle Feishu event callback for a specific agent's bot."""
     body = await request.json()
-    
+
     # Handle verification challenge
     if "challenge" in body:
         return {"challenge": body["challenge"]}
 
-    return await process_feishu_event(agent_id, body, db)
+    return await process_feishu_event(agent_id, body)
 
 
-async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession):
-    """Core logic to process feishu events from both webhook and WS client."""
+async def process_feishu_event(agent_id: uuid.UUID, body: dict):
+    """Core logic to process feishu events from both webhook and WS client.
+
+    Manages its own short-lived database transactions to avoid holding connections
+    open during slow LLM/HTTP operations.
+    """
     import json as _json
     logger.info(f"[Feishu] Event processing for {agent_id}: event_type={body.get('header', {}).get('event_type', 'N/A')}")
 
@@ -503,14 +505,18 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
     if event_id in _processed_events:
         return {"code": 0, "msg": "already processed"}
 
-    # Get channel config — filter by feishu since an agent can have multiple channels
-    result = await db.execute(
-        select(ChannelConfig).where(
-            ChannelConfig.agent_id == agent_id,
-            ChannelConfig.channel_type == "feishu",
+    # ── Phase 1: Short transaction — load config + agent/model for LLM ──
+    async with _async_session() as db:
+        result = await db.execute(
+            select(ChannelConfig).where(
+                ChannelConfig.agent_id == agent_id,
+                ChannelConfig.channel_type == "feishu",
+            )
         )
-    )
-    config = result.scalar_one_or_none()
+        config = result.scalar_one_or_none()
+        # Pre-load agent and model configs for LLM call (avoids extra session later)
+        _agent_model, _llm_model, _fallback_model = await _load_agent_and_model(db, agent_id)
+    # Objects are now detached but their column attributes are already loaded.
     if not config:
         return {"code": 1, "msg": "Channel not found"}
 
@@ -573,20 +579,18 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             if _post_image_keys:
                 import base64 as _b64
                 _msg_id = message.get("message_id", "")
-                from pathlib import Path as _PostPath
-                from app.config import get_settings as _post_gs
-                _post_settings = _post_gs()
-                _upload_dir = _PostPath(_post_settings.AGENT_DATA_DIR) / str(agent_id) / "workspace" / "uploads"
-                _upload_dir.mkdir(parents=True, exist_ok=True)
                 for _ik in _post_image_keys:
                     try:
                         _img_bytes = await feishu_service.download_message_resource(
                             config.app_id, config.app_secret, _msg_id, _ik, "image"
                         )
-                        # Save to workspace
-                        _save_path = _upload_dir / f"image_{_ik[-8:]}.jpg"
-                        _save_path.write_bytes(_img_bytes)
-                        logger.info(f"[Feishu] Saved post image to {_save_path} ({len(_img_bytes)} bytes)")
+                        _, _workspace_path, _save_path = await store_agent_upload(
+                            agent_id,
+                            f"image_{_ik[-8:]}.jpg",
+                            _img_bytes,
+                            content_type="image/jpeg",
+                        )
+                        logger.info(f"[Feishu] Saved post image to {_workspace_path} ({len(_img_bytes)} bytes)")
                         # Embed as base64 marker for vision models
                         _b64_data = _b64.b64encode(_img_bytes).decode("ascii")
                         _image_markers.append(f"[image_data:data:image/jpeg;base64,{_b64_data}]")
@@ -607,7 +611,6 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             import asyncio as _asyncio
             _asyncio.create_task(
                 _handle_feishu_file(
-                    db,
                     agent_id,
                     config,
                     message,
@@ -811,6 +814,8 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             db.add(ChatMessage(agent_id=agent_id, user_id=platform_user_id, role="user", content=user_text, conversation_id=session_conv_id))
             _sess.last_message_at = _dt.now(_tz.utc)
             await db.commit()
+            # ── Phase 1 complete: release connection before slow LLM/HTTP work ──
+            await db.close()
 
 
             # Prepend sender identity so the agent knows who is talking
@@ -824,21 +829,22 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             # to disk always succeeds even if the DB transaction fails.
             try:
                 import time as _time
-                import pathlib as _pl
-                from app.config import get_settings as _gs
-                _upload_dir = _pl.Path(_gs().AGENT_DATA_DIR) / str(agent_id) / "workspace" / "uploads"
+                _storage = get_storage_backend()
+                _upload_key = agent_upload_key(agent_id, "placeholder").rsplit("/", 1)[0]
                 _recent_file_path = None
-                if _upload_dir.exists() and "uploads/" not in user_text and "workspace/" not in user_text:
+                if "uploads/" not in user_text and "workspace/" not in user_text:
                     _now = _time.time()
-                    _candidates = sorted(
-                        _upload_dir.iterdir(),
-                        key=lambda p: p.stat().st_mtime,
-                        reverse=True,
-                    )
-                    for _fp in _candidates:
-                        if _fp.is_file() and (_now - _fp.stat().st_mtime) < 1800:  # 30 min
-                            _recent_file_path = f"uploads/{_fp.name}"
-                            break
+                    if await _storage.exists(_upload_key) and await _storage.is_dir(_upload_key):
+                        _candidates = sorted(
+                            [e for e in await _storage.list_dir(_upload_key) if not e.is_dir],
+                            key=_storage_mtime,
+                            reverse=True,
+                        )
+                        for _entry in _candidates:
+                            _mtime = _storage_mtime(_entry)
+                            if _mtime and (_now - _mtime) < 1800:
+                                _recent_file_path = f"uploads/{_entry.name}"
+                                break
                 if _recent_file_path:
                     # _recent_file_path is relative to uploads dir; agent workspace root is
                     # AGENT_DATA_DIR/{agent_id}/, so the correct relative path is workspace/uploads/
@@ -876,11 +882,16 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                     _fs = _gs_fallback()
                     _base_url = getattr(_fs, 'BASE_URL', '').rstrip('/') or ''
                     _fp = _P(file_path)
-                    _ws_root = _P(_fs.AGENT_DATA_DIR)
+                    _parts = list(_fp.parts)
                     try:
-                        _rel = str(_fp.relative_to(_ws_root / str(agent_id)))
+                        _workspace_idx = _parts.index("workspace")
+                        _rel = "/".join(_parts[_workspace_idx:])
                     except ValueError:
-                        _rel = _fp.name
+                        _ws_root = _P(getattr(_fs, "STORAGE_LOCAL_ROOT", "") or _fs.AGENT_DATA_DIR)
+                        try:
+                            _rel = str(_fp.relative_to(_ws_root / str(agent_id)))
+                        except ValueError:
+                            _rel = _fp.name
                     _fallback_parts = []
                     if msg:
                         _fallback_parts.append(msg)
@@ -1042,10 +1053,10 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             if _patch_msg_id:
                 _heartbeat_task = asyncio.create_task(_heartbeat())
 
-            # Call LLM with history and streaming callback
+            # Call LLM with history and streaming callback (no DB session needed)
             try:
-                reply_text = await _call_agent_llm(
-                    db,
+                reply_text = await _call_llm_with_config(
+                    _agent_model, _llm_model, _fallback_model,
                     agent_id,
                     llm_user_text,
                     history=history,
@@ -1077,22 +1088,24 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
                         from app.services.task_executor import execute_task
                         import asyncio as _asyncio
 
-                        # Find the agent's creator to use as task creator
-                        agent_r = await db.execute(select(AgentModel).where(AgentModel.id == agent_id))
-                        agent_obj = agent_r.scalar_one_or_none()
-                        creator_id = agent_obj.creator_id if agent_obj else agent_id
+                        async with _async_session() as _task_db:
+                            # Find the agent's creator to use as task creator
+                            agent_r = await _task_db.execute(select(AgentModel).where(AgentModel.id == agent_id))
+                            agent_obj = agent_r.scalar_one_or_none()
+                            _task_creator_id = agent_obj.creator_id if agent_obj else agent_id
 
-                        task_obj = TaskModel(
-                            agent_id=agent_id,
-                            title=task_title,
-                            created_by=creator_id,
-                            status="pending",
-                            priority="medium",
-                        )
-                        db.add(task_obj)
-                        await db.commit()
-                        await db.refresh(task_obj)
-                        _asyncio.create_task(execute_task(task_obj.id, agent_id))
+                            task_obj = TaskModel(
+                                agent_id=agent_id,
+                                title=task_title,
+                                created_by=_task_creator_id,
+                                status="pending",
+                                priority="medium",
+                            )
+                            _task_db.add(task_obj)
+                            await _task_db.commit()
+                            await _task_db.refresh(task_obj)
+                            _task_id = str(task_obj.id)
+                        _asyncio.create_task(execute_task(_task_id, agent_id))
                         reply_text += f"\n\n📋 已同步创建任务到任务面板：【{task_title}】"
                         logger.info(f"[Feishu] Created task: {task_title}")
                     except Exception as e:
@@ -1165,17 +1178,25 @@ async def process_feishu_event(agent_id: uuid.UUID, body: dict, db: AsyncSession
             from app.services.activity_logger import log_activity
             await log_activity(agent_id, "chat_reply", f"回复了飞书消息: {final_reply_text[:80]}", detail={"channel": "feishu", "user_text": user_text[:200], "reply": final_reply_text[:500]})
 
-            # Save assistant reply to history (use platform_user_id so messages stay in one session)
-            db.add(ChatMessage(
-                agent_id=agent_id,
-                user_id=platform_user_id,
-                role="assistant",
-                content=final_reply_text,
-                thinking="".join(_thinking_buffer) or None,
-                conversation_id=session_conv_id,
-            ))
-            _sess.last_message_at = _dt.now(_tz.utc)
-            await db.commit()
+            # Save assistant reply to history (new short transaction)
+            async with _async_session() as _save_db:
+                _save_db.add(ChatMessage(
+                    agent_id=agent_id,
+                    user_id=platform_user_id,
+                    role="assistant",
+                    content=final_reply_text,
+                    thinking="".join(_thinking_buffer) or None,
+                    conversation_id=session_conv_id,
+                ))
+                # Reload session object in new transaction to update last_message_at
+                from app.models.chat_session import ChatSession
+                _sess_r = await _save_db.execute(
+                    select(ChatSession).where(ChatSession.id == uuid.UUID(session_conv_id))
+                )
+                _sess_fresh = _sess_r.scalar_one_or_none()
+                if _sess_fresh:
+                    _sess_fresh.last_message_at = _dt.now(_tz.utc)
+                await _save_db.commit()
 
     return {"code": 0, "msg": "ok"}
 
@@ -1191,7 +1212,6 @@ _FILE_ACK_MESSAGES = [
 
 
 async def _handle_feishu_file(
-    db,
     agent_id,
     config,
     message,
@@ -1202,8 +1222,6 @@ async def _handle_feishu_file(
 ):
     """Handle incoming file or image messages from Feishu (runs as a background task)."""
     import asyncio, random, json
-    from pathlib import Path
-    from app.config import get_settings
     from app.models.audit import ChatMessage
     from app.models.agent import Agent as AgentModel
     from app.models.user import User as UserModel
@@ -1233,18 +1251,18 @@ async def _handle_feishu_file(
         return
 
     # Resolve workspace upload dir
-    settings = get_settings()
-    upload_dir = Path(settings.AGENT_DATA_DIR) / str(agent_id) / "workspace" / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    save_path = upload_dir / filename
-
     # Download the file
     try:
         file_bytes = await feishu_service.download_message_resource(
             config.app_id, config.app_secret, message_id, file_key, res_type
         )
-        save_path.write_bytes(file_bytes)
-        logger.info(f"[Feishu] Saved {msg_type} to {save_path} ({len(file_bytes)} bytes)")
+        _, workspace_path, save_path = await store_agent_upload(
+            agent_id,
+            filename,
+            file_bytes,
+            content_type="image/jpeg" if msg_type == "image" else None,
+        )
+        logger.info(f"[Feishu] Saved {msg_type} to {workspace_path} ({len(file_bytes)} bytes)")
     except Exception as e:
         logger.error(f"[Feishu] Failed to download {msg_type}: {e}")
         err_tip = "抱歉，文件下载失败。可能原因：机器人缺少 `im:resource` 权限（文件读取）。\n请在飞书开放平台 → 权限管理 → 批量导入权限 JSON → 重新发布机器人版本后重试。"
@@ -1562,26 +1580,66 @@ async def _handle_feishu_file(
 
 async def _download_post_images(agent_id, config, message_id, image_keys):
     """Download images embedded in a Feishu post message to the agent's workspace."""
-    from pathlib import Path
-    from app.config import get_settings
-    settings = get_settings()
-    upload_dir = Path(settings.AGENT_DATA_DIR) / str(agent_id) / "workspace" / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
     for ik in image_keys:
         try:
             file_bytes = await feishu_service.download_message_resource(
                 config.app_id, config.app_secret, message_id, ik, "image"
             )
-            save_path = upload_dir / f"image_{ik[-8:]}.jpg"
-            save_path.write_bytes(file_bytes)
-            logger.info(f"[Feishu] Saved post image to {save_path} ({len(file_bytes)} bytes)")
+            _, workspace_path, _ = await store_agent_upload(
+                agent_id,
+                f"image_{ik[-8:]}.jpg",
+                file_bytes,
+                content_type="image/jpeg",
+            )
+            logger.info(f"[Feishu] Saved post image to {workspace_path} ({len(file_bytes)} bytes)")
         except Exception as e:
                 logger.error(f"[Feishu] Failed to download post image {ik}: {e}")
 
 
-async def _call_agent_llm(
-    db: AsyncSession,
+async def _load_agent_and_model(
+    db: AsyncSession, agent_id: uuid.UUID
+):
+    """Load agent and LLM model configs in a short DB transaction.
+
+    Returns (agent, model, fallback_model). Caller should extract all needed
+    scalar values before closing the session to avoid detached-instance errors.
+    """
+    from app.models.agent import Agent
+    from app.models.llm import LLMModel
+
+    agent_result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = agent_result.scalar_one_or_none()
+    if not agent:
+        return None, None, None
+
+    model = None
+    if agent.primary_model_id:
+        model_result = await db.execute(select(LLMModel).where(LLMModel.id == agent.primary_model_id))
+        model = model_result.scalar_one_or_none()
+        if model and not model.enabled:
+            logger.info(f"[Channel] Primary model {model.model} is disabled, skipping")
+            model = None
+
+    fallback_model = None
+    if agent.fallback_model_id:
+        fb_result = await db.execute(select(LLMModel).where(LLMModel.id == agent.fallback_model_id))
+        fallback_model = fb_result.scalar_one_or_none()
+        if fallback_model and not fallback_model.enabled:
+            logger.info(f"[Channel] Fallback model {fallback_model.model} is disabled, skipping")
+            fallback_model = None
+
+    if not model and fallback_model:
+        model = fallback_model
+        fallback_model = None
+        logger.warning(f"[Channel] Primary model unavailable, using fallback: {model.model}")
+
+    return agent, model, fallback_model
+
+
+async def _call_llm_with_config(
+    agent,
+    model,
+    fallback_model,
     agent_id: uuid.UUID,
     user_text: str,
     history: list[dict] | None = None,
@@ -1591,47 +1649,14 @@ async def _call_agent_llm(
     on_thinking=None,
     on_tool_call=None,
 ) -> str:
-    """Call the agent's configured LLM model with conversation history.
-    
-    Reuses the same call_llm function as the WebSocket chat endpoint so that
-    all providers (OpenRouter, Qwen, etc.) work identically on both channels.
-    """
-    from app.models.agent import Agent
-    from app.models.llm import LLMModel
-    from app.services.llm import call_llm
+    """Call LLM with pre-loaded agent/model objects. No DB session needed.
 
-    # Load agent and model
-    agent_result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = agent_result.scalar_one_or_none()
-    if not agent:
-        return "⚠️ 数字员工未找到"
+    This is the hot path — all DB queries should be done before calling this.
+    """
+    from app.services.llm import call_llm
 
     if is_agent_expired(agent):
         return "This Agent has expired and is off duty. Please contact your admin to extend its service."
-
-    # Load primary model (skip if disabled by admin)
-    model = None
-    if agent.primary_model_id:
-        model_result = await db.execute(select(LLMModel).where(LLMModel.id == agent.primary_model_id))
-        model = model_result.scalar_one_or_none()
-        if model and not model.enabled:
-            logger.info(f"[Channel] Primary model {model.model} is disabled, skipping")
-            model = None
-
-    # Load fallback model (skip if disabled by admin)
-    fallback_model = None
-    if agent.fallback_model_id:
-        fb_result = await db.execute(select(LLMModel).where(LLMModel.id == agent.fallback_model_id))
-        fallback_model = fb_result.scalar_one_or_none()
-        if fallback_model and not fallback_model.enabled:
-            logger.info(f"[Channel] Fallback model {fallback_model.model} is disabled, skipping")
-            fallback_model = None
-
-    # Config-level fallback: primary missing -> use fallback
-    if not model and fallback_model:
-        model = fallback_model
-        fallback_model = None
-        logger.warning(f"[Channel] Primary model unavailable, using fallback: {model.model}")
 
     if not model:
         return f"⚠️ {agent.name} 未配置 LLM 模型，请在管理后台设置。"
@@ -1644,10 +1669,7 @@ async def _call_agent_llm(
         messages.extend(_normalize_history_messages(history)[-ctx_size:])
     messages.append({"role": "user", "content": user_text})
 
-    # Use actual user_id so the system prompt knows who it's chatting with
     effective_user_id = user_id or agent_id
-
-    # Determine effective timeout: prefer model-level setting, else use module default.
     _timeout = _get_llm_timeout(model)
 
     try:
@@ -1674,7 +1696,6 @@ async def _call_agent_llm(
             f"(agent_id={agent_id}, model={getattr(model, 'model', 'unknown')})"
         )
         if fallback_model:
-            # Use the fallback model's own timeout budget.
             _fb_timeout = _get_llm_timeout(fallback_model)
             logger.info(f"[LLM] Retrying timed-out request with fallback model: {fallback_model.model} (timeout={_fb_timeout}s)")
             try:
@@ -1711,7 +1732,6 @@ async def _call_agent_llm(
         traceback.print_exc()
         error_msg = str(e) or repr(e)
         logger.error(f"[LLM] Primary model error: {error_msg}")
-        # Runtime fallback: primary model failed -> retry with fallback model
         if fallback_model:
             logger.info(f"[LLM] Retrying with fallback model: {fallback_model.model}")
             try:
@@ -1743,3 +1763,29 @@ async def _call_agent_llm(
                 traceback.print_exc()
                 return f"⚠️ Model error: Primary: {str(e)[:80]} | Fallback: {str(e2)[:80]}"
         return f"⚠️ 调用模型出错: {error_msg[:150]}"
+
+
+async def _call_agent_llm(
+    db: AsyncSession,
+    agent_id: uuid.UUID,
+    user_text: str,
+    history: list[dict] | None = None,
+    user_id=None,
+    session_id: str = "",
+    on_chunk=None,
+    on_thinking=None,
+    on_tool_call=None,
+) -> str:
+    """Backward-compatible wrapper: load config + call LLM in one shot.
+
+    Prefer _load_agent_and_model + _call_llm_with_config for short-transaction
+    patterns where the session should be closed before the LLM call.
+    """
+    agent, model, fallback_model = await _load_agent_and_model(db, agent_id)
+    if not agent:
+        return "⚠️ 数字员工未找到"
+    return await _call_llm_with_config(
+        agent, model, fallback_model, agent_id, user_text,
+        history=history, user_id=user_id, session_id=session_id,
+        on_chunk=on_chunk, on_thinking=on_thinking, on_tool_call=on_tool_call,
+    )

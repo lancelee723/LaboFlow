@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -59,6 +60,7 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	toolApprovalGate      approval.MCPApproval
 }
 
 // NewAgentService creates a new agent service
@@ -78,6 +80,7 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	toolApprovalGate approval.MCPApproval,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -95,17 +98,19 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		toolApprovalGate:      toolApprovalGate,
 	}
 }
 
-// CreateAgentEngineWithEventBus creates an agent engine with the given configuration and EventBus
+// CreateAgentEngine creates an agent engine with the given configuration and EventBus.
+// History is loaded once per turn by the caller (see service.LoadAgentHistory)
+// and handed to AgentEngine.Execute as llmContext; the engine is stateless across turns.
 func (s *agentService) CreateAgentEngine(
 	ctx context.Context,
 	config *types.AgentConfig,
 	chatModel chat.Chat,
 	rerankModel rerank.Reranker,
 	eventBus *event.EventBus,
-	contextManager interfaces.ContextManager,
 	sessionID string,
 ) (interfaces.AgentEngine, error) {
 	logger.Infof(ctx, "Creating agent engine with custom EventBus")
@@ -140,7 +145,7 @@ func (s *agentService) CreateAgentEngine(
 	// 5. Create engine
 	engine := agent.NewAgentEngine(
 		config, chatModel, toolRegistry, eventBus,
-		kbInfos, selectedDocs, contextManager, sessionID,
+		kbInfos, selectedDocs, sessionID,
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
@@ -223,7 +228,7 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
-		if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager); err != nil {
+		if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate); err != nil {
 			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
 		} else {
 			logger.Infof(ctx, "Registered MCP tools from %d enabled services", len(enabledServices))
@@ -498,8 +503,7 @@ func (s *agentService) registerTools(
 	// Deduplicate while preserving original order.
 	allowedTools = dedupStrings(allowedTools)
 
-	logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
-	allowedTools = append(allowedTools, tools.ToolFinalAnswer)
+	// logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 	// Register each allowed tool
 	for _, toolName := range allowedTools {
 		var toolToRegister types.Tool
@@ -553,10 +557,6 @@ func (s *agentService) registerTools(
 		case tools.ToolDataSchema:
 			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository())
 			logger.Infof(ctx, "Registered data_schema tool")
-
-		case tools.ToolFinalAnswer:
-			toolToRegister = tools.NewFinalAnswerTool()
-			logger.Infof(ctx, "Registered final_answer tool")
 
 		// Wiki tools — only registered when wiki KBs are detected
 		case tools.ToolWikiReadPage:
@@ -682,7 +682,9 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			pageResult, err := s.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
-			}, "", "", "")
+			}, types.KnowledgeListFilter{
+				ParseStatus: types.ParseStatusCompleted,
+			})
 
 			if err == nil && pageResult != nil {
 				docCount = int(pageResult.Total)

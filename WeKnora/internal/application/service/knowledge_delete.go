@@ -75,6 +75,17 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 	}
 
+	// Best-effort: purge any queued downstream tasks for this knowledge
+	// (multimodal / post-process / question / summary / graph extract).
+	// Worker checkpoints already drop them on the floor, but dequeuing
+	// here avoids waking workers just to no-op when the parse was still
+	// in flight at delete time. No-op in Lite mode and on completed rows
+	// (no queued descendants anyway).
+	if originalStatus == types.ParseStatusPending ||
+		originalStatus == types.ParseStatusProcessing {
+		s.dequeueKnowledgeTasks(ctx, id)
+	}
+
 	// Resolve file service for this KB before spawning goroutines
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	kbFileSvc := s.resolveFileService(ctx, kb)
@@ -98,10 +109,18 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// and GetEmbeddingModel would fail with "model ID cannot be empty".
 	if strings.TrimSpace(knowledge.EmbeddingModelID) != "" {
 		wg.Go(func() error {
-			tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+			// kb was already loaded above for resolveFileService — reuse its
+			// VectorStoreID for engine routing.
+			var boundStoreID *string
+			if kb != nil {
+				boundStoreID = kb.VectorStoreID
+			}
+			retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+				ctx,
 				s.retrieveEngine,
-				tenantInfo.GetEffectiveEngines(),
+				s.ownership,
+				tenantID,
+				boundStoreID,
 			)
 			if err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -384,8 +403,12 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return err
 	}
 
-	// Mark all as deleting first to prevent async task conflicts
+	// Mark all as deleting first to prevent async task conflicts.
+	// Remember which entries still had queued / in-flight downstream tasks
+	// so we can dequeue them in one pass after marking.
+	var inFlightIDs []string
 	for _, knowledge := range knowledgeList {
+		prev := knowledge.ParseStatus
 		knowledge.ParseStatus = types.ParseStatusDeleting
 		knowledge.UpdatedAt = time.Now()
 		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
@@ -393,8 +416,18 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 				Errorf("DeleteKnowledgeList failed to mark as deleting")
 			// Continue with deletion even if marking fails
 		}
+		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
+			inFlightIDs = append(inFlightIDs, knowledge.ID)
+		}
 	}
 	logger.Infof(ctx, "Marked %d knowledge entries as deleting", len(knowledgeList))
+
+	// Best-effort dequeue of downstream tasks for in-flight entries.
+	// See DeleteKnowledge for the rationale; loop is per-knowledge because
+	// the inspector only filters by knowledge_id, not by ID set.
+	for _, kid := range inFlightIDs {
+		s.dequeueKnowledgeTasks(ctx, kid)
+	}
 
 	// Pre-resolve file services per KB so goroutines don't need DB access
 	kbFileServices := make(map[string]interfaces.FileService)
@@ -427,11 +460,14 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	wg := errgroup.Group{}
 	// 2. Delete knowledge embeddings from vector store
 	wg.Go(func() error {
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
-		)
+		tenantID := types.MustTenantIDFromContext(ctx)
+		// Batch cleanup spans multiple KBs that may be bound to different
+		// VectorStores; routing this batch through tenant effective engines
+		// keeps the legacy behavior intact.
+		// TODO: fan out the batch per-store using each KB's own
+		// VectorStoreID so cleanup hits the right backend for bound KBs.
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantID, nil)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 			return err
@@ -556,10 +592,21 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if knowledge.EmbeddingModelID != "" {
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
-		)
+		// Load KB to discover its VectorStoreID binding. Falls back to tenant
+		// effective engines if the KB has no binding or the load fails.
+		//
+		// Silent fallback risk: if a bound KB fails to load here due to a
+		// transient DB error, the cleanup will delete from env engines and
+		// leave orphan vectors in the bound store. Warn so operators can spot it.
+		var boundStoreID *string
+		if kb, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); loadErr == nil && kb != nil {
+			boundStoreID = kb.VectorStoreID
+		} else if loadErr != nil {
+			logger.GetLogger(ctx).WithField("error", loadErr).WithField("knowledge_base_id", knowledge.KnowledgeBaseID).
+				Warnf("cleanupKnowledgeResources: failed to load KB for vector store resolution; falling back to tenant effective engines")
+		}
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, boundStoreID)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Error("Failed to init retrieve engine during cleanup")
 			cleanupErr = errors.Join(cleanupErr, err)

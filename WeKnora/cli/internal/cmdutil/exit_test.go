@@ -3,6 +3,7 @@ package cmdutil
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,40 +29,16 @@ func TestExitCode(t *testing.T) {
 		{"network.* prefix", NewError(CodeNetworkError, "x"), 7},
 		{"unknown error", errors.New("plain"), 1},
 		{"local.* prefix", NewError(CodeLocalConfigCorrupt, "x"), 1},
+		{"operation.timeout", NewError(CodeOperationTimeout, "timed out"), 124},
+		{"operation.failed → 1 (fall-through bucket)", NewError(CodeOperationFailed, "failed"), 1},
+		{"operation.cancelled → 1 (main overrides to 130 on signal-cancelled ctx)", NewError(CodeOperationCancelled, "cancelled"), 1},
+		{"server.session_create_failed → 1 (workflow, not transient)", NewError(CodeSessionCreateFailed, "x"), 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, ExitCode(tc.err))
 		})
 	}
-}
-
-func TestToErrorBody(t *testing.T) {
-	t.Run("nil returns nil", func(t *testing.T) {
-		assert.Nil(t, ToErrorBody(nil))
-	})
-	t.Run("typed without cause", func(t *testing.T) {
-		body := ToErrorBody(NewError(CodeResourceNotFound, "kb missing"))
-		assert.Equal(t, "resource.not_found", body.Code)
-		assert.Equal(t, "kb missing", body.Message)
-	})
-	t.Run("typed with cause surfaces inner", func(t *testing.T) {
-		inner := errors.New("HTTP error 500: server exploded")
-		body := ToErrorBody(Wrapf(CodeServerError, inner, "hybrid search"))
-		assert.Equal(t, "server.error", body.Code)
-		// Both wrap context AND server cause must appear so agents see what
-		// actually broke, not just our wrap label.
-		assert.Equal(t, "hybrid search: HTTP error 500: server exploded", body.Message)
-	})
-	t.Run("flag error", func(t *testing.T) {
-		body := ToErrorBody(NewFlagError(errors.New("bad flag")))
-		assert.Equal(t, "input.invalid_argument", body.Code)
-	})
-	t.Run("unclassified", func(t *testing.T) {
-		body := ToErrorBody(errors.New("anything"))
-		assert.Equal(t, "server.error", body.Code)
-		assert.Equal(t, "anything", body.Message)
-	})
 }
 
 func TestPrintError(t *testing.T) {
@@ -81,4 +58,66 @@ func TestPrintError(t *testing.T) {
 		assert.Contains(t, buf.String(), "auth.unauthenticated")
 		assert.Contains(t, buf.String(), "no creds")
 	})
+}
+
+func TestPrintError_JSONMode_WritesEnvelope(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("json")
+
+	err := NewError(CodeInputConfirmationRequired, "kb delete kb_x requires confirmation").
+		WithHint("re-run with -y/--yes").
+		WithRetryCommand("weknora kb delete kb_x -y")
+
+	var buf bytes.Buffer
+	PrintError(&buf, err)
+
+	got := buf.String()
+	if !strings.Contains(got, `"ok":false`) {
+		t.Errorf("expected envelope ok:false; got %q", got)
+	}
+	if !strings.Contains(got, `"type":"input.confirmation_required"`) {
+		t.Errorf("expected typed code; got %q", got)
+	}
+	if !strings.Contains(got, `"retry_command":"weknora kb delete kb_x -y"`) {
+		t.Errorf("expected retry_command; got %q", got)
+	}
+}
+
+func TestPrintError_JSONMode_IncludesRetryAfter(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("json")
+
+	err := NewError(CodeServerRateLimited, "rate limited").
+		WithRetryAfter(30)
+
+	var buf bytes.Buffer
+	PrintError(&buf, err)
+
+	got := buf.String()
+	if !strings.Contains(got, `"retry_after_seconds":30`) {
+		t.Errorf("expected retry_after_seconds:30; got %q", got)
+	}
+}
+
+func TestPrintError_TextMode_WritesProse(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("text")
+
+	err := NewError(CodeInputConfirmationRequired, "kb delete kb_x requires confirmation").
+		WithHint("re-run with -y/--yes").
+		WithRetryCommand("weknora kb delete kb_x -y")
+
+	var buf bytes.Buffer
+	PrintError(&buf, err)
+
+	got := buf.String()
+	if !strings.Contains(got, "input.confirmation_required: kb delete kb_x requires confirmation") {
+		t.Errorf("expected prose code:message line; got %q", got)
+	}
+	if !strings.Contains(got, "hint: re-run with -y/--yes") {
+		t.Errorf("expected hint line; got %q", got)
+	}
+	if !strings.Contains(got, "retry: weknora kb delete kb_x -y") {
+		t.Errorf("expected retry line; got %q", got)
+	}
 }

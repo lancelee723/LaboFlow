@@ -52,11 +52,14 @@ services:
       REDIS_URL: redis://clawith-redis:6379/0
       AGENT_DATA_DIR: /data/agents
       AGENT_TEMPLATE_DIR: /app/agent_template
+      SANDBOX_ALLOW_NETWORK: ${SANDBOX_ALLOW_NETWORK:-true}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-secret}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       CORS_ORIGINS: '["*"]'
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_LOCAL_ROOT: /data/agents
       WEKNORA_URL: ${WEKNORA_URL:-/kb}
       DOCKER_NETWORK: laboflow
     volumes:
@@ -201,9 +204,31 @@ services:
     environment:
       # SSO: must match Clawith's JWT_SECRET_KEY
       JWT_SECRET: ${JWT_SECRET_KEY:-change-me-jwt-secret}
+      # Clawith cross-product SSO — must equal Clawith's JWT_SECRET_KEY
+      CLAWITH_SSO_SECRET: ${JWT_SECRET_KEY:-change-me-jwt-secret}
       # AES key for encrypting sensitive fields (api_key, app secrets, etc.)
       # Generate with: openssl rand -base64 32 | cut -c1-32
       SYSTEM_AES_KEY: ${SYSTEM_AES_KEY:-}
+
+  # One-shot migration: runs on every deploy, idempotent (no-op when up-to-date)
+  weknora-migrate:
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-app:${TAG:-1.0}
+    container_name: WeKnora-migrate
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        encoded_password=$$(printf '%s' "$${DB_PASSWORD}" | sed 's/!/%21/g; s/@/%40/g; s/#/%23/g')
+        migrate -path /app/migrations/versioned -database "postgres://$${DB_USER}:$${encoded_password}@postgres:5432/$${DB_NAME}?sslmode=disable" up
+    environment:
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres123!@#}
+      - DB_NAME=${DB_NAME:-WeKnora}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: "no"
 
   docreader:
     build:

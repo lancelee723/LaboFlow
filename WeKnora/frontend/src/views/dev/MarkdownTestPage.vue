@@ -280,7 +280,7 @@ const doMermaid = async () => {
 };
 
 onMounted(doMermaid);
-watch(mermaidSample, doMermaid);
+watch(() => mermaidSample, doMermaid);
 </script>
 
 <style lang="less" scoped>

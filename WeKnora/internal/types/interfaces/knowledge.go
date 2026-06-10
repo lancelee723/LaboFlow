@@ -55,23 +55,29 @@ type KnowledgeService interface {
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)
 	// GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
+	// GetOwningKBCreatorID resolves a knowledge ID to the CreatorID of its
+	// owning KnowledgeBase, scoped to the caller's tenant. Used by the
+	// per-KB ownership lookups in handler/rbac_lookups.go (PR 5, #1303) so
+	// chunk and knowledge sub-resource routes can inherit the same
+	// "creator-of-the-KB OR Admin+" gate that KB-level routes already use.
+	// Returns the underlying repository sentinel errors unchanged so
+	// callers can map them to middleware.ErrResourceNotFound.
+	GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error)
 	// GetKnowledgeBatch retrieves a batch of knowledge by IDs.
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs including items from shared KBs the user has access to.
 	GetKnowledgeBatchWithSharedAccess(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
-	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base with pagination.
-	// When tagID is non-empty, results are filtered by tag_id.
-	// When keyword is non-empty, results are filtered by file_name.
-	// When fileType is non-empty, results are filtered by file_type or type.
+	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base
+	// with pagination. The filter struct controls optional dimensions (tag, keyword,
+	// file type, parse status, source channel, updated time range); pass a zero
+	// struct to disable all filters.
 	ListPagedKnowledgeByKnowledgeBaseID(
 		ctx context.Context,
 		kbID string,
 		page *types.Pagination,
-		tagID string,
-		keyword string,
-		fileType string,
+		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
@@ -89,6 +95,14 @@ type KnowledgeService interface {
 	) (*types.Knowledge, error)
 	// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 	ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
+	// user. The knowledge row and any partially written chunks/index are
+	// kept; downstream queued tasks for the same knowledge are best-effort
+	// dequeued and active workers are signalled to stop at their next
+	// checkpoint. Idempotent — returns the existing row when the knowledge
+	// is already cancelled. Returns an error when the knowledge is in a
+	// terminal state (completed / failed) or being deleted.
+	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.
@@ -178,12 +192,12 @@ type KnowledgeRepository interface {
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
-	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination.
-	// When tagID is non-empty, results are filtered by tag_id.
-	// When keyword is non-empty, results are filtered by file_name.
-	// When fileType is non-empty, results are filtered by file_type or type.
+	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base
+	// with pagination. The filter struct controls optional dimensions (tag, keyword,
+	// file type, parse status, source channel, updated time range); pass a zero
+	// struct to disable all filters.
 	ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
-		tenantID uint64, kbID string, page *types.Pagination, tagID string, keyword string, fileType string,
+		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
@@ -204,6 +218,21 @@ type KnowledgeRepository interface {
 	// AminusB returns the difference set of A and B.
 	AminusB(ctx context.Context, Atenant uint64, A string, Btenant uint64, B string) ([]string, error)
 	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
+	// UpdateKnowledgeColumns updates multiple columns of a knowledge row in a single
+	// statement so callers that flip several related fields (e.g. parse_status +
+	// error_message) cannot leave the row in a half-updated state.
+	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
+	// FinalizeSubtask atomically decrements pending_subtasks_count for the
+	// given knowledge and promotes parse_status from "finalizing" to
+	// "completed" when the count reaches zero. Returns the post-decrement
+	// count, whether this caller's UPDATE was the one that promoted the
+	// row, and any error.
+	FinalizeSubtask(ctx context.Context, id string) (int, bool, error)
+	// SetFinalizing atomically transitions a row from "processing" to
+	// "finalizing" and writes the initial pending_subtasks_count. Returns
+	// whether the transition took place (false when the row's parse_status
+	// was no longer "processing", e.g. user cancelled / deleted in flight).
+	SetFinalizing(ctx context.Context, id string, expectedSubtasks int) (bool, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.

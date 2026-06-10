@@ -154,16 +154,33 @@ class SubprocessBackend(BaseSandboxBackend):
 
     def _ensure_workspace_venv(self, work_path: Path) -> None:
         venv_python = work_path / ".venv" / "bin" / "python"
-        if venv_python.exists():
-            return
+        if not venv_python.exists():
+            import subprocess
 
-        import subprocess
+            subprocess.run(
+                ["python3", "-m", "venv", str(work_path / ".venv")],
+                check=True,
+                cwd=str(work_path),
+            )
 
-        subprocess.run(
-            ["python3", "-m", "venv", str(work_path / ".venv")],
-            check=True,
-            cwd=str(work_path),
-        )
+        # Fix shebang lines in pip scripts to use bwrap-visible path
+        # venv creates scripts with absolute paths to the host Python,
+        # but bwrap only mounts /workspace, so those paths don't exist inside the sandbox
+        self._fix_pip_shebangs(work_path)
+
+    def _fix_pip_shebangs(self, work_path: Path) -> None:
+        """Fix pip script shebangs to point to /workspace/.venv/bin/python for bwrap compatibility."""
+        venv_bin = work_path / ".venv" / "bin"
+        sandbox_python = "/workspace/.venv/bin/python"
+        for script_name in ("pip", "pip3", "pip3.X"):
+            script_path = venv_bin / script_name
+            if script_path.exists():
+                content = script_path.read_text(encoding="utf-8")
+                if content.startswith("#!"):
+                    first_line, rest = content.split("\n", 1)
+                    # Only rewrite if shebang doesn't already point to sandbox python
+                    if sandbox_python not in first_line:
+                        script_path.write_text(f"#!{sandbox_python}\n{rest}", encoding="utf-8")
 
     def _build_exec_kwargs(self, work_path: Path, timeout: int, use_preexec: bool = False) -> dict:
         kwargs = {
@@ -397,7 +414,7 @@ class SubprocessBackend(BaseSandboxBackend):
             stdout_data = bytearray()
             stderr_data = bytearray()
 
-            async def read_stream(stream, out, label: str = "stdout"):
+            async def read_stream(stream, out, label="stdout"):
                 capture_limit = MAX_STDERR_CAPTURE_BYTES if label == "stderr" else MAX_STDOUT_CAPTURE_BYTES
                 while True:
                     chunk = await stream.read(4096)
@@ -406,6 +423,7 @@ class SubprocessBackend(BaseSandboxBackend):
                     remaining = capture_limit - len(out)
                     if remaining > 0:
                         out.extend(chunk[:remaining])
+                    # Real-time streaming: push each chunk to the WebSocket
                     if on_output:
                         try:
                             text = chunk.decode("utf-8", errors="replace")
@@ -417,7 +435,6 @@ class SubprocessBackend(BaseSandboxBackend):
             task2 = asyncio.create_task(read_stream(proc.stderr, stderr_data, "stderr"))
 
             is_timeout = False
-
             try:
                 await asyncio.wait_for(proc.wait(), timeout=timeout)
             except asyncio.TimeoutError:

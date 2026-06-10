@@ -31,12 +31,13 @@ func TestNewCmdAuth_TreeShape(t *testing.T) {
 
 func TestNewCmdLogin_FlagsRegistered(t *testing.T) {
 	cmd := NewCmdLogin(&cmdutil.Factory{}, nil)
-	for _, name := range []string{"host", "name", "with-token", "json"} {
+	// --format is a persistent root flag (v0.7); only per-command flags here.
+	for _, name := range []string{"host", "name", "with-token"} {
 		assert.NotNilf(t, cmd.Flags().Lookup(name), "flag %s missing", name)
 	}
-	// `--context` should NOT be a local flag (it's the global persistent flag).
-	// Local registration would silently shadow the global single-shot override.
-	assert.Nil(t, cmd.Flags().Lookup("context"), "auth login must not declare a local --context flag (use --name)")
+	// --profile is the global persistent override; local registration would
+	// silently shadow it.
+	assert.Nil(t, cmd.Flags().Lookup("profile"), "auth login must not declare a local --profile flag (use --name)")
 }
 
 func TestNewCmdLogin_InvokesRunF(t *testing.T) {
@@ -46,7 +47,7 @@ func TestNewCmdLogin_InvokesRunF(t *testing.T) {
 	f := &cmdutil.Factory{
 		Secrets: func() (secrets.Store, error) { return store, nil },
 	}
-	cmd := NewCmdLogin(f, func(_ context.Context, opts *LoginOptions, _ *cmdutil.Factory, _ LoginService) error {
+	cmd := NewCmdLogin(f, func(_ context.Context, opts *LoginOptions, _ *cmdutil.FormatOptions, _ *cmdutil.Factory, _ LoginService) error {
 		called = true
 		assert.Equal(t, "https://kb.example.com", opts.Host)
 		assert.True(t, opts.WithToken)
@@ -73,17 +74,17 @@ func TestPersistAPIKey_WritesContext(t *testing.T) {
 	}
 	opts := &LoginOptions{
 		Host:    "https://kb.example.com",
-		Context: "ci",
+		Profile: "ci",
 		APIKey:  "sk-zzz",
 	}
-	require.NoError(t, persistAPIKey(opts, f))
+	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, nil))
 	v, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-zzz", v)
 	cfg, _ := f.Config()
-	assert.Equal(t, "ci", cfg.CurrentContext)
-	assert.Equal(t, "https://kb.example.com", cfg.Contexts["ci"].Host)
+	assert.Equal(t, "ci", cfg.CurrentProfile)
+	assert.Equal(t, "https://kb.example.com", cfg.Profiles["ci"].Host)
 	// APIKeyRef should be the mem:// URI from the store's Ref method.
-	assert.Equal(t, "mem://ci/api_key", cfg.Contexts["ci"].APIKeyRef)
+	assert.Equal(t, "mem://ci/api_key", cfg.Profiles["ci"].APIKeyRef)
 }
 
 func TestPersistJWT_StoresBothTokens(t *testing.T) {
@@ -97,15 +98,14 @@ func TestPersistJWT_StoresBothTokens(t *testing.T) {
 	}
 	opts := &LoginOptions{
 		Host:    "https://x",
-		Context: "p",
-		JSONOut: true,
+		Profile: "p",
 	}
 	resp := &sdk.LoginResponse{
 		Token:        "jwt-acc",
 		RefreshToken: "jwt-ref",
 		User:         &sdk.AuthUser{Email: "a@b.c", TenantID: 7},
 	}
-	require.NoError(t, persistJWT(opts, f, resp))
+	require.NoError(t, persistJWT(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, f, resp))
 	a, _ := store.Get("p", "access")
 	r, _ := store.Get("p", "refresh")
 	assert.Equal(t, "jwt-acc", a)

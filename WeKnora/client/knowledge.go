@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -278,20 +279,65 @@ func (c *Client) GetKnowledgeBatch(ctx context.Context, knowledgeIDs []string) (
 	return response.Data, nil
 }
 
-// ListKnowledge lists knowledge entries in a knowledge base with pagination
+// ListKnowledge lists knowledge entries in a knowledge base with pagination.
+// For richer filtering (keyword, file type, parse status, source, time range)
+// use ListKnowledgeWithFilter.
 func (c *Client) ListKnowledge(ctx context.Context,
 	knowledgeBaseID string,
 	page int,
 	pageSize int,
 	tagID string,
 ) ([]Knowledge, int64, error) {
+	return c.ListKnowledgeWithFilter(ctx, knowledgeBaseID, page, pageSize, KnowledgeListFilter{TagID: tagID})
+}
+
+// KnowledgeListFilter mirrors the server-side filters accepted by GET
+// /api/v1/knowledge-bases/{id}/knowledge. Empty / zero fields are omitted from
+// the request.
+type KnowledgeListFilter struct {
+	TagID       string
+	Keyword     string
+	FileType    string
+	ParseStatus string
+	Source      string
+	// StartTime / EndTime filter on knowledge updated_at. Zero values are skipped.
+	// They are serialized in RFC3339 format.
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// ListKnowledgeWithFilter lists knowledge entries with the full filter surface.
+func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
+	knowledgeBaseID string,
+	page int,
+	pageSize int,
+	filter KnowledgeListFilter,
+) ([]Knowledge, int64, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge", knowledgeBaseID)
 
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
-	if tagID != "" {
-		queryParams.Add("tag_id", tagID)
+	if filter.TagID != "" {
+		queryParams.Add("tag_id", filter.TagID)
+	}
+	if filter.Keyword != "" {
+		queryParams.Add("keyword", filter.Keyword)
+	}
+	if filter.FileType != "" {
+		queryParams.Add("file_type", filter.FileType)
+	}
+	if filter.ParseStatus != "" {
+		queryParams.Add("parse_status", filter.ParseStatus)
+	}
+	if filter.Source != "" {
+		queryParams.Add("source", filter.Source)
+	}
+	if !filter.StartTime.IsZero() {
+		queryParams.Add("start_time", filter.StartTime.Format(time.RFC3339))
+	}
+	if !filter.EndTime.IsZero() {
+		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339))
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
@@ -307,7 +353,9 @@ func (c *Client) ListKnowledge(ctx context.Context,
 	return response.Data, response.Total, nil
 }
 
-// DeleteKnowledge deletes a knowledge entry by its ID
+// DeleteKnowledge enqueues an asynchronous delete for the given knowledge entry.
+// The server returns 200 once the task has been submitted; the actual deletion is
+// performed by a background worker (same pipeline as BatchDeleteKnowledge).
 func (c *Client) DeleteKnowledge(ctx context.Context, knowledgeID string) error {
 	path := fmt.Sprintf("/api/v1/knowledge/%s", knowledgeID)
 	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil, nil)
@@ -323,35 +371,67 @@ func (c *Client) DeleteKnowledge(ctx context.Context, knowledgeID string) error 
 	return parseResponse(resp, &response)
 }
 
-// DownloadKnowledgeFile downloads a knowledge file to the specified local path
+// DownloadKnowledgeFile downloads a knowledge file to the specified local path.
+// On any error after the file is opened, the partial file is removed so a
+// failed download doesn't leave a corrupt artifact at destPath.
+//
+// Callers wanting more control (stream to stdout, validate filename before
+// touching disk) should use OpenKnowledgeFile and io.Copy directly.
 func (c *Client) DownloadKnowledgeFile(ctx context.Context, knowledgeID string, destPath string) error {
-	path := fmt.Sprintf("/api/v1/knowledge/%s/download", knowledgeID)
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	_, body, err := c.OpenKnowledgeFile(ctx, knowledgeID)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer body.Close()
 
-	// Check for HTTP errors
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Create destination file
 	out, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer out.Close()
-
-	// Copy response body to file
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
+	if _, err := io.Copy(out, body); err != nil {
+		_ = out.Close()
+		_ = os.Remove(destPath)
+		return fmt.Errorf("failed to copy response body: %w", err)
 	}
+	return out.Close()
+}
 
-	return nil
+// OpenKnowledgeFile starts a download for the given knowledge entry and
+// returns the server-suggested filename (parsed from Content-Disposition;
+// empty when the server didn't send one) and a streaming reader for the
+// body. Callers MUST Close the returned reader.
+//
+// Used by `weknora doc download` so the CLI can inspect the filename
+// before opening the destination file — avoids streaming the full body
+// to a temp file just to discover the request would have been rejected
+// (overwrite without --force, missing --out for unnamed downloads, etc.).
+func (c *Client) OpenKnowledgeFile(ctx context.Context, knowledgeID string) (string, io.ReadCloser, error) {
+	path := fmt.Sprintf("/api/v1/knowledge/%s/download", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return "", nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+	}
+	filename := filenameFromContentDisposition(resp.Header.Get("Content-Disposition"))
+	return filename, resp.Body, nil
+}
+
+// filenameFromContentDisposition extracts the filename parameter from a
+// Content-Disposition header. Returns "" on any parse failure or missing
+// parameter — callers fall back to their own default in that case.
+func filenameFromContentDisposition(h string) string {
+	if h == "" {
+		return ""
+	}
+	_, params, err := mime.ParseMediaType(h)
+	if err != nil {
+		return ""
+	}
+	return params["filename"]
 }
 
 func (c *Client) UpdateKnowledge(ctx context.Context, knowledge *Knowledge) error {
@@ -409,6 +489,153 @@ func (c *Client) ReparseKnowledge(ctx context.Context, knowledgeID string) (*Kno
 	return &response.Data, nil
 }
 
+// CancelKnowledgeParse cancels an in-progress knowledge parse.
+// The server marks the knowledge as cancelled and best-effort dequeues
+// any pending downstream tasks (multimodal, post-process, summary,
+// question generation, graph extract) for the same knowledge ID. Any
+// chunks/index already written are preserved; the user can re-trigger
+// parsing later via ReparseKnowledge.
+//
+// Cancellable parse_status values:
+//   - pending      — task has not started
+//   - processing   — DocReader / chunking / embedding stage
+//   - finalizing   — primary parse done, enrichment subtasks (summary,
+//                    question generation, graph extract) still running
+//
+// Returns an error when the knowledge is in a terminal state
+// (completed, failed) or already being deleted.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - knowledgeID: The ID of the knowledge entry whose parse should be cancelled
+//
+// Returns:
+//   - *Knowledge: The updated knowledge entry with status set to "cancelled"
+//   - error: Error information if the request fails
+//
+// Example:
+//
+//	knowledge, err := client.CancelKnowledgeParse(ctx, "knowledge-id-123")
+//	if err != nil {
+//	    log.Fatalf("Failed to cancel parse: %v", err)
+//	}
+//	fmt.Printf("Knowledge parse cancelled, status: %s\n", knowledge.ParseStatus)
+func (c *Client) CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*Knowledge, error) {
+	if knowledgeID == "" {
+		return nil, fmt.Errorf("knowledge ID cannot be empty")
+	}
+
+	path := fmt.Sprintf("/api/v1/knowledge/%s/cancel-parse", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// KnowledgeSpanNode mirrors one node of the server's document-parsing trace
+// tree (root → stage → subspan). Children carries nested subspans such as
+// per-image multimodal calls or LLM generations under a stage.
+type KnowledgeSpanNode struct {
+	KnowledgeID  string                 `json:"knowledge_id"`
+	Attempt      int                    `json:"attempt"`
+	SpanID       string                 `json:"span_id"`
+	ParentSpanID string                 `json:"parent_span_id,omitempty"`
+	Name         string                 `json:"name"`
+	Kind         string                 `json:"kind"`   // root / stage / subspan / generation
+	Status       string                 `json:"status"` // pending / running / done / failed / skipped / cancelled
+	Input        map[string]interface{} `json:"input,omitempty"`
+	Output       map[string]interface{} `json:"output,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	ErrorCode    string                 `json:"error_code,omitempty"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	StartedAt    *time.Time             `json:"started_at,omitempty"`
+	FinishedAt   *time.Time             `json:"finished_at,omitempty"`
+	DurationMs   int64                  `json:"duration_ms,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Children     []*KnowledgeSpanNode   `json:"children,omitempty"`
+}
+
+// KnowledgeSpanError describes the most recent failed span in a trace.
+type KnowledgeSpanError struct {
+	Stage      string     `json:"stage"`
+	Code       string     `json:"code"`
+	Message    string     `json:"message"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// KnowledgeProcessingTrace is the document-parsing trace for one parse
+// attempt: a five-segment stage timeline (docreader, chunking, embedding,
+// multimodal, postprocess) plus any subspans, with the current stage and
+// last error surfaced for convenience.
+type KnowledgeProcessingTrace struct {
+	KnowledgeID    string              `json:"knowledge_id"`
+	ParseStatus    string              `json:"parse_status"`
+	CurrentAttempt int                 `json:"current_attempt"`
+	CurrentStage   string              `json:"current_stage"`
+	Trace          *KnowledgeSpanNode  `json:"trace"`
+	LastError      *KnowledgeSpanError `json:"last_error,omitempty"`
+}
+
+type knowledgeProcessingTraceResponse struct {
+	Success bool                     `json:"success"`
+	Data    KnowledgeProcessingTrace `json:"data"`
+}
+
+// GetKnowledgeProcessingSpans fetches the document-parsing trace tree for a
+// knowledge entry. The response always contains the five canonical stages;
+// stages that have not produced rows yet are synthesized as "pending"
+// placeholders so the timeline is stable to render.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - knowledgeID: The ID of the knowledge entry
+//   - attempt: A specific parse attempt number; pass 0 for the latest attempt
+//
+// Returns:
+//   - *KnowledgeProcessingTrace: The trace for the selected attempt
+//   - error: Error information if the request fails
+//
+// Example:
+//
+//	trace, err := client.GetKnowledgeProcessingSpans(ctx, "knowledge-id-123", 0)
+//	if err != nil {
+//	    log.Fatalf("Failed to get parsing trace: %v", err)
+//	}
+//	fmt.Printf("parse_status=%s current_stage=%s\n", trace.ParseStatus, trace.CurrentStage)
+func (c *Client) GetKnowledgeProcessingSpans(
+	ctx context.Context, knowledgeID string, attempt int,
+) (*KnowledgeProcessingTrace, error) {
+	if knowledgeID == "" {
+		return nil, fmt.Errorf("knowledge ID cannot be empty")
+	}
+
+	queryParams := url.Values{}
+	if attempt > 0 {
+		queryParams.Add("attempt", strconv.Itoa(attempt))
+	}
+
+	path := fmt.Sprintf("/api/v1/knowledge/%s/spans", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	var response knowledgeProcessingTraceResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // UpdateChunk updates a chunk's information
 // Updates information for a specific chunk under a knowledge document
 // Parameters:
@@ -439,8 +666,8 @@ func (c *Client) UpdateImageInfo(ctx context.Context,
 
 // CreateManualKnowledgeRequest contains the parameters for creating a manual Markdown knowledge entry.
 type CreateManualKnowledgeRequest struct {
-	Title      string `json:"title"`
-	Content    string `json:"content"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 	TagID   string `json:"tag_id,omitempty"`
 	Channel string `json:"channel,omitempty"`
 }
@@ -550,8 +777,8 @@ func (c *Client) MoveKnowledge(ctx context.Context, req *MoveKnowledgeRequest) (
 	}
 
 	var result struct {
-		Success bool                    `json:"success"`
-		Data    *MoveKnowledgeResponse  `json:"data"`
+		Success bool                   `json:"success"`
+		Data    *MoveKnowledgeResponse `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err
@@ -579,8 +806,8 @@ func (c *Client) GetKnowledgeMoveProgress(ctx context.Context, taskID string) (*
 	}
 
 	var result struct {
-		Success bool                    `json:"success"`
-		Data    *KnowledgeMoveProgress  `json:"data"`
+		Success bool                   `json:"success"`
+		Data    *KnowledgeMoveProgress `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err

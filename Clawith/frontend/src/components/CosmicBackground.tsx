@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import Particles, { initParticlesEngine } from '@tsparticles/react';
+import type { Engine } from '@tsparticles/engine';
 import { loadSlim } from '@tsparticles/slim';
 
 export default function CosmicBackground() {
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
-        initParticlesEngine(async (engine) => {
+        initParticlesEngine(async (engine: Engine) => {
             await loadSlim(engine);
         }).then(() => setReady(true));
     }, []);

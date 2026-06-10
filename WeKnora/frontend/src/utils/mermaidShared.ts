@@ -50,7 +50,7 @@ export const createMermaidCodeRenderer = (idPrefix: string) => {
     let highlightLang: string = lang || 'Code';
     if (highlightLang && hljs.getLanguage(highlightLang)) {
         try {
-            highlighted = hljs.highlight(text, { language: lang }).value;
+        highlighted = hljs.highlight(text, { language: highlightLang }).value;
         } catch {
             let ret = hljs.highlightAuto(text);
             highlighted = ret.value;

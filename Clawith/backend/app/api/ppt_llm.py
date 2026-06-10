@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
+from app.models.agent import Agent
 from app.models.llm import LLMModel
 from app.models.user import User
 from app.services.llm.utils import create_llm_client, get_model_api_key, LLMMessage
@@ -84,6 +85,93 @@ async def get_ppt_user_info(
         "role": current_user.role,
         "tenant_id": str(current_user.tenant_id) if current_user.tenant_id else None,
     }
+
+
+class SSOVerifyRequest(BaseModel):
+    token: str
+
+
+@auth_router.post("/sso/verify")
+async def verify_sso_token(
+    req: SSOVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify a Pro Slides SSO token and return user + session token.
+
+    This replaces the old daemon's /api/sso/verify endpoint.
+    The SSO token (aud='pro-slides', short-lived) is validated,
+    then a longer-lived Clawith access token is minted as the session_token.
+    """
+    try:
+        payload = jose_jwt.decode(
+            req.token,
+            get_settings().JWT_SECRET_KEY,
+            algorithms=[get_settings().JWT_ALGORITHM],
+            audience="pro-slides",
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired SSO token",
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token")
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token")
+
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(
+        select(User).where(User.id == uid).options(selectinload(User.identity))
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    from app.core.security import create_access_token
+
+    session_token = create_access_token(str(user.id), user.role)
+
+    return {
+        "user": {
+            "id": str(user.id),
+            "email": user.email or "",
+            "display_name": user.display_name or "",
+            "role": user.role,
+        },
+        "session_token": session_token,
+    }
+
+
+@auth_router.get("/agent-id")
+async def get_ppt_agent_id(
+    current_user: User = Depends(get_pro_slides_sso_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the PPT Agent ID for this tenant.
+
+    Pro Slides frontend calls this at startup to discover which agent
+    to connect to via WebSocket.
+    """
+    result = await db.execute(
+        select(Agent).where(
+            Agent.name == "PPT Agent",
+            Agent.is_system == True,  # noqa: E712
+            Agent.tenant_id == current_user.tenant_id,
+        ).limit(1)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PPT Agent not found. Please restart Clawith to seed it.",
+        )
+    return {"agent_id": str(agent.id)}
 
 
 # ── Schemas ──────────────────────────────────────────────────

@@ -56,7 +56,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
 
@@ -179,9 +179,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
-	// Create knowledge record
-	logger.Info(ctx, "Creating knowledge record")
+	// Prepare knowledge record
+	logger.Info(ctx, "Preparing knowledge record")
 	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
@@ -199,25 +200,24 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		Metadata:         metadataJSON,
 	}
-	// Save knowledge record to database
-	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
-		return nil, err
-	}
+
 	// Save the file to storage (use KB-level storage engine if configured)
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	fileSvc := s.resolveFileService(ctx, kb)
+	filePath, err := fileSvc.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 	knowledge.FilePath = filePath
 
-	// Update knowledge record with file path
-	logger.Info(ctx, "Updating knowledge record with file path")
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to update knowledge with file path, ID: %s, error: %v", knowledge.ID, err)
+	// Save knowledge record to database after the file is safely stored.
+	logger.Info(ctx, "Saving knowledge record to database")
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
+		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
+			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
+		}
 		return nil, err
 	}
 
@@ -245,7 +245,6 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
 		KnowledgeBaseID:          kbID,
-		RetryLimit:               3,
 		FilePath:                 filePath,
 		FileName:                 safeFilename,
 		FileType:                 getFileType(safeFilename),
@@ -255,7 +254,20 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		Language:                 lang,
 	}
 
-	info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
+		// 即使入队失败，也返回knowledge，因为文件已保存
+		return knowledge, nil
+	}
+
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+	)
+	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		// 即使入队失败，也返回knowledge，因为文件已保存
@@ -314,7 +326,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
 
@@ -414,7 +426,6 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
 		KnowledgeBaseID:          kbID,
-		RetryLimit:               3,
 		URL:                      url,
 		EnableMultimodel:         enableMultimodelValue,
 		EnableQuestionGeneration: enableQuestionGeneration,
@@ -422,7 +433,19 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		Language:                 lang,
 	}
 
-	info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal URL process task payload: %v", err)
+		return knowledge, nil
+	}
+
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+	)
+	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
 		return knowledge, nil
@@ -503,7 +526,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
 
@@ -637,7 +660,19 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		Language:                 lang,
 	}
 
-	info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
+		return knowledge, nil
+	}
+
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config)...,
+	)
+	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		return knowledge, nil
@@ -699,7 +734,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		return nil, err
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
 
@@ -841,7 +876,6 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
 			KnowledgeBaseID:          kbID,
-			RetryLimit:               3,
 			Passages:                 safePassages,
 			EnableMultimodel:         false, // 文本段落不支持多模态
 			EnableQuestionGeneration: enableQuestionGeneration,
@@ -849,7 +883,20 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			Language:                 lang,
 		}
 
-		info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
+		langfuse.InjectTracing(ctx, &taskPayload)
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal passage process task payload: %v", err)
+			// 即使入队失败，也返回knowledge
+			return knowledge, nil
+		}
+
+		task := asynq.NewTask(
+			types.TypeDocumentProcess,
+			payloadBytes,
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+		)
+		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
 			return knowledge, nil

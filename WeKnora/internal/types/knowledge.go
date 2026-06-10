@@ -37,13 +37,30 @@ const (
 	// ParseStatusPending indicates the knowledge is waiting to be processed
 	ParseStatusPending = "pending"
 	// ParseStatusProcessing indicates the knowledge is being processed
+	// (DocReader / chunking / embedding stage).
 	ParseStatusProcessing = "processing"
-	// ParseStatusCompleted indicates the knowledge has been processed successfully
+	// ParseStatusFinalizing indicates the primary parse has finished but
+	// enrichment subtasks (summary, question generation, graph extract)
+	// are still in flight. The user-facing intuition behind this state is
+	// "the document is queryable for vector search but is still spending
+	// resources" — cancel-parse can interrupt enrichment from here.
+	// pending_subtasks_count holds the outstanding subtask count; the
+	// last subtask to finish atomically promotes the row to completed.
+	ParseStatusFinalizing = "finalizing"
+	// ParseStatusCompleted indicates the knowledge has been processed
+	// successfully AND every enrichment subtask has reached a terminal
+	// state. No further resources will be spent on the document until
+	// the user explicitly re-parses it.
 	ParseStatusCompleted = "completed"
 	// ParseStatusFailed indicates the knowledge processing failed
 	ParseStatusFailed = "failed"
 	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
 	ParseStatusDeleting = "deleting"
+	// ParseStatusCancelled indicates parsing was cancelled by the user.
+	// Same short-circuit semantics as ParseStatusDeleting for in-flight and
+	// queued downstream tasks, but the knowledge row and any already-written
+	// chunks/index are kept so the user can re-trigger parsing via reparse.
+	ParseStatusCancelled = "cancelled"
 )
 
 // Summary status constants for async summary generation
@@ -67,6 +84,27 @@ const (
 	ManualKnowledgeStatusPublish  = "publish"
 )
 
+// KnowledgeListFilter aggregates optional filters for listing knowledge entries
+// under a knowledge base. Empty / zero fields mean "no filter on that dimension".
+type KnowledgeListFilter struct {
+	// TagID filters by tag_id when non-empty.
+	TagID string
+	// Keyword performs a LIKE match on file_name / title when non-empty.
+	Keyword string
+	// FileType filters by file_type, or by type for the special values "manual" / "url".
+	FileType string
+	// ParseStatus filters by parse_status when non-empty (e.g. pending, processing, completed, failed).
+	ParseStatus string
+	// Source filters by ingestion channel when non-empty (web, api, feishu, notion, wechat, ...).
+	// The special values "manual" and "url" are routed to the `type` column to match
+	// FileType semantics, so callers can filter "manually created" / "URL imported" entries.
+	Source string
+	// UpdatedFrom, when non-zero, keeps rows with updated_at >= UpdatedFrom.
+	UpdatedFrom time.Time
+	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
+	UpdatedTo time.Time
+}
+
 // Knowledge represents a knowledge entity in the system.
 // It contains metadata about the knowledge source, its processing status,
 // and references to the physical file if applicable.
@@ -86,11 +124,15 @@ type Knowledge struct {
 	// Description of the knowledge
 	Description string `json:"description"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
-	Source string `json:"source"`
+	Source string `json:"source"             gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
 	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge
 	ParseStatus string `json:"parse_status"`
+	// PendingSubtasksCount is the outstanding enrichment subtask count
+	// (summary + question + graph chunks). Only meaningful while
+	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.
+	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
 	// Summary status for async summary generation
 	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
 	// Enable status of the knowledge

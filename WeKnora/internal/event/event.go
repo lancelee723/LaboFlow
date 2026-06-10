@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // EventType represents the type of event in the system
@@ -53,6 +55,10 @@ const (
 	EventAgentReflection  EventType = "reflection"   // Agent 反思
 	EventAgentReferences  EventType = "references"   // 知识引用
 	EventAgentFinalAnswer EventType = "final_answer" // 最终答案
+
+	// MCP tool human approval (issue #1173)
+	EventToolApprovalRequired EventType = "tool_approval_required"
+	EventToolApprovalResolved EventType = "tool_approval_resolved"
 
 	// Error events
 	EventError EventType = "error" // 错误事件
@@ -140,6 +146,11 @@ func (eb *EventBus) Emit(ctx context.Context, event Event) error {
 		for _, handler := range handlers {
 			h := handler // capture loop variable
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Errorf(ctx, "event handler panic recovered (type=%s): %v", event.Type, r)
+					}
+				}()
 				_ = h(ctx, event)
 			}()
 		}
@@ -182,6 +193,11 @@ func (eb *EventBus) EmitAndWait(ctx context.Context, event Event) error {
 
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errChan <- fmt.Errorf("event handler panic (type=%s): %v", event.Type, r)
+				}
+			}()
 			if err := h(ctx, event); err != nil {
 				errChan <- err
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -63,6 +62,11 @@ type Message struct {
 	ToolCallID   string               `json:"tool_call_id,omitempty"`  // Tool call ID (for tool role)
 	ToolCalls    []ToolCall           `json:"tool_calls,omitempty"`    // Tool calls (for assistant role)
 	Images       []string             `json:"images,omitempty"`        // Image URLs for multimodal (only for current user message)
+	// ReasoningContent 是 assistant 推理类模型（DeepSeek thinking、小米 MiMo、vLLM reasoning 等）
+	// 上一轮输出的思考内容。部分供应商（MiMo、DeepSeek V3.2/V4 thinking 模式）要求多轮对话中
+	// 把 assistant 的 reasoning_content 原样回传，否则会以 400 拒绝请求；其他不要求的供应商
+	// 会忽略未知字段，无副作用。
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // ToolCall represents a tool call in a message
@@ -145,32 +149,16 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	return wrapChatLangfuse(c, err)
 }
 
-// NewRemoteChat 根据 provider 创建远程聊天实例
+// NewRemoteChat 根据 provider 创建远程聊天实例。
+// Anthropic 走独立的 Messages 协议实现；其余 OpenAI 兼容供应商统一由
+// RemoteAPIChat 处理，provider 特定行为在构造时通过 providerAdapter 解析。
 func NewRemoteChat(config *ChatConfig) (Chat, error) {
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}
-
-	remoteChat, err := NewRemoteAPIChat(config)
-	if err != nil {
-		return nil, err
+	if providerName == provider.ProviderAnthropic {
+		return NewAnthropicChat(config)
 	}
-
-	// Look up provider-specific behavior from spec registry
-	if spec := findProviderSpec(providerName, config.ModelName); spec != nil {
-		if spec.RequestCustomizer != nil {
-			remoteChat.SetRequestCustomizer(spec.RequestCustomizer)
-		}
-		if spec.EndpointCustomizer != nil {
-			remoteChat.SetEndpointCustomizer(spec.EndpointCustomizer)
-		}
-		if spec.HeaderCustomizer != nil {
-			remoteChat.SetHeaderCustomizer(func(req *http.Request, body []byte) error {
-				return spec.HeaderCustomizer(remoteChat, req, body)
-			})
-		}
-	}
-
-	return remoteChat, nil
+	return NewRemoteAPIChat(config)
 }

@@ -30,6 +30,7 @@ const getCategoryLabels = (t: any): Record<string, string> => ({
     custom: t('agent.toolCategories.custom'),
     general: t('agent.toolCategories.general'),
     agentbay: t('agent.toolCategories.agentbay', 'AgentBay'),
+    webbrowser: t('agent.toolCategories.webbrowser', 'Web Browser'),
 });
 
 export default function ToolsManager({ agentId, canManage = false }: { agentId: string; canManage?: boolean }) {

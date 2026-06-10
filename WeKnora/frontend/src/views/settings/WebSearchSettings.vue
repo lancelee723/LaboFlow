@@ -7,46 +7,72 @@
 
     <div class="settings-toolbar">
       <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
-      <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
+      <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
         <template #icon><add-icon /></template>
         {{ t('webSearchSettings.addProvider') }}
       </t-button>
     </div>
 
-    <!-- Provider List -->
+    <!-- Provider List —— 与 ModelSettings 的卡片同形：左侧标识徽章 + 标题 / 副标题 / proxy URL 三段式。
+         不复用 SettingCard 的原因和 Models 一样：每页有微妙不同的右上侧栏需求（这里没有控件，
+         Mcp 有开关），SettingCard 仍服务于其它消费者。 -->
     <div v-if="providerEntities.length > 0" class="provider-grid">
-      <SettingCard
+      <div
         v-for="entity in providerEntities"
         :key="entity.id"
-        :title="entity.name"
-        :description="entity.description || ''"
-        :actions="getProviderOptions(entity)"
-        @action="(value: string) => handleMenuAction({ value }, entity)"
+        class="provider-card"
+        :class="`provider-card--${entity.provider}`"
       >
-        <template #tags>
-          <t-tag theme="primary" size="small" variant="light">
-            {{ entity.provider }}
-          </t-tag>
-          <t-tag v-if="entity.is_default" theme="success" size="small" variant="light">
-            {{ t('webSearchSettings.default') }}
-          </t-tag>
-          <t-tag v-if="isEntityFree(entity)" theme="warning" size="small" variant="light">
-            {{ t('webSearchSettings.free') }}
-          </t-tag>
-        </template>
-        <template #meta>
-          <span v-if="entity.parameters?.proxy_url" class="provider-meta-item" :title="entity.parameters.proxy_url">
-            <t-icon name="internet" size="12px" />
-            <span class="provider-meta-text">{{ entity.parameters.proxy_url }}</span>
-          </span>
-        </template>
-      </SettingCard>
+        <div
+          class="provider-card__badge"
+          :class="badgeClass(entity.provider)"
+          :style="badgeStyle(entity.provider)"
+          :aria-label="entity.provider"
+        >
+          <img
+            v-if="resolveLogo(entity.provider)?.mode === 'color'"
+            :src="resolveLogo(entity.provider)!.url"
+            :alt="entity.provider"
+            class="provider-card__badge-img"
+          />
+          <template v-else-if="!resolveLogo(entity.provider)">
+            {{ providerInitial(entity.provider) }}
+          </template>
+        </div>
+        <div class="provider-card__body">
+          <div class="provider-card__header">
+            <h3 class="provider-card__title" :title="entity.name">{{ entity.name }}</h3>
+            <t-dropdown
+              v-if="getProviderOptions(entity).length > 0"
+              :options="getProviderOptions(entity)"
+              placement="bottom-right"
+              attach="body"
+              trigger="click"
+              @click="(data: any) => handleMenuAction({ value: data.value }, entity)"
+            >
+              <t-button variant="text" shape="square" size="small" class="provider-card__more">
+                <t-icon name="ellipsis" />
+              </t-button>
+            </t-dropdown>
+          </div>
+          <div class="provider-card__subtitle">
+            <span class="provider-card__type">{{ providerTypeLabel(entity.provider) }}</span>
+            <template v-if="entity.description">
+              <span class="provider-card__sep">·</span>
+              <span class="provider-card__desc" :title="entity.description">{{ entity.description }}</span>
+            </template>
+          </div>
+          <div v-if="entity.parameters?.proxy_url" class="provider-card__url" :title="entity.parameters.proxy_url">
+            {{ entity.parameters.proxy_url }}
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Empty State -->
     <div v-else class="empty-state">
       <t-empty :description="t('webSearchSettings.noProvidersDesc')">
-        <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
+        <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
           <template #icon><add-icon /></template>
           {{ t('webSearchSettings.addProvider') }}
         </t-button>
@@ -54,12 +80,9 @@
     </div>
 
     <!-- Add/Edit Drawer -->
-    <SettingDrawer
-      v-model:visible="showAddProviderDialog"
+    <SettingDrawer v-model:visible="showAddProviderDialog"
       :title="editingProvider ? t('webSearchSettings.editProvider') : t('webSearchSettings.addProvider')"
-      :confirm-loading="saving"
-      @confirm="saveProvider"
-    >
+      :confirm-loading="saving" @confirm="saveProvider">
       <t-form ref="formRef" :data="providerForm" label-align="top" class="provider-form">
         <t-form-item :label="t('webSearchSettings.providerTypeLabel')" name="provider">
           <t-select v-model="providerForm.provider" :disabled="!!editingProvider" @change="onProviderTypeChange">
@@ -75,14 +98,16 @@
         </t-form-item>
 
         <t-form-item :label="t('webSearchSettings.providerNameLabel')" name="name">
-          <t-input v-model="providerForm.name" :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
+          <t-input v-model="providerForm.name"
+            :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
         </t-form-item>
 
         <t-form-item :label="t('webSearchSettings.providerDescLabel')" name="description">
           <t-input v-model="providerForm.description" :placeholder="t('webSearchSettings.providerDescPlaceholder')" />
         </t-form-item>
 
-        <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id">
+        <template
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url">
           <div class="form-divider"></div>
 
           <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
@@ -92,23 +117,39 @@
             </a>
           </div>
 
-          <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">
-            <t-input
-              v-model="providerForm.parameters.api_key"
-              type="password"
-              :placeholder="editingProvider ? t('webSearchSettings.apiKeyUnchanged') : t('webSearchSettings.apiKeyPlaceholder')"
-            />
+          <t-form-item v-if="selectedProviderType?.requires_base_url" :label="t('webSearchSettings.baseUrlLabel')"
+            name="parameters.base_url">
+            <t-input v-model="providerForm.parameters.base_url"
+              :placeholder="t('webSearchSettings.baseUrlPlaceholder')" />
           </t-form-item>
-          <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')" name="parameters.engine_id">
+          <!--
+            Edit mode: credential is managed by the shared <CredentialResource>
+            card via the /credentials subresource. Create mode keeps a plain
+            input so the initial api_key flows in with the first POST.
+
+            API key is mandatory for every requires_api_key=true provider
+            (validation in service/web_search_provider.go). The component's
+            "Remove" action is still available because a user might want to
+            rotate via remove + re-add, but in normal use they will use
+            "Replace" instead.
+          -->
+          <div v-if="selectedProviderType?.requires_api_key" class="credential-field">
+            <label class="credential-label">{{ t('webSearchSettings.apiKeyLabel') }}</label>
+            <CredentialResource v-if="editingProvider?.id" :api="credentialApi" :fields="credentialFields"
+              :meta="credentialMeta" />
+            <t-input v-else v-model="providerForm.parameters.api_key" type="password"
+              :placeholder="apiKeyPlaceholder" />
+          </div>
+          <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')"
+            name="parameters.engine_id">
             <t-input v-model="providerForm.parameters.engine_id" :placeholder="t('webSearchSettings.engineIdLabel')" />
           </t-form-item>
         </template>
 
-        <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')" name="parameters.proxy_url">
-          <t-input
-            v-model="providerForm.parameters.proxy_url"
-            :placeholder="t('webSearchSettings.proxyUrlPlaceholder')"
-          />
+        <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')"
+          name="parameters.proxy_url">
+          <t-input v-model="providerForm.parameters.proxy_url"
+            :placeholder="t('webSearchSettings.proxyUrlPlaceholder')" />
           <template #help>
             <span class="switch-help">{{ t('webSearchSettings.proxyUrlHelp') }}</span>
           </template>
@@ -127,13 +168,8 @@
       </t-form>
 
       <template #footer-left>
-        <t-button
-          v-if="selectedProviderType && !isProviderFree(selectedProviderType)"
-          theme="default"
-          variant="outline"
-          :loading="testing"
-          @click="testConnection"
-        >
+        <t-button v-if="selectedProviderType && !isProviderFree(selectedProviderType)" theme="default" variant="outline"
+          :loading="testing" @click="testConnection">
           {{ testing ? t('webSearchSettings.testing') : t('webSearchSettings.testConnection') }}
         </t-button>
       </template>
@@ -153,14 +189,23 @@ import {
   updateWebSearchProvider,
   deleteWebSearchProvider as deleteWebSearchProviderAPI,
   testWebSearchProvider,
+  putWebSearchProviderCredentials,
+  deleteWebSearchProviderCredentialField,
   type WebSearchProviderEntity,
   type WebSearchProviderTypeInfo,
+  type WebSearchCredentialField,
 } from '@/api/web-search-provider'
-import SettingCard from '@/components/settings/SettingCard.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import CredentialResource, {
+  type CredentialFieldDef,
+  type CredentialResourceApi,
+} from '@/components/credentials/CredentialResource.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
+import { useAuthStore } from '@/stores/auth'
+import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
 // ===== State =====
@@ -177,7 +222,7 @@ const providerForm = ref<{
   name: string
   provider: string
   description: string
-  parameters: { api_key?: string; engine_id?: string; proxy_url?: string }
+  parameters: { api_key?: string; engine_id?: string; base_url?: string; proxy_url?: string }
   is_default: boolean
 }>({
   name: '',
@@ -192,13 +237,65 @@ const selectedProviderType = computed(() => {
   return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
 })
 
+// Create-mode placeholder (edit mode replaces the input with
+// <CredentialResource>, which has its own placeholder).
+const apiKeyPlaceholder = computed(() => t('webSearchSettings.apiKeyPlaceholder'))
+
+const credentialFields = computed<CredentialFieldDef<WebSearchCredentialField>[]>(() => [
+  { key: 'api_key', label: t('webSearchSettings.apiKeyLabel') as string },
+])
+
+const credentialApi = computed<CredentialResourceApi<WebSearchCredentialField>>(() => {
+  const id = editingProvider.value?.id ?? ''
+  return {
+    save: async (patch) => {
+      const meta = await putWebSearchProviderCredentials(id, patch)
+      return meta.fields
+    },
+    remove: async (field) => {
+      await deleteWebSearchProviderCredentialField(id, field)
+    },
+  }
+})
+
+// Initial configured? from the main provider response (embedded server-side
+// in dto.WebSearchProviderResponse.Credentials).
+const credentialMeta = computed(() => editingProvider.value?.credentials ?? {
+  api_key: { configured: false },
+})
+
 const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
+  // "Free" here means no upstream-paid credentials are required. Self-hosted
+  // providers (requires_base_url) are still free to use even though they need
+  // an instance URL, so they should keep the free badge.
   return !providerType.requires_api_key && !providerType.requires_engine_id
 }
 
-const isEntityFree = (entity: WebSearchProviderEntity) => {
-  const pt = providerTypes.value.find(p => p.id === entity.provider)
-  return pt ? isProviderFree(pt) : false
+// 卡片首字母徽章。复用 providerType 信息表，让多字节缩写也走同一处。
+const providerInitial = (providerId: string) => {
+  const label = providerTypes.value.find(p => p.id === providerId)?.name || providerId
+  return (label.trim().charAt(0) || '?').toUpperCase()
+}
+
+// 见 VectorStoreSettings 的同名注释：返回 --logo-url 给 ::before 用 mask 渲染。
+const resolveLogo = (providerId: string) => providerLogo('websearch', providerId)
+
+const badgeClass = (providerId: string) => {
+  const m = resolveLogo(providerId)?.mode
+  return {
+    'provider-card__badge--logo': !!m,
+    'provider-card__badge--color': m === 'color',
+    'provider-card__badge--mono': m === 'mono',
+  }
+}
+
+const badgeStyle = (providerId: string): Record<string, string> => {
+  const logo = resolveLogo(providerId)
+  return logo?.mode === 'mono' ? { '--logo-url': `url("${logo.url}")` } : {}
+}
+
+const providerTypeLabel = (providerId: string) => {
+  return providerTypes.value.find(p => p.id === providerId)?.name || providerId
 }
 
 // ===== Methods =====
@@ -244,8 +341,11 @@ const editProvider = (entity: WebSearchProviderEntity) => {
     provider: entity.provider,
     description: entity.description || '',
     parameters: {
+      // Never pre-fill the api_key — even the redacted placeholder from the
+      // server is ignored so that "non-empty means user typed it" holds.
       api_key: '',
       engine_id: entity.parameters?.engine_id || '',
+      base_url: entity.parameters?.base_url || '',
       proxy_url: entity.parameters?.proxy_url || '',
     },
     is_default: entity.is_default || false,
@@ -263,16 +363,24 @@ const saveProvider = async () => {
 
   saving.value = true
   try {
+    // Build the parameters payload. api_key only flows in on initial
+    // create — edit mode commits credentials through <CredentialResource>
+    // (a dedicated PUT /credentials call) before this save runs.
+    const paramsOut: WebSearchProviderEntity['parameters'] = {
+      engine_id: providerForm.value.parameters.engine_id,
+      base_url: providerForm.value.parameters.base_url,
+      proxy_url: providerForm.value.parameters.proxy_url,
+    }
+    if (!editingProvider.value && providerForm.value.parameters.api_key) {
+      paramsOut.api_key = providerForm.value.parameters.api_key
+    }
+
     const data: Partial<WebSearchProviderEntity> = {
       name: providerForm.value.name.trim() || selectedProviderType.value?.name || providerForm.value.provider,
       provider: providerForm.value.provider as any,
       description: providerForm.value.description,
-      parameters: { ...providerForm.value.parameters },
+      parameters: paramsOut,
       is_default: providerForm.value.is_default,
-    }
-
-    if (editingProvider.value && !data.parameters!.api_key) {
-      delete data.parameters!.api_key
     }
 
     if (editingProvider.value) {
@@ -353,6 +461,12 @@ const testExistingConnection = async (entity: WebSearchProviderEntity) => {
 }
 
 const getProviderOptions = (_entity: WebSearchProviderEntity) => {
+  // Web search providers carry external API credentials; the backend
+  // gates every mutation/test behind Admin+ (RegisterWebSearchProviderRoutes).
+  // Hide the action menu entirely for non-Admins so they don't trip 403s.
+  if (!authStore.hasRole('admin')) {
+    return []
+  }
   return [
     { content: t('webSearchSettings.testConnection'), value: 'test' },
     { content: t('common.edit'), value: 'edit' },
@@ -419,22 +533,188 @@ onMounted(async () => {
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
 }
 
-.provider-meta-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  overflow: hidden;
+// 卡片视觉与 ModelSettings 的 model-card 同构（徽章 + 标题 / 副标题 / url 三段式）。
+// 现阶段两份样式各自维护避免过度抽象；如果后续 Mcp / 第四个消费者出现，
+// 再把共用片段抽到 components/settings/ 下的基类。
+.provider-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  min-width: 0;
 
-  .provider-meta-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  &:hover {
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
+}
+
+.provider-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  // 默认色，被 provider 修饰覆盖
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+
+// 真实品牌 logo：白底 + 细边，logo 用 mask-image 染成 currentColor（沿用品牌色）。
+// 多套一层 .provider-card 以胜过 `.provider-card--<id> .provider-card__badge` 的具体规则。
+.provider-card .provider-card__badge--logo {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.provider-card .provider-card__badge--mono::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--logo-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--logo-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.provider-card__badge-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+}
+
+// 各搜索源的徽章配色 —— 不强求与官方 logo 一致，挑同色系低饱和版即可。
+.provider-card--duckduckgo .provider-card__badge {
+  background: rgba(222, 88, 51, 0.12);
+  color: #DE5833;
+}
+.provider-card--bing .provider-card__badge {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.provider-card--google .provider-card__badge {
+  background: rgba(66, 133, 244, 0.12);
+  color: #4285F4;
+}
+.provider-card--tavily .provider-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+.provider-card--baidu .provider-card__badge {
+  background: rgba(225, 38, 38, 0.12);
+  color: #E12626;
+}
+.provider-card--searxng .provider-card__badge {
+  background: rgba(33, 86, 137, 0.12);
+  color: #215689;
+}
+.provider-card--ollama .provider-card__badge {
+  background: rgba(70, 70, 70, 0.12);
+  color: #464646;
+}
+
+.provider-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.provider-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-card__more {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.provider-card:hover .provider-card__more,
+.provider-card:focus-within .provider-card__more {
+  opacity: 1;
+}
+
+.provider-card__subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  min-width: 0;
+}
+
+.provider-card__type {
+  font-weight: 500;
+}
+
+.provider-card__sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.provider-card__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.provider-card__url {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .empty-state {
@@ -459,6 +739,31 @@ onMounted(async () => {
   height: 1px;
   background: var(--td-component-border);
   margin: 20px 0;
+}
+
+/**
+ * Credential field: stacks the label row, password input, and the optional
+ * "Remove this credential" checkbox vertically. Matches the pattern in
+ * McpServiceDialog and ModelEditorDialog so the whole UI reads consistently.
+ */
+.credential-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.credential-label {
+  display: block;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+}
+
+.clear-credential {
+  :deep(.t-checkbox__label) {
+    color: var(--td-error-color);
+    font-size: 13px;
+  }
 }
 
 .credentials-hint {

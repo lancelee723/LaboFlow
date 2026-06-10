@@ -20,10 +20,10 @@ class PlatformService:
 
     async def get_public_base_url(self, db: AsyncSession | None = None, request: Request | None = None) -> str:
         """Resolve the platform's public base URL with priority lookup.
-
+        
         Priority:
         1. Environment variable (PUBLIC_BASE_URL) - from .env or docker
-        2. Incoming request origin, honoring X-Forwarded-* headers from reverse proxies
+        2. Incoming request's base URL (browser address)
         3. Hardcoded fallback (https://try.clawith.ai)
         """
         # 1. Try environment variable
@@ -31,30 +31,29 @@ class PlatformService:
         if env_url:
             return env_url.rstrip("/")
 
-        # 2. Fallback to request, honoring X-Forwarded-* headers so that reverse
-        #    proxy deployments (Docker, nginx, Traefik) return the public URL instead
-        #    of the internal host:port.
+        # 2. Fallback to request (browser address)
         if request:
-            xf_proto = request.headers.get("X-Forwarded-Proto")
-            xf_host = request.headers.get("X-Forwarded-Host")
-            host_header = request.headers.get("Host")
-            scheme = xf_proto or request.url.scheme or "http"
-            authority = xf_host or host_header or str(request.url.hostname) or "localhost"
-            return f"{scheme}://{authority}"
+            # Note: request.base_url might include trailing slash
+            return str(request.base_url).rstrip("/")
 
         # 3. Absolute fallback
         return "https://try.clawith.ai"
 
 
     async def get_tenant_sso_base_url(self, db: AsyncSession, tenant, request: Request | None = None) -> str:
-        """Generate the SSO base URL for a tenant based on IP/Domain logic.
-        
-        Priority:
-        1. Explicit sso_domain stored in tenant record (if present)
-        2. Auto-generated URL based on the unified public_base_url (ENV > Request > Fallback)
-        """
-        if tenant.sso_domain:
+        """Generate the SSO base URL for a tenant based on IP/Domain logic."""
+        # Check if custom domain SSO redirect is enabled globally
+        setting_result = await db.execute(
+            select(SystemSetting).where(SystemSetting.key == "sso_custom_domain_redirect_enabled")
+        )
+        setting_s = setting_result.scalar_one_or_none()
+        sso_redirect_enabled = setting_s.value.get("enabled", True) if setting_s else True
+
+        if sso_redirect_enabled and tenant.sso_domain:
             return tenant.sso_domain.rstrip("/")
+
+        if not sso_redirect_enabled:
+            return await self.get_public_base_url(db, request)
 
         base_url = await self.get_public_base_url(db, request)
         

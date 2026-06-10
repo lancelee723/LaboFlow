@@ -68,7 +68,8 @@ const emit = defineEmits<{
 }>()
 
 const uiStore = useUIStore()
-const localProvider = ref(props.storageProvider || 'local')
+// Keep empty until tenant default_provider is loaded — do not pre-fill 'local'.
+const localProvider = ref(props.storageProvider)
 const loading = ref(true)
 const engineStatus = ref<StorageEngineStatusItem[]>([])
 const defaultProvider = ref('local')
@@ -139,6 +140,14 @@ const engineOptions = computed(() => {
       available: statusMap.ks3,
       disabled: allowedMap.ks3 === false || statusMap.ks3 === false,
     },
+    {
+      value: 'obs',
+      label: t('kbSettings.storage.engineObs'),
+      desc: t('kbSettings.storage.engineObsDesc'),
+      allowed: allowedMap.obs !== false,
+      available: statusMap.obs,
+      disabled: allowedMap.obs === false || statusMap.obs === false,
+    },
   ]
 })
 
@@ -179,10 +188,13 @@ async function load() {
     allowedProviders.value = statusRes?.data?.allowed_providers ?? []
     defaultProvider.value = configRes?.data?.default_provider || 'local'
     const d = configRes?.data
-    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name)
-    if (!localProvider.value || localProvider.value === '') {
+    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name || d?.obs?.bucket_name)
+    const parentUnset = !props.storageProvider
+    if (parentUnset) {
       localProvider.value = defaultProvider.value
       emit('update:storageProvider', localProvider.value)
+    } else {
+      localProvider.value = props.storageProvider
     }
     ensureAllowedProvider()
   } catch {
@@ -192,9 +204,13 @@ async function load() {
   }
 }
 
+// Sync only when parent sets an explicit provider (edit mode). Create mode leaves
+// storageProvider empty until load() applies tenant default_provider.
 watch(() => props.storageProvider, (v) => {
-  localProvider.value = v || defaultProvider.value || 'local'
-}, { immediate: true })
+  if (v) {
+    localProvider.value = v
+  }
+})
 
 onMounted(load)
 </script>

@@ -40,10 +40,11 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		if userIDVal == nil {
 			return nil, werrors.NewForbiddenError("无权访问该知识库")
 		}
-		userID := userIDVal.(string)
+		_ = userIDVal.(string) // userID retained only for legacy log fields
+		callerTenantRole := types.TenantRoleFromContext(ctx)
 
-		// Check if user has at least viewer permission through organization sharing
-		hasPermission, err := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
+		// Check if the caller's tenant has at least viewer permission via org sharing.
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
 		if err != nil || !hasPermission {
 			return nil, werrors.NewForbiddenError("无权访问该知识库")
 		}
@@ -421,8 +422,8 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		oldSimilarQuestionCount := len(oldSimilarQuestions)
 		newSimilarQuestionCount := len(meta.SimilarQuestions)
 		if questionIndexMode == types.FAQQuestionIndexModeSeparate && oldSimilarQuestionCount > newSimilarQuestionCount {
-			tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			retrieveEngine, engineErr := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+			retrieveEngine, engineErr := retriever.CreateRetrieveEngineForKB(
+				ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), kb.VectorStoreID)
 			if engineErr == nil {
 				sourceIDsToDelete := make([]string, 0, oldSimilarQuestionCount-newSimilarQuestionCount)
 				for i := newSimilarQuestionCount; i < oldSimilarQuestionCount; i++ {
@@ -646,8 +647,8 @@ func (s *knowledgeService) UpdateFAQEntryStatus(ctx context.Context,
 
 	// Sync update to retriever engines
 	chunkStatusMap := map[string]bool{chunk.ID: isEnabled}
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
 	if err != nil {
 		return err
 	}
@@ -840,11 +841,8 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 
 	// Sync to retriever engines
 	if len(enabledUpdates) > 0 || len(tagUpdates) > 0 {
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
-		)
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
 		if err != nil {
 			return err
 		}
@@ -902,11 +900,8 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 	}
 
 	// Sync tag update to retriever engines
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-		s.retrieveEngine,
-		tenantInfo.GetEffectiveEngines(),
-	)
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
 	if err != nil {
 		return err
 	}
@@ -1003,11 +998,8 @@ func (s *knowledgeService) UpdateFAQEntryTagBatch(ctx context.Context, kbID stri
 		for _, chunk := range chunksToUpdate {
 			tagUpdates[chunk.ID] = chunk.TagID
 		}
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
-		)
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
 		if err != nil {
 			return err
 		}
@@ -1574,7 +1566,7 @@ func (s *knowledgeService) ensureFAQKnowledge(
 		KnowledgeBaseID:  kb.ID,
 		Type:             types.KnowledgeTypeFAQ,
 		Channel:          types.ChannelWeb,
-		Title:            fmt.Sprintf("%s - FAQ", kb.Name),
+		Title:            buildFAQKnowledgeTitle(kb.Name),
 		Description:      "FAQ 条目容器",
 		Source:           types.KnowledgeTypeFAQ,
 		ParseStatus:      "completed",
@@ -1587,6 +1579,18 @@ func (s *knowledgeService) ensureFAQKnowledge(
 		return nil, err
 	}
 	return knowledge, nil
+}
+
+// buildFAQKnowledgeTitle derives the display title for the FAQ container
+// knowledge. The title is simply the knowledge base name (falling back to "FAQ"
+// when empty) — no suffix is appended, so a KB named "FAQ" stays "FAQ" instead
+// of becoming the redundant "FAQ - FAQ".
+func buildFAQKnowledgeTitle(kbName string) string {
+	name := strings.TrimSpace(kbName)
+	if name == "" {
+		return "FAQ"
+	}
+	return name
 }
 
 func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.KnowledgeBase, tagSeqIDMap map[string]int64) (*types.FAQEntry, error) {

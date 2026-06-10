@@ -647,7 +647,8 @@
         "discovery": "发现",
         "feishu": "飞书",
         "agentbay": "AgentBay",
-        "okr": "OKR"
+        "okr": "OKR",
+        "webbrowser": "网页浏览器"
       },
       "upload": {
         "success": "上传成功",
@@ -747,7 +748,8 @@
       "discovery": "发现",
       "feishu": "飞书",
       "agentbay": "AgentBay",
-      "okr": "OKR"
+      "okr": "OKR",
+      "webbrowser": "网页浏览器"
     },
     "upload": {
       "success": "上传成功",
@@ -1544,12 +1546,6 @@
       "period": "周期",
       "agents": "数字员工",
       "ttl": "TTL",
-      "deleteUser": "删除",
-      "deleteUserTitle": "删除用户",
-      "deleteUserConfirmLabel": "输入用户名以确认",
-      "deleteUserConfirm": "此操作将从本组织中永久移除 {{name}}，且无法撤销。",
-      "deleteUserSuccess": "用户已成功移除",
-      "deleteUserError": "移除用户失败",
       "edit": "编辑",
       "clickToSort": "点击切换排序",
       "platformAdmin": "平台\n管理员",

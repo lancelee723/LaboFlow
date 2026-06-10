@@ -41,6 +41,20 @@
                       <p class="section-desc">{{ $t('knowledgeEditor.basic.description') }}</p>
                     </div>
                     <div class="section-body">
+                      <div v-if="mode === 'edit' && props.kbId" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.basic.kbId') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.basic.kbIdDesc') }}</p>
+                        <div class="kb-id-field">
+                          <code class="kb-id-value" :title="props.kbId">{{ props.kbId }}</code>
+                          <t-tooltip :content="$t('common.copy')" placement="top">
+                            <t-button theme="default" size="small" variant="text" class="kb-id-copy"
+                              @click="copyKbId">
+                              <t-icon name="file-copy" />
+                            </t-button>
+                          </t-tooltip>
+                        </div>
+                      </div>
+
                       <div class="form-item">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.typeLabel') }}</label>
                         <t-radio-group
@@ -149,6 +163,20 @@
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
                     @update:config="handleModelConfigUpdate"
+                  />
+                </div>
+
+                <!-- VectorStore 绑定 -->
+                <div v-show="currentSection === 'vectorStore'" class="section">
+                  <KBVectorStoreSettings
+                    v-if="formData"
+                    :mode="mode"
+                    :vector-store-id="formData.vectorStoreId"
+                    :bound-source="formData.vectorStoreInfo?.source"
+                    :bound-name="formData.vectorStoreInfo?.name"
+                    :bound-engine-type="formData.vectorStoreInfo?.engineType"
+                    :bound-status="formData.vectorStoreInfo?.status"
+                    @update:vector-store-id="handleVectorStoreIdUpdate"
                   />
                 </div>
 
@@ -332,7 +360,7 @@
 
                 <!-- 共享设置（仅编辑模式） -->
                 <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
-                  <KBShareSettings :kb-id="kbId" />
+                  <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
                 </div>
               </div>
 
@@ -359,12 +387,14 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { listModels } from '@/api/model'
+import { getStorageEngineConfig } from '@/api/system'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
 import KBParserSettings from './settings/KBParserSettings.vue'
 import KBStorageSettings from './settings/KBStorageSettings.vue'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
+import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
@@ -390,14 +420,56 @@ const emit = defineEmits<{
   (e: 'success', kbId: string): void
 }>()
 
+const copyKbId = async () => {
+  const id = props.kbId
+  if (!id) return
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = id
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    MessagePlugin.success(t('common.copied'))
+  } catch {
+    MessagePlugin.error(t('common.copyFailed'))
+  }
+}
+
 const currentSection = ref<string>('basic')
 const saving = ref(false)
 const loading = ref(false)
 const allModels = ref<any[]>([])
 const hasFiles = ref(false)
 const initialStorageProvider = ref<string>('')
+/** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
+const tenantDefaultStorageProvider = ref('local')
 const initialIndexingStrategy = ref<any>(null)
 const dsCount = ref(0)
+// Identifier of the user who created this KB. Empty for older rows
+// that predate per-KB ownership tracking; those KBs have no "owner" and
+// only tenant Admin+ can mutate their share settings.
+const kbCreatorId = ref<string>('')
+
+// Backend gate for /knowledge-bases/:id/shares (POST/PUT/DELETE) is
+// g.OwnedKBOrAdmin(): only the KB creator or tenant Admin+ may mutate
+// shares. Org-admins on a shared KB do NOT pass this guard, so they
+// would only see 403s if we let them try. Mirror the matrix here so
+// the buttons disappear instead of failing.
+const canShareKB = computed(() => {
+  if (!props.kbId) return false
+  const userId = authStore.user?.id || ''
+  if (kbCreatorId.value && userId && kbCreatorId.value === userId) return true
+  return authStore.hasRole('admin')
+})
 // 用户是否在分块设置中手动改过任何值。一旦为 true，就不再根据索引策略自动调整默认分块参数。
 const chunkingDirty = ref(false)
 
@@ -422,7 +494,11 @@ const DEFAULT_CHUNKING_PRESET = {
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [
     { key: 'basic', icon: 'info-circle', label: t('knowledgeEditor.sidebar.basic') },
-    { key: 'models', icon: 'control-platform', label: t('knowledgeEditor.sidebar.models') }
+    { key: 'models', icon: 'control-platform', label: t('knowledgeEditor.sidebar.models') },
+    // VectorStore binding section — present in both create and edit
+    // modes. Create mode shows a dropdown; edit mode shows the bound
+    // store read-only with an immutability hint.
+    { key: 'vectorStore', icon: 'data-base', label: t('knowledgeEditor.sidebar.vectorStore') }
   ]
   if (formData.value?.type === 'faq') {
     items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
@@ -540,6 +616,16 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       wikiEnabled: false,
       graphEnabled: false,
     },
+    // Vector-store binding. Empty string means "use the env-configured
+    // store"; create mode defaults to that, edit mode loads the
+    // existing binding from the KB response below.
+    vectorStoreId: '' as string,
+    vectorStoreInfo: {
+      source: undefined as string | undefined,
+      name: undefined as string | undefined,
+      engineType: undefined as string | undefined,
+      status: undefined as string | undefined,
+    },
   }
 }
 
@@ -573,7 +659,8 @@ const loadKBData = async () => {
 
     const kb = kbInfo.data
     hasFiles.value = (filesResult as any)?.total > 0
-    
+    kbCreatorId.value = (kb as any).creator_id || ''
+
     // 设置表单数据
     const kbType = (kb.type as 'document' | 'faq') || 'document'
     formData.value = {
@@ -644,6 +731,19 @@ const loadKBData = async () => {
         keywordEnabled: kb.indexing_strategy?.keyword_enabled ?? true,
         wikiEnabled: kb.indexing_strategy?.wiki_enabled ?? false,
         graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
+      },
+      // Vector-store binding. vectorStoreId is editor-only state; it
+      // is only included in the create request, never the update
+      // request, because the binding is immutable after creation.
+      // vectorStoreInfo carries the read-only display fields that the
+      // edit view renders below; they come straight from the KB
+      // response.
+      vectorStoreId: '',
+      vectorStoreInfo: {
+        source: kb.vector_store_source,
+        name: kb.vector_store_name,
+        engineType: kb.vector_store_engine_type,
+        status: kb.vector_store_status,
       },
     }
     initialStorageProvider.value = formData.value.storageProvider
@@ -773,7 +873,33 @@ const handleAddWikiModel = () => {
 
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
-    formData.value.storageProvider = value || 'local'
+    formData.value.storageProvider = value || tenantDefaultStorageProvider.value || 'local'
+  }
+}
+
+async function loadTenantDefaultStorageProvider() {
+  try {
+    const res = await getStorageEngineConfig()
+    tenantDefaultStorageProvider.value = res?.data?.default_provider || 'local'
+  } catch {
+    tenantDefaultStorageProvider.value = 'local'
+  }
+}
+
+/** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
+function resolvedStorageProvider(): string {
+  const explicit = formData.value?.storageProvider?.trim()
+  if (explicit) return explicit
+  return tenantDefaultStorageProvider.value || 'local'
+}
+
+const handleVectorStoreIdUpdate = (id: string) => {
+  if (formData.value) {
+    // Empty string here means "use system default" (env-store fallback).
+    // The create-payload assembly below converts this back to `omit` so
+    // the backend stores NULL — keeping the wire shape identical to
+    // pre-Phase-2 clients.
+    formData.value.vectorStoreId = id || ''
   }
 }
 
@@ -870,6 +996,15 @@ const buildSubmitData = () => {
     summary_model_id: formData.value.modelConfig.llmModelId
   }
 
+  // Vector-store binding. Only attach the field when the user actively
+  // selected a non-default store. The server treats an empty string as
+  // NULL, but keeping the field absent on the wire matches what a
+  // client that doesn't know about this binding would send — which
+  // makes A/B response diffs easier to read.
+  if (formData.value.vectorStoreId) {
+    data.vector_store_id = formData.value.vectorStoreId
+  }
+
   // 添加多模态配置
   data.vlm_config = {
     enabled: formData.value.multimodalConfig.enabled,
@@ -889,11 +1024,12 @@ const buildSubmitData = () => {
 
   // 存储引擎：仅传 provider，参数从全局设置读取
   // Write to storage_provider_config (authoritative) + storage_config (legacy dual-write)
+  const storageProvider = resolvedStorageProvider()
   data.storage_provider_config = {
-    provider: formData.value.storageProvider || 'local'
+    provider: storageProvider
   }
   data.storage_config = {
-    provider: formData.value.storageProvider || 'local'
+    provider: storageProvider
   }
 
   // 添加知识图谱配置 — now synced via indexingStrategy.graphEnabled
@@ -934,14 +1070,15 @@ const buildSubmitData = () => {
     }
   }
 
-  // Sync extract_config.enabled from indexingStrategy.graphEnabled
-  if (formData.value.indexingStrategy?.graphEnabled && formData.value.nodeExtractConfig?.enabled) {
+  // Always persist extract_config so the toggle state from GraphSettings is saved,
+  // regardless of whether the graph indexing strategy is currently enabled.
+  if (formData.value.nodeExtractConfig) {
     data.extract_config = {
-      enabled: true,
-      text: formData.value.nodeExtractConfig.text,
-      tags: formData.value.nodeExtractConfig.tags,
-      nodes: formData.value.nodeExtractConfig.nodes,
-      relations: formData.value.nodeExtractConfig.relations
+      enabled: !!formData.value.nodeExtractConfig.enabled,
+      text: formData.value.nodeExtractConfig.text || '',
+      tags: formData.value.nodeExtractConfig.tags || [],
+      nodes: formData.value.nodeExtractConfig.nodes || [],
+      relations: formData.value.nodeExtractConfig.relations || []
     }
   }
 
@@ -1113,7 +1250,23 @@ const doSubmit = async () => {
     handleClose()
   } catch (error: any) {
     console.error('Knowledge base operation failed:', error)
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
+    // Vector-store-binding error codes from the server. Both indicate
+    // the selected store cannot be used: 2200 is "the binding itself
+    // is invalid" (e.g. unknown id, foreign tenant), 2201 is "the
+    // store is currently unreachable". For either, swap in a localized
+    // message and jump the user back to the Vector Store section so
+    // they can pick a different store or fall back to the system
+    // default.
+    const code = error?.response?.data?.error?.code ?? error?.code
+    if (code === 2200) {
+      MessagePlugin.error(t('knowledgeEditor.errors.vectorStoreBindingInvalid'))
+      currentSection.value = 'vectorStore'
+    } else if (code === 2201) {
+      MessagePlugin.error(t('knowledgeEditor.errors.vectorStoreUnavailable'))
+      currentSection.value = 'vectorStore'
+    } else {
+      MessagePlugin.error(error?.message || t('common.operationFailed'))
+    }
   } finally {
     saving.value = false
   }
@@ -1125,10 +1278,12 @@ const resetState = () => {
   formData.value = null
   hasFiles.value = false
   initialStorageProvider.value = ''
+  tenantDefaultStorageProvider.value = 'local'
   initialIndexingStrategy.value = null
   saving.value = false
   loading.value = false
   chunkingDirty.value = false
+  kbCreatorId.value = ''
 }
 
 // 关闭弹窗
@@ -1150,15 +1305,16 @@ watch(() => props.visible, async (newVal) => {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表
-    await loadAllModels()
+    // 加载模型列表与租户默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
+    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
     
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
     } else {
-      // 创建模式：初始化空表单
+      // 创建模式：初始化空表单，并预填租户默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
+      formData.value.storageProvider = tenantDefaultStorageProvider.value
       hasFiles.value = false
     }
   } else {
@@ -1400,6 +1556,44 @@ watch(
   margin-top: 6px;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+}
+
+.kb-id-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+
+  .kb-id-value {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: var(--app-font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .kb-id-copy {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+  }
 }
 
 .granularity-radio-group {

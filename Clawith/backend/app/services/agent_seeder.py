@@ -168,6 +168,39 @@ When a daily or weekly report is triggered:
 #   biweekly_okr_checkin → bi-weekly check-in
 #   monthly_okr_report  → monthly summary
 
+# PPT Agent persona — hidden system agent that powers Pro Slides.
+PPT_AGENT_SOUL = """# Personality
+
+I am the PPT Agent, a professional presentation designer powered by AI.
+
+## Role
+I create high-quality, visually stunning presentation decks on any topic. My workflow:
+1. Ask the user for their preferred style, mood, and color palette via direction cards
+2. Generate a complete slide deck as self-contained SVG
+3. Iterate and refine based on user feedback
+4. Export to PPTX when requested
+
+## Core Traits
+- **Design-Obsessed**: Every slide must be visually compelling — clean layout, proper typography hierarchy, consistent color palette
+- **Structured**: I follow a strict slide order: Cover → Agenda → Content → Closing
+- **Collaborative**: I always present direction choices first so the user's aesthetic preferences guide the design
+- **Iterative**: I happily refine slides until the user is satisfied
+
+## Work Style
+- Always call `ask_direction` first to present style/mood/palette options
+- Call `generate_slides` with complete deck (title, palette, fonts, all slides as SVG)
+- Each slide is `<svg viewBox="0 0 1280 720">` — self-contained, no external dependencies
+- Maintain consistent palette and typography across ALL slides
+- Minimum 4.5:1 contrast ratio for text readability
+- When iterating, regenerate only affected slides but keep the same deck palette/fonts
+
+## Communication Style
+- Professional and concise
+- I respond in whatever language the user speaks
+- I describe what I'm creating before generating
+- I ask clarifying questions about content, audience, and purpose before designing
+"""
+
 # ── Skill assignments (by folder_name) ──────────────────────────
 
 MORTY_SKILLS = [
@@ -367,6 +400,183 @@ async def seed_default_agents():
         encoding="utf-8",
     )
     logger.info(f"[AgentSeeder] Wrote seed marker to {seed_marker}")
+
+
+PPT_SKILLS = [
+    "ppt-master",
+    # defaults (auto-included): skill-creator
+]
+
+
+async def seed_ppt_agent():
+    """Create the PPT Agent if it does not exist yet.
+
+    This seeder is independent and uses its own idempotency key
+    ('ppt_agent') in the .seeded marker file.
+
+    The PPT Agent is a hidden system agent (access_mode=private) that
+    powers Pro Slides:
+    - Receives presentation requests from Pro Slides frontend via WebSocket
+    - Uses ask_direction to present style/mood/palette choices
+    - Uses generate_slides to output self-contained SVG slide decks
+    - Uses export_pptx for PPTX export (future)
+    """
+    seed_marker = Path(settings.AGENT_DATA_DIR) / ".seeded"
+
+    # Check if PPT Agent has already been seeded
+    if seed_marker.exists():
+        marker_content = seed_marker.read_text(encoding="utf-8")
+        if "ppt_agent=" in marker_content:
+            logger.info("[AgentSeeder] PPT Agent already seeded, skipping")
+            return
+
+    async with async_session() as db:
+        # Abort if a non-stopped PPT Agent already exists in the DB.
+        existing = await db.execute(
+            select(Agent)
+            .where(
+                Agent.name == "PPT Agent",
+                Agent.is_system == True,  # noqa: E712
+                Agent.status != "stopped",
+            )
+            .limit(1)
+        )
+        if existing.scalar_one_or_none():
+            logger.info("[AgentSeeder] PPT Agent already exists in DB, skipping")
+            _append_seed_marker(seed_marker, "ppt_agent=existing")
+            return
+
+        # Get platform admin as creator
+        admin_result = await db.execute(
+            select(User).where(User.role == "platform_admin").limit(1)
+        )
+        admin = admin_result.scalar_one_or_none()
+        if not admin:
+            logger.warning("[AgentSeeder] No platform admin, skipping PPT Agent creation")
+            return
+
+        # Create PPT Agent — hidden from regular users
+        ppt_agent = Agent(
+            name="PPT Agent",
+            role_description=(
+                "Professional presentation designer — creates visually stunning "
+                "SVG slide decks with real-time rendering via direction cards and iterative refinement"
+            ),
+            bio=(
+                "I am the PPT Agent. I create professional presentations by first asking "
+                "your style preferences, then generating complete slide decks as SVG for "
+                "real-time browser rendering. I iterate until you're satisfied."
+            ),
+            avatar_url="",
+            creator_id=admin.id,
+            tenant_id=admin.tenant_id,
+            status="idle",
+            # System agent: protected from user deletion
+            is_system=True,
+            # Hidden from regular users — only accessible via Pro Slides frontend
+            access_mode="private",
+            # No heartbeat — PPT Agent is on-demand only
+            heartbeat_enabled=False,
+        )
+
+        try:
+            db.add(ppt_agent)
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            logger.info("[AgentSeeder] PPT Agent was created concurrently, skipping")
+            _append_seed_marker(seed_marker, "ppt_agent=existing")
+            return
+
+        # ── Participant identity ──
+        from app.models.participant import Participant
+        db.add(Participant(
+            type="agent",
+            ref_id=ppt_agent.id,
+            display_name=ppt_agent.name,
+            avatar_url=ppt_agent.avatar_url,
+        ))
+        await db.flush()
+
+        # ── Permission: company-wide 'use' access ──
+        db.add(AgentPermission(agent_id=ppt_agent.id, scope_type="company", access_level="use"))
+
+        # ── Workspace setup ──
+        template_dir = Path(settings.AGENT_TEMPLATE_DIR)
+        agent_dir = Path(settings.AGENT_DATA_DIR) / str(ppt_agent.id)
+
+        if template_dir.exists():
+            shutil.copytree(
+                str(template_dir),
+                str(agent_dir),
+                ignore=shutil.ignore_patterns("tasks.json", "todo.json", "enterprise_info"),
+            )
+        else:
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            (agent_dir / "skills").mkdir(exist_ok=True)
+            (agent_dir / "workspace").mkdir(exist_ok=True)
+            (agent_dir / "memory").mkdir(exist_ok=True)
+
+        # Write PPT Agent soul
+        (agent_dir / "soul.md").write_text(PPT_AGENT_SOUL.strip() + "\n", encoding="utf-8")
+
+        # Ensure memory.md exists
+        mem_path = agent_dir / "memory" / "memory.md"
+        if not mem_path.exists():
+            mem_path.write_text("# Memory\n\n_Presentation design knowledge and experience._\n", encoding="utf-8")
+
+        # Write relationships.md — PPT Agent has no colleagues
+        (agent_dir / "relationships.md").write_text(
+            "# Relationships\n\n_PPT Agent operates independently, accessible via Pro Slides frontend._\n",
+            encoding="utf-8",
+        )
+
+        # Stamp state.json if template provides one
+        state_path = agent_dir / "state.json"
+        if state_path.exists():
+            import json as _json
+            state = _json.loads(state_path.read_text())
+            state["agent_id"] = str(ppt_agent.id)
+            state["name"] = ppt_agent.name
+            state_path.write_text(_json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # ── Assign skills ──
+        all_skills_result = await db.execute(
+            select(Skill).options(selectinload(Skill.files))
+        )
+        all_skills = {s.folder_name: s for s in all_skills_result.scalars().all()}
+
+        skills_dir = agent_dir / "skills"
+        folders_to_copy = set(PPT_SKILLS)
+        for fname, skill in all_skills.items():
+            if skill.is_default:
+                folders_to_copy.add(fname)
+
+        for fname in folders_to_copy:
+            skill = all_skills.get(fname)
+            if not skill:
+                logger.warning(f"[AgentSeeder] Skill '{fname}' not found in DB, skipping")
+                continue
+            skill_folder = skills_dir / skill.folder_name
+            skill_folder.mkdir(parents=True, exist_ok=True)
+            for sf in skill.files:
+                file_path = skill_folder / sf.path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(sf.content, encoding="utf-8")
+
+        # ── Assign default tools ──
+        default_tools_result = await db.execute(
+            select(Tool).where(Tool.is_default == True)  # noqa: E712
+        )
+        for tool in default_tools_result.scalars().all():
+            db.add(AgentTool(agent_id=ppt_agent.id, tool_id=tool.id, enabled=True))
+
+        await db.commit()
+        logger.info(f"[AgentSeeder] Created PPT Agent ({ppt_agent.id})")
+
+    # Update seed marker
+    _append_seed_marker(seed_marker, f"ppt_agent={ppt_agent.id}")
+    logger.info(f"[AgentSeeder] PPT Agent seeded, id={ppt_agent.id}")
 
 
 async def seed_okr_agent():

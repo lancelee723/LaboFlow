@@ -373,6 +373,7 @@ export type FocusApiItem = {
     id: string;
     agent_id: string;
     key: string;
+    title?: string | null;
     description: string;
     status: 'in_progress' | 'completed';
     kind: 'normal' | 'system';

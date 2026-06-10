@@ -1,7 +1,6 @@
 """Agent relationship management API — human + agent-to-agent."""
 
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -22,11 +21,11 @@ from app.core.security import get_current_user
 from app.database import get_db
 from app.models.agent import Agent
 from app.models.org import AgentRelationship, AgentAgentRelationship, OrgMember
+from app.models.user import Identity, User
 from app.services.access_relationships import ensure_access_granted_platform_relationships
 from app.services.org_sync_adapter import derive_member_department_paths
-from app.models.user import User
+from app.services.storage import store_agent_bytes
 
-settings = get_settings()
 router = APIRouter(prefix="/agents/{agent_id}/relationships", tags=["relationships"])
 
 RELATION_LABELS = {
@@ -563,80 +562,5 @@ async def delete_agent_relationship(
 # ─── relationships.md Generation ──────────────────────
 
 async def _regenerate_relationships_file(db: AsyncSession, agent_id: uuid.UUID):
-    """Regenerate relationships.md with both human and agent relationships."""
-    from app.models.identity import IdentityProvider
-    # Load human relationships with provider name
-    h_result = await db.execute(
-        select(
-            AgentRelationship,
-            IdentityProvider.name.label("provider_name"),
-            IdentityProvider.provider_type.label("provider_type"),
-        )
-        .outerjoin(OrgMember, AgentRelationship.member_id == OrgMember.id)
-        .outerjoin(IdentityProvider, OrgMember.provider_id == IdentityProvider.id)
-        .where(AgentRelationship.agent_id == agent_id)
-        .options(selectinload(AgentRelationship.member))
-    )
-    human_rows = []
-    for rel, provider_name, provider_type in h_result.all():
-        status_info = await evaluate_human_relationship_status(db, rel)
-        if status_info["access_status"] == "active":
-            human_rows.append((rel, _display_provider_name(provider_name, provider_type)))
-
-    # Load agent relationships
-    a_result = await db.execute(
-        select(AgentAgentRelationship)
-        .where(AgentAgentRelationship.agent_id == agent_id)
-        .options(selectinload(AgentAgentRelationship.target_agent))
-    )
-    agent_rels = []
-    for rel in a_result.scalars().all():
-        status_info = await evaluate_agent_relationship_status(db, rel)
-        if status_info["access_status"] == "active":
-            agent_rels.append(rel)
-
-    ws = Path(settings.AGENT_DATA_DIR) / str(agent_id)
-    ws.mkdir(parents=True, exist_ok=True)
-
-    if not human_rows and not agent_rels:
-        (ws / "relationships.md").write_text("# 关系网络\n\n_暂无配置的关系。_\n", encoding="utf-8")
-        return
-
-    lines = ["# 关系网络\n"]
-
-    # Human relationships
-    if human_rows:
-        lines.append("## 👤 人类同事\n")
-        for r, provider_name in human_rows:
-            m = r.member
-            if not m:
-                continue
-            label = RELATION_LABELS.get(r.relation, r.relation)
-            source = f"（通过 {provider_name} 同步）" if provider_name else ""
-            lines.append(f"### {m.name} — {m.title or '未设置职位'}{source}")
-            lines.append(f"- 部门：{m.department_path or '未设置'}")
-            lines.append(f"- 关系：{label}")
-            if m.open_id:
-                lines.append(f"- OpenID：{m.open_id}")
-            if m.email:
-                lines.append(f"- 邮箱：{m.email}")
-            if r.description:
-                lines.append(f"- {r.description}")
-            lines.append("")
-
-    # Agent relationships
-    if agent_rels:
-        lines.append("## 🤖 数字员工同事\n")
-        for r in agent_rels:
-            a = r.target_agent
-            if not a:
-                continue
-            label = AGENT_RELATION_LABELS.get(r.relation, r.relation)
-            lines.append(f"### {a.name} — {a.role_description or '数字员工'}")
-            lines.append(f"- 关系：{label}")
-            lines.append(f"- 可以用 send_message_to_agent 工具给 {a.name} 发消息协作")
-            if r.description:
-                lines.append(f"- {r.description}")
-            lines.append("")
-
-    (ws / "relationships.md").write_text("\n".join(lines), encoding="utf-8")
+    """Obsolete. relationships.md is no longer generated as relationships are read directly from the database."""
+    pass

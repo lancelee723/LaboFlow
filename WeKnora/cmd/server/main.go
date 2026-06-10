@@ -47,9 +47,20 @@ func main() {
 	} else {
 		gin.SetMode(gin.DebugMode)
 	}
+	// Mute Gin's per-route registration spam (one line per route × ~150
+	// routes) — replaced by a single summary printed after router build.
+	runtime.SilenceGinRouteSpam()
+	// Print the env banner before container build so operators see what
+	// config landed even when DB / storage init fails.
+	runtime.LogStartupEnv(context.Background())
+	runtime.MarkServerStarted()
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
+
+	// One-shot bootstrap hooks (e.g. promote env-named user to system
+	// admin). Best-effort: never aborts startup — see bootstrap.go.
+	runStartupBootstrap(c)
 
 	// Run application
 	err := c.Invoke(func(
@@ -57,6 +68,7 @@ func main() {
 		router *gin.Engine,
 		tracer *tracing.Tracer,
 		resourceCleaner interfaces.ResourceCleaner,
+		systemSettingSvc interfaces.SystemSettingService,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -70,6 +82,15 @@ func main() {
 		}
 
 		ctx, done := context.WithCancel(context.Background())
+
+		// Start the system_settings pubsub subscriber. Runs in its own
+		// goroutine and exits when ctx is cancelled at shutdown. Best-
+		// effort: an error here only warns (Redis may legitimately be
+		// disabled in lite-mode deployments — the service no-ops in
+		// that case anyway).
+		if err := systemSettingSvc.SubscribeRedis(ctx); err != nil {
+			logger.Warnf(ctx, "[system_settings] subscribe failed: %v", err)
+		}
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
@@ -109,6 +130,7 @@ func main() {
 			done()
 		}()
 
+		runtime.LogGinRouteCount(context.Background())
 		logger.Infof(context.Background(), "Server is running at %s", addr)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			return fmt.Errorf("server error: %v", err)

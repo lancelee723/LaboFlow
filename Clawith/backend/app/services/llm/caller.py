@@ -20,9 +20,19 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.config import get_settings
 from app.database import async_session
-from app.services.agent_tools import AGENT_TOOLS, execute_tool, get_agent_tools_for_llm
+
+# NOTE: agent_tools imports are deferred to function bodies to avoid circular
+# import: agent_tools → llm.finish → llm/__init__ → caller → agent_tools
+
+async def get_agent_tools_for_llm(*args, **kwargs):
+    from app.services.agent_tools import get_agent_tools_for_llm as _impl
+    return await _impl(*args, **kwargs)
+
+async def execute_tool(*args, **kwargs):
+    from app.services.agent_tools import execute_tool as _impl
+    return await _impl(*args, **kwargs)
 from app.services.token_tracker import (
     TokenUsage,
     record_token_usage,
@@ -187,11 +197,17 @@ async def _get_user_name(user_id) -> str | None:
         return None
     try:
         from app.models.user import User as _UserModel
+        from app.models.agent import Agent as _AgentModel
         async with async_session() as _udb:
             _ur = await _udb.execute(select(_UserModel).where(_UserModel.id == user_id))
             _u = _ur.scalar_one_or_none()
             if _u:
                 return _u.display_name or _u.username
+            # Check Agent name fallback
+            _ar = await _udb.execute(select(_AgentModel).where(_AgentModel.id == user_id))
+            _a = _ar.scalar_one_or_none()
+            if _a:
+                return _a.name
     except Exception:
         pass
     return None
@@ -274,15 +290,6 @@ def _tool_not_enabled_message(tool_name: str) -> str:
     )
 
 
-class AskDirectionNeeded(Exception):
-    """Raised when the agent asks the user for direction and needs to pause
-    the LLM tool-calling loop while waiting for the user's choice."""
-
-    def __init__(self, direction_data: str):
-        self.direction_data = direction_data
-        super().__init__("Agent needs user direction input")
-
-
 async def _process_tool_call(
     tc: dict,
     api_messages: list,
@@ -311,27 +318,27 @@ async def _process_tool_call(
     if not should_execute:
         return error_msg
 
-    if tool_name not in allowed_tool_names:
-        result = _tool_not_enabled_message(tool_name)
-        logger.warning(f"[LLM] Blocked disabled tool call: {tool_name} agent_id={agent_id}")
-        if on_tool_call:
-            try:
-                await on_tool_call({
-                    "name": tool_name,
-                    "call_id": tc.get("id", ""),
-                    "args": args,
-                    "status": "done",
-                    "result": result,
-                    "reasoning_content": full_reasoning_content
-                })
-            except Exception:
-                pass
-        api_messages.append(LLMMessage(
-            role="tool",
-            tool_call_id=tc["id"],
-            content=result,
-        ))
-        return ""
+    # if tool_name not in allowed_tool_names:
+    #     result = _tool_not_enabled_message(tool_name)
+    #     logger.warning(f"[LLM] Blocked disabled tool call: {tool_name} agent_id={agent_id}")
+    #     if on_tool_call:
+    #         try:
+    #             await on_tool_call({
+    #                 "name": tool_name,
+    #                 "call_id": tc.get("id", ""),
+    #                 "args": args,
+    #                 "status": "done",
+    #                 "result": result,
+    #                 "reasoning_content": full_reasoning_content
+    #             })
+    #         except Exception:
+    #             pass
+    #     api_messages.append(LLMMessage(
+    #         role="tool",
+    #         tool_call_id=tc["id"],
+    #         content=result,
+    #     ))
+    #     return ""
 
     # Notify client about tool call (in-progress)
     if on_tool_call:
@@ -357,31 +364,13 @@ async def _process_tool_call(
     )
     logger.debug(f"[LLM] Tool result: {result[:100]}")
 
-    # ── ask_direction: pause loop and wait for user direction input ──
-    if tool_name == "ask_direction":
-        # Send the tool_call event to the client before raising
-        if on_tool_call:
-            try:
-                await on_tool_call({
-                    "name": tool_name,
-                    "call_id": tc.get("id", ""),
-                    "args": args,
-                    "status": "done",
-                    "result": result,
-                    "reasoning_content": full_reasoning_content,
-                })
-            except Exception:
-                pass
-        raise AskDirectionNeeded(result)
-
     # ── Vision injection for screenshot tools ──
     tool_content: str | list = str(result)
     if supports_vision and agent_id:
         try:
             from app.services.vision_inject import try_inject_screenshot_vision
-            from app.config import get_settings
             settings = get_settings()
-            ws_path = Path(settings.AGENT_DATA_DIR) / str(agent_id)
+            ws_path = Path(settings.STORAGE_LOCAL_ROOT or settings.AGENT_DATA_DIR) / str(agent_id)
             vision_content = try_inject_screenshot_vision(tool_name, str(result), ws_path)
             if vision_content:
                 tool_content = vision_content
@@ -432,6 +421,7 @@ async def call_llm(
     max_tool_rounds_override: int | None = None,
     skip_tools: bool = False,
     on_code_output=None,
+    current_user_name_override: str | None = None,
 ) -> str:
     """Call LLM via unified client with function-calling tool loop."""
     # Get agent config for tool rounds
@@ -442,7 +432,28 @@ async def call_llm(
         _max_tool_rounds = max_tool_rounds_override
 
     # Get user's name for personalized context
-    _user_name = await _get_user_name(user_id)
+    if current_user_name_override:
+        _user_name = current_user_name_override
+    else:
+        _user_name = await _get_user_name(user_id)
+
+    # Auto-assign fallback tool call logger if none provided but conversation context exists
+    if on_tool_call is None and session_id:
+        from app.services.chat_session_service import save_tool_call_log
+        async def _default_on_tool_call(data: dict):
+            if data.get("status") == "done" and agent_id:
+                await save_tool_call_log(
+                    agent_id=agent_id,
+                    user_id=user_id or agent_id,
+                    conversation_id=session_id,
+                    tool_name=data.get("name", ""),
+                    arguments=data.get("args"),
+                    result=data.get("result"),
+                    status="done",
+                    tool_call_id=data.get("call_id"),
+                    reasoning_content=data.get("reasoning_content"),
+                )
+        on_tool_call = _default_on_tool_call
 
     # Build rich prompt with soul, memory, skills, relationships
     from app.services.agent_context import build_agent_context
@@ -455,6 +466,7 @@ async def call_llm(
     if skip_tools:
         tools_for_llm = [FINISH_TOOL_DEFINITION]
     else:
+        from app.services.agent_tools import AGENT_TOOLS
         tools_for_llm = await get_agent_tools_for_llm(agent_id) if agent_id else AGENT_TOOLS
     allowed_tool_names = _allowed_tool_names(tools_for_llm)
 
@@ -627,6 +639,7 @@ async def call_llm_with_failover(
     on_failover=None,
     skip_tools: bool = False,
     on_code_output=None,
+    current_user_name_override: str | None = None,
 ) -> str:
     """Call LLM with automatic failover support."""
     guard = FailoverGuard()
@@ -668,6 +681,7 @@ async def call_llm_with_failover(
         supports_vision=supports_vision,
         skip_tools=skip_tools,
         on_code_output=on_code_output,
+        current_user_name_override=current_user_name_override,
     )
 
     # Check if we need to failover
@@ -731,6 +745,7 @@ async def call_llm_with_failover(
         supports_vision=getattr(fallback_model, 'supports_vision', False),
         skip_tools=skip_tools,
         on_code_output=on_code_output,
+        current_user_name_override=current_user_name_override,
     )
 
     # Combine error messages if fallback also failed
@@ -861,7 +876,6 @@ async def call_agent_llm_with_tools(
         LLMMessage(role="user", content=user_prompt),
     ]
 
-    # Load tools
     tools_for_llm = await get_agent_tools_for_llm(agent_id)
     allowed_tool_names = _allowed_tool_names(tools_for_llm)
 

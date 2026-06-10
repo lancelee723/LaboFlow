@@ -32,16 +32,18 @@
               <t-switch
                 :value="channel.enabled"
                 size="small"
+                :disabled="!authStore.hasRole('admin')"
                 @change="handleToggle(channel)"
               />
               <t-dropdown
+                v-if="authStore.hasRole('admin')"
                 trigger="click"
                 placement="bottom-right"
                 :options="[
                   { content: $t('common.edit'), value: 'edit', onClick: () => editChannel(channel) },
                   { content: $t('common.delete'), value: 'delete', theme: 'error' }
                 ]"
-                @click="(data) => data.value === 'delete' && handleDelete(channel.id)"
+                @click="handleChannelMenuClick($event, channel.id)"
               >
                 <t-button variant="text" theme="default" size="small">
                   <t-icon name="more" />
@@ -77,7 +79,7 @@
     </div>
 
     <!-- Add button -->
-    <t-button theme="default" variant="dashed" block @click="showCreateDialog = true" class="add-btn">
+    <t-button v-if="authStore.hasRole('admin')" theme="default" variant="dashed" block @click="showCreateDialog = true" class="add-btn">
       <t-icon name="add" />
       {{ $t('agentEditor.im.addChannel') }}
     </t-button>
@@ -429,8 +431,10 @@ import {
 } from '@/api/agent';
 import { listKnowledgeBases } from '@/api/knowledge-base';
 import type { IMChannel } from '@/api/agent';
+import { useAuthStore } from '@/stores/auth';
 
 const { t } = useI18n();
+const authStore = useAuthStore();
 
 const props = defineProps<{
   agentId: string;
@@ -464,6 +468,10 @@ const formData = ref({
   knowledge_base_id: '',
   credentials: defaultCredentials(),
 });
+
+type ChannelMenuClickData = {
+  value: string;
+};
 
 function platformLabel(platform: string): string {
   const key = `agentEditor.im.${platform}`;
@@ -714,6 +722,12 @@ async function handleDelete(id: string) {
     await loadChannels();
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.operationFailed'));
+  }
+}
+
+function handleChannelMenuClick(data: ChannelMenuClickData, channelId: string) {
+  if (data.value === 'delete') {
+    handleDelete(channelId);
   }
 }
 

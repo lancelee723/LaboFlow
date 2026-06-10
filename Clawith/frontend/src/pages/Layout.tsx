@@ -539,7 +539,7 @@ export default function Layout() {
             setPptLoading(false);
         }
     }, [pptLoading, isChinese]);
-    const tenantSwitcherRef = useRef<HTMLButtonElement>(null);
+    const tenantSwitcherRef = useRef<HTMLDivElement>(null);
     const tenantMenuPortalRef = useRef<HTMLDivElement>(null);
     const [tenantMenuPos, setTenantMenuPos] = useState({ top: 0, left: 0, maxHeight: 520 });
 
@@ -592,7 +592,7 @@ export default function Layout() {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: 'Failed to switch tenant' }));
-            toast.error('切换公司失败', { details: String(err.detail || `HTTP ${res.status}`) });
+            toast.error(t('common.error.companySwitchFailed'), { details: String(err.detail || `HTTP ${res.status}`) });
             return;
         }
         const data = await res.json();
@@ -1104,31 +1104,28 @@ export default function Layout() {
                 <div className="sidebar-top">
                     <div className="sidebar-logo">
                         <img className="sidebar-logo-image" src="/laboflow-logo-transparent.svg" alt="LaboFlow" />
-                        <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
-                            padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            marginLeft: 'auto', color: 'var(--text-tertiary)',
-                        }} title={isSidebarCollapsed ? t('common.expandSidebar') : t('common.collapseSidebar')}>
-                            {isSidebarCollapsed ? SidebarIcons.expand : SidebarIcons.collapse}
+                    </div>
+                    <div className="sidebar-workspace-row" ref={tenantSwitcherRef} data-tour-target="company-switcher">
+                        <button
+                            type="button"
+                            className={`workspace-switcher-trigger${showTenantMenu ? ' open' : ''}`}
+                            onClick={() => {
+                                if (showTenantMenu) {
+                                    setShowTenantMenu(false);
+                                    return;
+                                }
+                                openTenantModal();
+                            }}
+                            title={isChinese ? '切换企业' : 'Switch Organization'}
+                        >
+                            <span className={`workspace-switcher-avatar tone-${currentTenantAvatarTone}`}>
+                                {currentTenantLogoUrl ? <img src={currentTenantLogoUrl} alt="" /> : currentTenantInitial}
+                            </span>
+                            <span className="workspace-switcher-name">{currentTenantName}</span>
+                            <IconChevronDown className="workspace-switcher-chevron" size={15} stroke={1.7} />
                         </button>
 
                     </div>
-
-                    <button
-                        ref={tenantSwitcherRef}
-                        data-tour-target="company-switcher"
-                        className="sidebar-company-btn"
-                        onClick={() => setShowTenantMenu(true)}
-                    >
-                        {currentTenantLogoUrl ? (
-                            <img src={currentTenantLogoUrl} alt="" className="sidebar-company-logo" />
-                        ) : (
-                            <span className={`sidebar-company-avatar tone-${currentTenantAvatarTone}`}>
-                                {currentTenantInitial}
-                            </span>
-                        )}
-                        <span className="sidebar-company-name">{currentTenantName}</span>
-                        <IconChevronDown size={12} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.5 }} />
-                    </button>
 
                     <div className="sidebar-section" data-tour-target="main-nav">
                         <NavLink to="/plaza" className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}>
@@ -1228,7 +1225,7 @@ export default function Layout() {
                 <div className="sidebar-bottom">
                     <div className="sidebar-footer">
                         <div className="sidebar-footer-controls" style={{
-                            display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px',
+                            display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', width: '100%',
                         }}>
                             <button className="btn btn-ghost" onClick={toggleTheme} style={{
                                 padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1250,6 +1247,13 @@ export default function Layout() {
                                         lineHeight: 1,
                                     }}>{(unreadCount as number) > 99 ? '99+' : unreadCount}</span>
                                 )}
+                            </button>
+                            <button className="btn btn-ghost sidebar-collapse-btn" onClick={toggleSidebar} style={{
+                                padding: '4px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: 'var(--text-tertiary)',
+                                marginLeft: isSidebarCollapsed ? undefined : 'auto',
+                            }} title={isSidebarCollapsed ? t('common.expandSidebar') : t('common.collapseSidebar')}>
+                                {isSidebarCollapsed ? SidebarIcons.expand : SidebarIcons.collapse}
                             </button>
                         </div>
                         <div ref={accountMenuRef} style={{ position: 'relative' }}>

@@ -1,5 +1,6 @@
 // src/utils/request.js
 import axios from "axios";
+import type { AxiosProgressEvent, AxiosRequestConfig } from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
@@ -37,20 +38,18 @@ instance.interceptors.request.use(
     // 添加用户语言偏好
     config.headers["Accept-Language"] = getCurrentLanguage();
     
-    // 添加跨租户访问请求头（如果选择了其他租户）
+    // 添加跨租户访问请求头：只要 setSelectedTenant 写过激活租户，
+    // 每个请求都要附 X-Tenant-ID。早期版本会 short-circuit
+    // "selectedTenantId === defaultTenantId 时不附"以减少 header 体积，
+    // 但这条优化会被任何把 weknora_tenant 写成激活租户的代码（OIDC
+    // 回调、UserMenu loadUserInfo、router hydrate）触发，导致后续请求
+    // 静默丢失 header，前端"切换了"但实际仍跑在 home 租户里——把"切
+    // 换之后只有第一批请求带 X-Tenant-ID"调成永久状态。
+    // 后端 IsTenantAccessible 已经允许 header 指向 home 租户（自家），
+    // 所以无脑附不会引入新风险。
     const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
-    const defaultTenantId = localStorage.getItem('weknora_tenant');
     if (selectedTenantId) {
-      try {
-        const defaultTenant = defaultTenantId ? JSON.parse(defaultTenantId) : null;
-        const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
-        // 如果选择的租户ID与默认租户ID不同，添加请求头
-        if (selectedTenantId !== defaultId) {
-          config.headers["X-Tenant-ID"] = selectedTenantId;
-        }
-      } catch (e) {
-        console.error('Failed to parse tenant info', e);
-      }
+      config.headers["X-Tenant-ID"] = selectedTenantId;
     }
     
     config.headers["X-Request-ID"] = `${generateRandomString(12)}`;
@@ -216,18 +215,21 @@ instance.interceptors.response.use(
   }
 );
 
-export function get(url: string) {
-  return instance.get(url);
+export function get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  return instance.get<T, T>(url, config);
 }
 
-export async function getDown(url: string) {
-  let res = await instance.get(url, {
+export function getDown(url: string): Promise<Blob> {
+  return instance.get<Blob, Blob>(url, {
     responseType: "blob",
   });
-  return res
 }
 
-export function postUpload(url: string, data = {}, onUploadProgress?: (progressEvent: any) => void) {
+export function postUpload<T = any>(
+  url: string,
+  data: any = {},
+  onUploadProgress?: (progressEvent: AxiosProgressEvent) => void,
+): Promise<T> {
   return instance.post(url, data, {
     headers: {
       "Content-Type": "multipart/form-data",
@@ -237,8 +239,8 @@ export function postUpload(url: string, data = {}, onUploadProgress?: (progressE
   });
 }
 
-export function postChat(url: string, data = {}) {
-  return instance.post(url, data, {
+export function postChat<T = any>(url: string, data: any = {}): Promise<T> {
+  return instance.post<T, T>(url, data, {
     headers: {
       "Content-Type": "text/event-stream;charset=utf-8",
       "X-Request-ID": `${generateRandomString(12)}`,
@@ -246,14 +248,14 @@ export function postChat(url: string, data = {}) {
   });
 }
 
-export function post(url: string, data = {}, config?: any) {
-  return instance.post(url, data, config);
+export function post<T = any>(url: string, data: any = {}, config?: AxiosRequestConfig): Promise<T> {
+  return instance.post<T, T>(url, data, config);
 }
 
-export function put(url: string, data = {}) {
-  return instance.put(url, data);
+export function put<T = any>(url: string, data: any = {}, config?: AxiosRequestConfig): Promise<T> {
+  return instance.put<T, T>(url, data, config);
 }
 
-export function del(url: string, data?: any) {
-  return instance.delete(url, { data });
+export function del<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+  return instance.delete<T, T>(url, { ...config, data });
 }

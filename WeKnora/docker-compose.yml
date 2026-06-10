@@ -41,12 +41,28 @@ services:
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
+      # Optional: declarative built-in models. Copy config/builtin_models.yaml.example
+      # to config/builtin_models.yaml, edit it for your deployment, then
+      # uncomment the line below. See docs/BUILTIN_MODELS.md.
+      # - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    # Source .env so deployment-specific variables (e.g. those referenced by
+    # config/builtin_models.yaml via ${ENV}, or any future feature) reach the
+    # app container without having to be enumerated under `environment:`.
+    #
+    # NOTE: the array form below is used instead of the map form
+    # (env_file: - path: .env, required: false) because the map syntax
+    # requires Docker Compose v2.24+ (Jan 2024) and would break parsing on
+    # older deploys. The trade-off is that Compose errors out if .env is
+    # absent — see scripts/start_all.sh for the pre-flight touch that keeps
+    # fresh clones working.
+    env_file:
+      - .env
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-}
       - COS_SECRET_ID=${COS_SECRET_ID:-}
@@ -66,12 +82,6 @@ services:
       - DB_NAME=${DB_NAME:-}
       - TZ=${TZ:-Asia/Shanghai}
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
-      - OTEL_SERVICE_NAME=WeKnora
-      - OTEL_TRACES_EXPORTER=otlp
-      - OTEL_METRICS_EXPORTER=none
-      - OTEL_LOGS_EXPORTER=none
-      - OTEL_PROPAGATORS=tracecontext,baggage
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
       # See docs/Langfuse集成.md for the full list of tuning knobs.
@@ -102,6 +112,13 @@ services:
       - MILVUS_METRIC_TYPE=${MILVUS_METRIC_TYPE:-IP}
       - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
       - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
+      # docreader gRPC TLS / 认证（客户端侧）
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
       - WEAVIATE_HOST=${WEAVIATE_HOST:-weaviate:8080}
       - WEAVIATE_GRPC_ADDRESS=${WEAVIATE_GRPC_ADDRESS:-weaviate:50051}
       - WEAVIATE_SCHEME=${WEAVIATE_SCHEME:-http}
@@ -113,6 +130,7 @@ services:
       - DORIS_USERNAME=${DORIS_USERNAME:-root}
       - DORIS_PASSWORD=${DORIS_PASSWORD:-}
       - DORIS_TABLE_PREFIX=${DORIS_TABLE_PREFIX:-weknora_embeddings}
+      - DORIS_COMPAT_MODE=${DORIS_COMPAT_MODE:-auto}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -120,6 +138,13 @@ services:
       - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
       - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
+      - OBS_REGION=${OBS_REGION:-}
+      - OBS_ACCESS_KEY=${OBS_ACCESS_KEY:-}
+      - OBS_SECRET_KEY=${OBS_SECRET_KEY:-}
+      - OBS_BUCKET_NAME=${OBS_BUCKET_NAME:-}
+      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
+      - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - STREAM_MANAGER_TYPE=${STREAM_MANAGER_TYPE:-}
       - REDIS_ADDR=redis:6379
@@ -135,6 +160,17 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
+      - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
+      # Always allow the optional searxng sidecar and the bundled vector-store
+      # service hostnames (compose service names). Vector-store create/test now
+      # runs SSRF validation on user-supplied addresses, which would otherwise
+      # reject these private docker-network hosts; whitelisting them keeps the
+      # out-of-box experience. Merged on top of SSRF_WHITELIST so user
+      # overrides don't clobber it. (postgres is intentionally NOT listed: it
+      # is not a user-registerable vector store, and whitelisting the app's own
+      # DB host would skip the 5432 port block.)
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
@@ -150,7 +186,16 @@ services:
       - WEKNORA_SANDBOX_DOCKER_IMAGE=${WEKNORA_SANDBOX_DOCKER_IMAGE:-wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}}
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
+      - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
+      # Tenant / RBAC（详见 docs/RBAC说明.md 与 .env.example 注释）
+      # - WEKNORA_TENANT_ENABLE_RBAC: 是否启用租户角色强制鉴权（true / false），默认 true
+      # - WEKNORA_TENANT_MAX_OWNED_PER_USER: 单个非超管自助创建租户的上限
+      #   >0 强制限额；=0 走 handler 默认；<0 关闭限额（不建议共享部署使用）
+      - WEKNORA_TENANT_ENABLE_RBAC=${WEKNORA_TENANT_ENABLE_RBAC:-}
+      - WEKNORA_TENANT_MAX_OWNED_PER_USER=${WEKNORA_TENANT_MAX_OWNED_PER_USER:-}
+      - WEKNORA_ASYNQ_CONCURRENCY=${WEKNORA_ASYNQ_CONCURRENCY:-32}
       - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+      - WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL=${WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL:-}
     depends_on:
       redis:
         condition: service_started
@@ -184,17 +229,34 @@ services:
       args:
         - APT_MIRROR=${APT_MIRROR:-}
     container_name: WeKnora-docreader
-    ports:
-      - "${DOCREADER_PORT:-50051}:50051"
+    # docreader gRPC ships without auth/TLS and is only consumed by the app
+    # container over the WeKnora-network (DOCREADER_ADDR defaults to
+    # docreader:50051), so we don't publish 50051 to the host. `expose` keeps
+    # the port reachable inside the compose network for documentation only.
+    # If you need to call docreader from outside the host (e.g. for debugging),
+    # add a `ports:` entry locally, preferably bound to 127.0.0.1.
+    expose:
+      - "50051"
     volumes:
       - docreader-tmp:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+      - DOCREADER_ODL_MAX_WORKERS=${DOCREADER_ODL_MAX_WORKERS:-1}
+      - DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID:-off}
+      - DOCREADER_ODL_HYBRID_URL=${DOCREADER_ODL_HYBRID_URL:-http://odl-hybrid:5002}
+      - DOCREADER_ODL_HYBRID_MODE=${DOCREADER_ODL_HYBRID_MODE:-auto}
+      - DOCREADER_ODL_HYBRID_FALLBACK=${DOCREADER_ODL_HYBRID_FALLBACK:-false}
+      - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
       - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-90}
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
@@ -206,6 +268,24 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # OpenDataLoader hybrid backend (optional). Default --no-ocr (no EasyOCR/libGL).
+  # Local build only — not published to Docker Hub; use --profile odl-hybrid --build.
+  odl-hybrid:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.odl-hybrid
+    image: weknora-odl-hybrid:local
+    container_name: WeKnora-odl-hybrid
+    profiles:
+      - odl-hybrid
+    expose:
+      - "5002"
+    environment:
+      - ODL_HYBRID_EXTRA_ARGS=${ODL_HYBRID_EXTRA_ARGS:---no-ocr}
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
 
   # 修改的PostgreSQL配置
   postgres:
@@ -237,6 +317,58 @@ services:
     networks:
       - WeKnora-network
 
+  # One-shot init: copy the read-only template settings.yml into a named volume
+  # before searxng starts. Necessary because the searxng entrypoint sed-replaces
+  # `ultrasecretkey` in /etc/searxng/settings.yml in place; bind-mounting the
+  # repo file directly would write the resolved SEARXNG_SECRET back into the
+  # working tree (and prevent re-templating on subsequent restarts).
+  searxng-init:
+    image: busybox:1.36
+    container_name: WeKnora-searxng-init
+    command: ["sh", "-c", "cp /template/settings.yml /etc/searxng/settings.yml && chmod 0644 /etc/searxng/settings.yml"]
+    volumes:
+      - ./docker/searxng/settings.yml:/template/settings.yml:ro
+      - searxng_config:/etc/searxng
+    restart: "no"
+    networks:
+      - WeKnora-network
+    profiles:
+      - searxng
+      - full
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: WeKnora-searxng
+    # Bind to loopback by default; override SEARXNG_BIND=0.0.0.0 only after
+    # rotating SEARXNG_SECRET and (optionally) re-enabling limiter in settings.yml.
+    ports:
+      - "${SEARXNG_BIND:-127.0.0.1}:${SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - searxng_config:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+      - INSTANCE_NAME=weknora-searxng
+      # Default value lets `docker compose --profile searxng up` work zero-config.
+      # Override via .env (e.g. `openssl rand -hex 32`) before exposing the
+      # instance beyond the default 127.0.0.1 bind, since secret_key signs
+      # image-proxy URLs and a shared default would be guessable by anyone.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-weknora-default-searxng-secret-rotate-before-exposing-publicly}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+    depends_on:
+      searxng-init:
+        condition: service_completed_successfully
+    networks:
+      - WeKnora-network
+    profiles:
+      - searxng
+      - full
+
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: WeKnora-minio
@@ -258,31 +390,6 @@ services:
       - WeKnora-network
     profiles:
       - minio
-      - full
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.76.0
-    container_name: WeKnora-jaeger
-    ports:
-      - "6831:6831/udp" # Jaeger Thrift接收器
-      - "6832:6832/udp" # Jaeger Thrift接收器(Compact)
-      - "5778:5778" # 配置端口
-      - "16686:16686" # Web UI
-      - "4317:4317" # OTLP gRPC接收器
-      - "4318:4318" # OTLP HTTP接收器
-      - "14250:14250" # 接收模型端口
-      - "14268:14268" # Jaeger HTTP接收器
-      - "9411:9411" # Zipkin兼容性端口
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-    volumes:
-      - jaeger_data:/var/lib/jaeger # 持久化 Jaeger 数据
-    networks:
-      - WeKnora-network
-    restart: unless-stopped
-    profiles:
-      - jaeger
       - full
 
   neo4j:
@@ -658,6 +765,24 @@ services:
       - langfuse
       - full
 
+  mcp:
+    build:
+      context: ./mcp-server
+    container_name: WeKnora-mcp
+    ports:
+      - "${MCP_PORT:-8082}:8000"
+    environment:
+      - WEKNORA_BASE_URL=http://app:8080/api/v1
+      - WEKNORA_API_KEY=${WEKNORA_API_KEY:-}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - full
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -666,7 +791,6 @@ volumes:
   postgres-data:
   data-files:
   docreader-tmp:
-  jaeger_data:
   minio_data:
   neo4j-data:
   qdrant_data:
@@ -679,3 +803,4 @@ volumes:
   langfuse_clickhouse_data:
   langfuse_clickhouse_logs:
   langfuse_minio_data:
+  searxng_config:

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"reflect"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -15,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 )
 
@@ -153,8 +155,45 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		return nil, datasource.ErrDataSourceInvalid
 	}
 
-	// Validate new configuration if changed
-	if ds.Type != existing.Type || string(ds.Config) != string(existing.Config) {
+	// Credentials NEVER flow through this endpoint — they live behind the
+	// /credentials subresource. Force-preserve the stored credentials map
+	// regardless of what the body says. Log a warning if a stale caller
+	// passes one so we can spot them and migrate later. Non-credential
+	// fields of Config (Type / ResourceIDs / Settings) flow through.
+	var mergedCfg, existingParsedCfg *types.DataSourceConfig
+	if len(ds.Config) > 0 {
+		incomingCfg, parseIncErr := ds.ParseConfig()
+		existingCfg, parseExErr := existing.ParseConfig()
+		if parseIncErr == nil && parseExErr == nil && incomingCfg != nil {
+			if incomingCfg.HasCredentials() {
+				logger.Warnf(ctx,
+					"deprecated: credentials in PUT /datasource/%s body are ignored; use PUT /credentials instead",
+					secutils.SanitizeForLog(ds.ID))
+			}
+			merged := *incomingCfg
+			if existingCfg != nil {
+				merged.Credentials = existingCfg.Credentials
+			} else {
+				merged.Credentials = nil
+			}
+			if blob, err := merged.ToJSON(); err == nil {
+				ds.Config = blob
+			}
+			mergedCfg = &merged
+			existingParsedCfg = existingCfg
+		}
+	}
+
+	// Validate new configuration if non-credential fields changed. Skip
+	// when there are no stored credentials yet (validators would fail with
+	// no token to call the live API) and when the parsed config is
+	// structurally identical.
+	configActuallyChanged := true
+	if mergedCfg != nil && existingParsedCfg != nil {
+		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
+	}
+	hasCreds := mergedCfg != nil && mergedCfg.HasCredentials()
+	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -172,6 +211,78 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 
 	logger.Infof(ctx, "data source updated: id=%s", ds.ID)
 	return ds, nil
+}
+
+// UpdateDataSourceCredentials replaces the connector credential map. This is
+// a single atomic write; the previous credential set is discarded entirely
+// (callers cannot patch individual keys because half-configured connector
+// auth is meaningless). After persisting, the live connection is validated
+// so the caller learns immediately if the new credentials are wrong.
+func (s *DataSourceService) UpdateDataSourceCredentials(
+	ctx context.Context, id string, credentials map[string]interface{},
+) (*types.DataSource, error) {
+	if id == "" {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil {
+		parsed = &types.DataSourceConfig{Type: existing.Type}
+	}
+	parsed.Credentials = credentials
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return nil, err
+	}
+	existing.Config = blob
+
+	// Run live validation now that the credentials are in place — surfaces
+	// "wrong token" feedback immediately to the user instead of waiting for
+	// the next scheduled sync.
+	if err := s.validateDataSourceConfig(ctx, existing); err != nil {
+		return nil, err
+	}
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "DataSource credentials updated: id=%s", secutils.SanitizeForLog(id))
+	return existing, nil
+}
+
+// ClearDataSourceCredentials wipes the connector credential map without
+// touching any other config field. Idempotent.
+func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id string) error {
+	if id == "" {
+		return datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return err
+	}
+	if parsed == nil || !parsed.HasCredentials() {
+		return nil
+	}
+	parsed.Credentials = nil
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return err
+	}
+	existing.Config = blob
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "DataSource credentials cleared by user: id=%s", secutils.SanitizeForLog(id))
+	return nil
 }
 
 // DeleteDataSource deletes a data source (soft delete)
@@ -555,15 +666,12 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	// Update sync log with results
-	syncLog.ItemsTotal = result.Total
-	syncLog.ItemsCreated = result.Created
-	syncLog.ItemsUpdated = result.Updated
-	syncLog.ItemsDeleted = result.Deleted
-	syncLog.ItemsSkipped = result.Skipped
-	syncLog.ItemsFailed = result.Failed
-	syncLog.Status = types.SyncLogStatusSuccess
-	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	resultJSON, _ := result.ToJSON()
+	if err := allFetchedItemsFailedError(result); err != nil {
+		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
+		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		return err
+	}
 
 	// Update cursor for next incremental sync
 	if nextCursor != nil {
@@ -572,30 +680,75 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	ds.LastSyncAt = timePtr(time.Now().UTC())
-	if wasPaused {
-		ds.Status = types.DataSourceStatusPaused
-	} else {
-		ds.Status = types.DataSourceStatusActive
-	}
-	ds.ErrorMessage = ""
-
-	// Store result
-	resultJSON, _ := result.ToJSON()
-	ds.LastSyncResult = resultJSON
-	syncLog.Result = resultJSON
-
-	// Update database
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to update data source: %v", err)
-	}
-	if err := s.syncLogRepo.Update(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to update sync log: %v", err)
-	}
+	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusSuccess, "", wasPaused)
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
 	return nil
+}
+
+func (s *DataSourceService) updateSyncRunResult(
+	ctx context.Context,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+	result *types.SyncResult,
+	resultJSON types.JSON,
+	status string,
+	errorMessage string,
+	wasPaused bool,
+) {
+	syncLog.ItemsTotal = result.Total
+	syncLog.ItemsCreated = result.Created
+	syncLog.ItemsUpdated = result.Updated
+	syncLog.ItemsDeleted = result.Deleted
+	syncLog.ItemsSkipped = result.Skipped
+	syncLog.ItemsFailed = result.Failed
+	syncLog.Status = status
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = errorMessage
+	syncLog.Result = resultJSON
+	if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
+		logger.Errorf(ctx, "failed to update sync log: %v", err)
+	}
+
+	if status == types.SyncLogStatusFailed {
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+	} else if wasPaused {
+		ds.Status = types.DataSourceStatusPaused
+	} else {
+		ds.Status = types.DataSourceStatusActive
+	}
+	ds.ErrorMessage = errorMessage
+	ds.LastSyncResult = resultJSON
+	if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
+		logger.Errorf(ctx, "failed to update data source: %v", err)
+	}
+}
+
+func allFetchedItemsFailedError(result *types.SyncResult) error {
+	if result == nil || result.Total == 0 {
+		return nil
+	}
+	if result.Failed != result.Total || result.Created != 0 || result.Updated != 0 ||
+		result.Deleted != 0 || result.Skipped != 0 {
+		return nil
+	}
+
+	detail := ""
+	if len(result.Errors) > 0 {
+		detail = result.Errors[0]
+		const maxDetailLen = 500
+		if len(detail) > maxDetailLen {
+			detail = detail[:maxDetailLen] + "..."
+		}
+	}
+	if detail == "" {
+		return fmt.Errorf("all fetched items failed during sync (%d/%d)", result.Failed, result.Total)
+	}
+	return fmt.Errorf("all fetched items failed during sync (%d/%d): %s", result.Failed, result.Total, detail)
 }
 
 // ValidateCredentials tests connectivity using raw credentials without persisting anything.

@@ -1,21 +1,28 @@
 package cmdutil
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/config"
+	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // TestFactory_Lazy ensures none of the closures execute work at construction
-// time — `--help` / `completion` must not trigger HTTP / keyring access.
+// time - `--help` / `completion` must not trigger HTTP / keyring access.
 func TestFactory_Lazy(t *testing.T) {
 	var configCalls, clientCalls, prompterCalls int
 	f := &Factory{
@@ -32,7 +39,7 @@ func TestFactory_Lazy(t *testing.T) {
 			return prompt.AgentPrompter{}
 		},
 	}
-	// Asserting on closure presence — none should have run yet.
+	// Asserting on closure presence - none should have run yet.
 	assert.Equal(t, 0, configCalls)
 	assert.Equal(t, 0, clientCalls)
 	assert.Equal(t, 0, prompterCalls)
@@ -48,9 +55,9 @@ func TestFactory_Lazy(t *testing.T) {
 
 // TestNew_FoundationDefaults verifies the production New() returns a usable
 // Factory and that Client surfaces auth.unauthenticated when no current
-// context is configured (the precondition for `weknora auth login`).
+// profile is configured (the precondition for `weknora auth login`).
 func TestNew_FoundationDefaults(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty config → no current context
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty config → no current profile
 	f := New()
 	require.NotNil(t, f)
 	require.NotNil(t, f.Config)
@@ -65,19 +72,19 @@ func TestNew_FoundationDefaults(t *testing.T) {
 	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
 }
 
-// TestFactory_ContextOverride verifies the global --context flag mechanism:
-// f.ContextOverride replaces config.CurrentContext for this invocation only,
-// without writing to disk. Spec §1.2.
-func TestFactory_ContextOverride(t *testing.T) {
+// TestFactory_ProfileOverride verifies the global --profile flag mechanism:
+// f.ProfileOverride replaces config.CurrentProfile for this invocation only,
+// without writing to disk.
+func TestFactory_ProfileOverride(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	// Seed config with two contexts; CurrentContext = "default"
+	// Seed config with two profiles; CurrentProfile = "default"
 	cfgPath := dir + "/weknora/config.yaml"
 	require.NoError(t, os.MkdirAll(dir+"/weknora", 0o700))
 	require.NoError(t, os.WriteFile(cfgPath, []byte(`
-current_context: default
-contexts:
+current_profile: default
+profiles:
   default:
     host: https://default.example
   other:
@@ -86,25 +93,25 @@ contexts:
 
 	f := New()
 
-	t.Run("no override: returns CurrentContext from disk", func(t *testing.T) {
-		f.ContextOverride = ""
+	t.Run("no override: returns CurrentProfile from disk", func(t *testing.T) {
+		f.ProfileOverride = ""
 		cfg, err := f.Config()
 		require.NoError(t, err)
-		assert.Equal(t, "default", cfg.CurrentContext)
+		assert.Equal(t, "default", cfg.CurrentProfile)
 	})
 
-	t.Run("override applied: ContextOverride wins over disk", func(t *testing.T) {
-		f.ContextOverride = "other"
+	t.Run("override applied: ProfileOverride wins over disk", func(t *testing.T) {
+		f.ProfileOverride = "other"
 		cfg, err := f.Config()
 		require.NoError(t, err)
-		assert.Equal(t, "other", cfg.CurrentContext)
+		assert.Equal(t, "other", cfg.CurrentProfile)
 	})
 
 	t.Run("override does not persist to disk", func(t *testing.T) {
 		// Reload from disk: should still be "default" (the original).
 		raw, err := os.ReadFile(cfgPath)
 		require.NoError(t, err)
-		assert.Contains(t, string(raw), "current_context: default")
+		assert.Contains(t, string(raw), "current_profile: default")
 	})
 }
 
@@ -157,7 +164,7 @@ func memSecretsFn(s *secrets.MemStore) func() (secrets.Store, error) {
 	return func() (secrets.Store, error) { return s, nil }
 }
 
-func TestBuildClient_NoCurrentContext(t *testing.T) {
+func TestBuildClient_NoCurrentProfile(t *testing.T) {
 	f := &Factory{
 		Config:  func() (*config.Config, error) { return &config.Config{}, nil },
 		Secrets: memSecretsFn(secrets.NewMemStore()),
@@ -172,7 +179,7 @@ func TestBuildClient_NoCurrentContext(t *testing.T) {
 func TestBuildClient_UnknownContext(t *testing.T) {
 	f := &Factory{
 		Config: func() (*config.Config, error) {
-			return &config.Config{CurrentContext: "ghost"}, nil
+			return &config.Config{CurrentProfile: "ghost"}, nil
 		},
 		Secrets: memSecretsFn(secrets.NewMemStore()),
 	}
@@ -187,8 +194,8 @@ func TestBuildClient_MissingHost(t *testing.T) {
 	f := &Factory{
 		Config: func() (*config.Config, error) {
 			return &config.Config{
-				CurrentContext: "p",
-				Contexts:       map[string]config.Context{"p": {Host: ""}},
+				CurrentProfile: "p",
+				Profiles:       map[string]config.Profile{"p": {Host: ""}},
 			}, nil
 		},
 		Secrets: memSecretsFn(secrets.NewMemStore()),
@@ -207,8 +214,8 @@ func TestBuildClient_HappyPath(t *testing.T) {
 	f := &Factory{
 		Config: func() (*config.Config, error) {
 			return &config.Config{
-				CurrentContext: "p",
-				Contexts: map[string]config.Context{
+				CurrentProfile: "p",
+				Profiles: map[string]config.Profile{
 					"p": {
 						Host:      "https://kb.example.com",
 						TenantID:  7,
@@ -226,15 +233,15 @@ func TestBuildClient_HappyPath(t *testing.T) {
 }
 
 func TestBuildClient_SkipsUnreferencedSecrets(t *testing.T) {
-	// If the context doesn't list APIKeyRef, buildClient must not call
-	// Get(api_key) — a perf invariant: avoid keychain trips for unused creds.
+	// If the profile doesn't list APIKeyRef, buildClient must not call
+	// Get(api_key) - a perf invariant: avoid keychain trips for unused creds.
 	store := &countingSecrets{MemStore: secrets.NewMemStore()}
 	require.NoError(t, store.Set("p", "access", "jwt"))
 	f := &Factory{
 		Config: func() (*config.Config, error) {
 			return &config.Config{
-				CurrentContext: "p",
-				Contexts: map[string]config.Context{
+				CurrentProfile: "p",
+				Profiles: map[string]config.Profile{
 					"p": {Host: "https://x", TokenRef: "mem://p/access"},
 				},
 			}, nil
@@ -255,4 +262,156 @@ type countingSecrets struct {
 func (c *countingSecrets) Get(ctx, key string) (string, error) {
 	c.gets++
 	return c.MemStore.Get(ctx, key)
+}
+
+// makeResolveKBCmd builds a minimal cobra.Command carrying the single --kb
+// local flag so cmd.Flags().GetString lookups in ResolveKB exercise the flag
+// path. The single flag accepts either a kb_<id> or a name.
+func makeResolveKBCmd(t *testing.T, kb string) *cobra.Command {
+	t.Helper()
+	c := &cobra.Command{Use: "x"}
+	c.Flags().String("kb", "", "")
+	if kb != "" {
+		require.NoError(t, c.Flags().Set("kb", kb))
+	}
+	c.SetContext(context.Background())
+	return c
+}
+
+// resolveKBChdir switches cwd to dir for the duration of t (auto-restored).
+// ResolveKB walks up from os.Getwd() so tests must isolate cwd.
+func resolveKBChdir(t *testing.T, dir string) {
+	t.Helper()
+	prev, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+// fakeKBServer returns an httptest server that answers GET /api/v1/knowledge-bases
+// with kbs (KnowledgeBaseListResponse), so a real *sdk.Client can talk to it.
+func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/knowledge-bases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sdk.KnowledgeBaseListResponse{Success: true, Data: kbs})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestFactory_ActiveProfile_EnvVarFallback verifies WEKNORA_PROFILE is honoured
+// when no override or config is present.
+func TestFactory_ActiveProfile_EnvVarFallback(t *testing.T) {
+	t.Setenv("WEKNORA_PROFILE", "staging")
+	f := &Factory{} // no override, no config
+	if got := f.ActiveProfile(); got != "staging" {
+		t.Errorf("expected env fallback to staging; got %q", got)
+	}
+}
+
+// TestFactory_ActiveProfile_OverrideWinsEnv verifies ProfileOverride takes
+// priority over the WEKNORA_PROFILE env var.
+func TestFactory_ActiveProfile_OverrideWinsEnv(t *testing.T) {
+	t.Setenv("WEKNORA_PROFILE", "staging")
+	f := &Factory{ProfileOverride: "prod"}
+	if got := f.ActiveProfile(); got != "prod" {
+		t.Errorf("override should win over env; got %q", got)
+	}
+}
+
+// TestResolveKB_Chain exercises the 4-level fallback chain. Each sub-test
+// isolates cwd / env / closure from the others.
+func TestResolveKB_Chain(t *testing.T) {
+	t.Run("flag_kb_id_wins", func(t *testing.T) {
+		// UUID form on --kb → pass-through; no SDK call, no env, no disk.
+		t.Setenv("WEKNORA_KB_ID", "kb_env_should_lose")
+		dir := t.TempDir()
+		resolveKBChdir(t, dir)
+		// Drop a project link too - must be ignored.
+		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
+
+		clientCalls := 0
+		f := &Factory{
+			Client: func() (*sdk.Client, error) {
+				clientCalls++
+				return nil, errors.New("must not be called")
+			},
+		}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+		require.NoError(t, err)
+		assert.Equal(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", got)
+		assert.Equal(t, 0, clientCalls)
+	})
+
+	t.Run("flag_kb_name_resolves", func(t *testing.T) {
+		t.Setenv("WEKNORA_KB_ID", "")
+		srv := fakeKBServer(t, []sdk.KnowledgeBase{
+			{ID: "kb_a", Name: "foo"},
+			{ID: "kb_b", Name: "bar"},
+		})
+		f := &Factory{
+			Client: func() (*sdk.Client, error) { return sdk.NewClient(srv.URL), nil },
+		}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "foo"))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_a", got)
+	})
+
+	t.Run("flag_kb_name_not_found", func(t *testing.T) {
+		t.Setenv("WEKNORA_KB_ID", "")
+		srv := fakeKBServer(t, []sdk.KnowledgeBase{{ID: "kb_a", Name: "foo"}})
+		f := &Factory{
+			Client: func() (*sdk.Client, error) { return sdk.NewClient(srv.URL), nil },
+		}
+		_, err := f.ResolveKB(makeResolveKBCmd(t, "missing"))
+		require.Error(t, err)
+		var typed *Error
+		require.ErrorAs(t, err, &typed)
+		assert.Equal(t, CodeKBNotFound, typed.Code)
+	})
+
+	t.Run("env_var", func(t *testing.T) {
+		// No flag, env wins over disk.
+		t.Setenv("WEKNORA_KB_ID", "kb_env")
+		dir := t.TempDir()
+		resolveKBChdir(t, dir)
+		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
+
+		f := &Factory{}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, ""))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_env", got)
+	})
+
+	t.Run("project_link_walk_up", func(t *testing.T) {
+		t.Setenv("WEKNORA_KB_ID", "")
+		root := t.TempDir()
+		require.NoError(t, projectlink.Save(filepath.Join(root, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_proj"}))
+		// Run from a deep child to exercise walk-up.
+		deep := filepath.Join(root, "a", "b", "c")
+		require.NoError(t, os.MkdirAll(deep, 0o755))
+		resolveKBChdir(t, deep)
+
+		f := &Factory{}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, ""))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_proj", got)
+	})
+
+	t.Run("none", func(t *testing.T) {
+		// No flag, no env, no project link → CodeKBIDRequired.
+		t.Setenv("WEKNORA_KB_ID", "")
+		dir := t.TempDir()
+		resolveKBChdir(t, dir)
+
+		f := &Factory{}
+		_, err := f.ResolveKB(makeResolveKBCmd(t, ""))
+		require.Error(t, err)
+		var typed *Error
+		require.ErrorAs(t, err, &typed)
+		assert.Equal(t, CodeKBIDRequired, typed.Code)
+	})
 }

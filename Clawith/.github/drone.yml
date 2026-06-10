@@ -57,6 +57,7 @@ steps:
       https_proxy:
         from_secret: PROXY
     commands:
+      - apk add --no-cache git
       - echo "========================================"
       - echo "开始构建 Docker 镜像"
       - echo "事件 $DRONE_BUILD_EVENT"
@@ -112,12 +113,12 @@ steps:
       - echo "启动全部服务 (postgres/redis/backend/frontend)..."
       - IMAGE_TAG=new docker compose -f docker-compose.ci.yml up -d --no-build
       - sleep 5
-
+      
       # 等待基础设施就绪
       - echo "等待 postgres 和 redis 健康检查通过..."
       - timeout 30s bash -c 'until [ "$(docker inspect --format="{{.State.Health.Status}}" $(docker compose -f docker-compose.ci.yml ps -q postgres) 2>/dev/null)" = "healthy" ]; do sleep 2; done' || (echo "postgres 启动超时" && docker compose -f docker-compose.ci.yml logs postgres && exit 1)
       - timeout 30s bash -c 'until [ "$(docker inspect --format="{{.State.Health.Status}}" $(docker compose -f docker-compose.ci.yml ps -q redis) 2>/dev/null)" = "healthy" ]; do sleep 2; done' || (echo "redis 启动超时" && docker compose -f docker-compose.ci.yml logs redis && exit 1)
-
+      
       # 核心验证: backend 启动
       - echo "等待 backend 启动 (最多 90 秒)..."
       - timeout 90s bash -c 'until docker compose -f docker-compose.ci.yml logs --tail=200 backend 2>&1 | grep -q "Application startup complete"; do sleep 3; done'
@@ -128,7 +129,7 @@ steps:
           docker compose -f docker-compose.ci.yml logs --tail=100 backend
           exit 1
         fi
-
+        
       # 检查迁移是否失败
       - echo "检查数据库迁移状态..."
       - |
@@ -138,11 +139,11 @@ steps:
           echo "$MIGRATION_LOG" | grep -Ei "migration|alembic|error|FAIL"
           exit 1
         fi
-
+        
       # 验证 health endpoint (通过 docker compose exec 直接在容器内 curl)
       - echo "验证 health endpoint..."
       - timeout 10s bash -c 'until docker compose -f docker-compose.ci.yml exec -T backend curl -sf http://localhost:8000/api/health > /dev/null 2>&1; do sleep 2; done' || (echo "❌ health endpoint 不可达" && exit 1)
-
+      
       # 清理环境
       - echo "清理测试环境..."
       - docker compose -f docker-compose.ci.yml down -v --remove-orphans
@@ -167,17 +168,17 @@ steps:
           echo "⚠️ 未找到历史 tag，跳过升级测试"
           exit 0
         fi
-
+        
       - docker compose -f docker-compose.ci.yml down -v --remove-orphans 2>/dev/null || true
       - docker rm -f backend-upgrade-test 2>/dev/null || true
 
       # 阶段 1: 部署旧版本
-      - echo "--- 阶段 1: 部署旧版本 ---"
+      - echo "--- 阶段 1 - 部署旧版本 ---"
       - IMAGE_TAG=old docker compose -f docker-compose.ci.yml up -d postgres redis
       - sleep 5
       - timeout 30s bash -c 'until [ "$(docker inspect --format="{{.State.Health.Status}}" $(docker compose -f docker-compose.ci.yml ps -q postgres) 2>/dev/null)" = "healthy" ]; do sleep 2; done'
       - timeout 30s bash -c 'until [ "$(docker inspect --format="{{.State.Health.Status}}" $(docker compose -f docker-compose.ci.yml ps -q redis) 2>/dev/null)" = "healthy" ]; do sleep 2; done'
-
+      
       # 启动旧版 backend
       - |
         docker run -d --name backend-upgrade-test \
@@ -199,13 +200,13 @@ steps:
           docker logs --tail=100 backend-upgrade-test
           exit 1
         fi
-
+      
       - docker exec backend-upgrade-test alembic history 2>&1 | head -5 || true
       - docker stop backend-upgrade-test
       - docker rm backend-upgrade-test
 
       # 阶段 2: 升级到新版本
-      - echo "--- 阶段 2: 升级到新版本 ---"
+      - echo "--- 阶段 2 - 升级到新版本 ---"
       - |
         docker run -d --name backend-upgrade-test \
           --network clawith_network \
@@ -291,7 +292,6 @@ trigger:
   branch:
     - main
     - release
-    - feat-devops
   event:
     - push
     - pull_request

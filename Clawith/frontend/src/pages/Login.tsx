@@ -9,7 +9,7 @@ import {
     IconArrowRight,
     IconCheck,
 } from '@tabler/icons-react';
-import { AtlasFrame } from '../components/atlas';
+import { AtlasFrame, OriginPlate } from '../components/atlas';
 
 export default function Login() {
     const { t, i18n } = useTranslation();
@@ -84,34 +84,6 @@ export default function Login() {
             .catch(() => { })
             .finally(() => setResolving(false));
     }, []);
-
-    useEffect(() => {
-        let cancelled = false;
-        if (isRegister) {
-            setOauthProviders([]);
-            setOauthError('');
-            return;
-        }
-
-        setOauthLoading(true);
-        setOauthError('');
-        fetchJson<any[]>('/auth/providers')
-            .then(providers => {
-                if (cancelled) return;
-                setOauthProviders((providers || []).filter(p => ['google', 'github'].includes(p.provider_type)));
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setOauthProviders([]);
-                setOauthError('Failed to load social login providers.');
-            })
-            .finally(() => {
-                if (cancelled) return;
-                setOauthLoading(false);
-            });
-
-        return () => { cancelled = true; };
-    }, [isRegister]);
 
     useEffect(() => {
         let cancelled = false;
@@ -404,24 +376,25 @@ export default function Login() {
     return (
         <AtlasFrame onToggleLang={toggleLang}>
             <div className="atlas-screen-split atlas-login-split">
-                {/* ── Left: Branding Panel ── */}
                 <div className="atlas-screen-plate atlas-login-hero">
-                <div className="login-hero-bg" />
-                <div className="login-hero-mark" aria-hidden="true">
-                    <img src="/laboflow-logo-transparent.svg" className="login-hero-mark-logo" alt="" />
-                    <span>LaboFlow</span>
-                    <span className="login-hero-mark-divider" />
-                    <span>{t('login.hero.mark')}</span>
+                    <div className="atlas-login-compass">
+                        <OriginPlate size={620} />
+                    </div>
+                    <div className="login-hero-mark" aria-hidden="true">
+                        <img src="/laboflow-logo-transparent.svg" className="login-hero-mark-logo" alt="" />
+                        <span>LaboFlow</span>
+                        <span className="login-hero-mark-divider" />
+                        <span>{t('login.hero.mark')}</span>
+                    </div>
+                    <div className="atlas-login-welcome login-hero-content">
+                        <h1 className="atlas-h1">
+                            {isZh
+                                ? '欢迎，创始人。'
+                                : `${t('login.hero.welcome')} ${t('login.hero.founder')}.`}
+                        </h1>
+                        <p className="atlas-body atlas-body--muted">{t('login.hero.description')}</p>
+                    </div>
                 </div>
-                <div className="login-hero-content">
-                    <h1 className="login-hero-title">
-                        {t('login.hero.welcome')}{' '}
-                        <span>{t('login.hero.founder')}</span>
-                    </h1>
-                    <p className="login-hero-desc">{t('login.hero.description')}</p>
-                </div>
-                </div>
-
                 {/* ── Right: Form Panel ── */}
                 <div className="atlas-screen-form atlas-login-form-pane">
                     <div className="atlas-login-form-wrapper">

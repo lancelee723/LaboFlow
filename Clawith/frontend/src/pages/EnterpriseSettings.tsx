@@ -272,9 +272,11 @@ export default function EnterpriseSettings() {
         custom: t('agent.toolCategories.custom'),
         general: t('agent.toolCategories.general'),
         agentbay: t('agent.toolCategories.agentbay', 'AgentBay'),
+        webbrowser: t('agent.toolCategories.webbrowser', 'Web Browser'),
     };
     const categoryDescriptions: Record<string, string> = {
         agentbay: 'Browser and cloud computer automation',
+        webbrowser: 'Built-in headless browser: navigate, click, type, and extract',
         file: 'Read, write, convert, and manage workspace files',
         communication: 'Messages and cross-channel collaboration',
         search: 'Web and knowledge search tools',

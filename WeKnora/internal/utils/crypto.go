@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -15,27 +14,14 @@ import (
 // EncPrefix marks a string as AES-256-GCM encrypted
 const EncPrefix = "enc:v1:"
 
-// GetAESKeyFromEnv reads an AES-256 key from an environment variable.
-// The value may be a 64-char hex string (produced by openssl rand -hex 32)
-// or a raw 32-byte string. Returns nil if the value is missing or invalid.
-func GetAESKeyFromEnv(envName string) []byte {
-	val := os.Getenv(envName)
-	if len(val) == 64 {
-		decoded, err := hex.DecodeString(val)
-		if err == nil {
-			return decoded // 32 bytes
-		}
-	}
-	if len(val) == 32 {
-		return []byte(val)
+// GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
+// Returns nil if not set or not exactly 32 bytes.
+func GetAESKey() []byte {
+	key := []byte(os.Getenv("SYSTEM_AES_KEY"))
+	if len(key) == 32 {
+		return key
 	}
 	return nil
-}
-
-// GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
-// Returns nil if not set or not a valid 32-byte key.
-func GetAESKey() []byte {
-	return GetAESKeyFromEnv("SYSTEM_AES_KEY")
 }
 
 // EncryptAESGCM encrypts plaintext with AES-256-GCM.
@@ -110,24 +96,28 @@ func DecryptAESGCM(encrypted string, key []byte) (string, error) {
 }
 
 // DecryptStoredSecret decrypts a value loaded from the database with strict
-// error propagation. Use this from GORM Scan/AfterFind hooks for any field that
-// stores AES-encrypted secrets (API keys, passwords, app secrets).
+// error propagation. Use this in hot-path code that is about to actually
+// USE the credential (e.g. building an upstream HTTP request) — a rotated
+// or missing key must surface as a loud error rather than silently
+// degrading to "no credential", because the user expects the configured
+// upstream call to either work or fail with a clear "auth misconfigured"
+// message.
 //
 // Behaviour:
 //   - empty input -> empty output, no error.
 //   - no enc:v1: prefix -> returned as-is (legacy plaintext column), no error.
 //   - has enc:v1: prefix and SYSTEM_AES_KEY is missing or wrong length ->
-//     returns ErrEncryptedDataMissingKey. Callers MUST propagate this so the
-//     load fails loudly instead of silently surfacing ciphertext as a credential.
+//     returns ErrEncryptedDataMissingKey.
 //   - has enc:v1: prefix and key is set -> decrypts, returns any decryption
 //     error verbatim (e.g. base64 decode failure, GCM auth tag mismatch from a
 //     rotated key).
 //
-// The previous lenient pattern (`if decrypted, err := ...; err == nil { ... }`)
-// hid the rotated-key case and caused the encrypted ciphertext to be sent
-// upstream as the actual API key, surfacing as 401/403 from third-party
-// vendors. Always prefer this helper over calling DecryptAESGCM directly when
-// loading from the database.
+// For GORM Scan paths that load a whole row (where erroring out hides the
+// rest of the resource from the user) use DecryptStoredSecretLenient
+// instead — it lets the row load with the secret blanked out so the UI
+// can render "credential not configured" and the user can re-enter it,
+// without crashing list endpoints when the operator rotates or removes
+// SYSTEM_AES_KEY.
 func DecryptStoredSecret(encrypted string) (string, error) {
 	if encrypted == "" {
 		return "", nil
@@ -140,4 +130,30 @@ func DecryptStoredSecret(encrypted string) (string, error) {
 		return "", ErrEncryptedDataMissingKey
 	}
 	return DecryptAESGCM(encrypted, key)
+}
+
+// DecryptStoredSecretLenient is the load-path counterpart for use inside
+// GORM Scan / AfterFind hooks. It prefers graceful degradation over
+// failing the whole row load.
+//
+// Returns:
+//   - (plaintext, true)  for empty input, legacy plaintext, or successful decrypt
+//   - ("", false)        when the value has the enc:v1: prefix but cannot be
+//     decrypted (SYSTEM_AES_KEY missing, rotated, or ciphertext corrupted).
+//     The bool=false case is the operator's signal: log a warning and treat
+//     the field as unconfigured. The row still loads so the rest of the
+//     resource displays normally; the UI shows "credential not configured",
+//     and any upstream call attempted with this empty value fails with a
+//     clear "missing api key" rather than sending ciphertext as the key.
+//
+// Rationale: a single line of broken ciphertext used to crash entire list
+// endpoints (e.g. ListModels returning "" because one row failed Scan),
+// hiding all other models from the user. Lenient load + loud per-row log
+// is strictly more recoverable than fail-fast Scan.
+func DecryptStoredSecretLenient(encrypted string) (plaintext string, ok bool) {
+	plain, err := DecryptStoredSecret(encrypted)
+	if err != nil {
+		return "", false
+	}
+	return plain, true
 }

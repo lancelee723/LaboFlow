@@ -8,7 +8,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
 import type { ThinkingData } from '@/types/tool-results';
 import { useI18n } from 'vue-i18n';
 

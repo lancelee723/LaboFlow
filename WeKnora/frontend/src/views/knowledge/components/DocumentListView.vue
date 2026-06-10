@@ -39,7 +39,7 @@ const emit = defineEmits<{
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
   (e: 'tag-change', item: KnowledgeItem, value: string): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
 }>();
 
 const { t } = useI18n();
@@ -97,8 +97,17 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
   if (item.parse_status === 'pending' || item.parse_status === 'processing') {
     return { label: t('knowledgeBase.statusProcessing'), theme: 'primary', icon: 'loading', spin: true };
   }
+  if (item.parse_status === 'finalizing') {
+    if (item.summary_status === 'pending' || item.summary_status === 'processing') {
+      return { label: t('knowledgeBase.generatingSummary'), theme: 'primary', icon: 'loading', spin: true };
+    }
+    return { label: t('knowledgeBase.statusFinalizing'), theme: 'primary', icon: 'loading', spin: true };
+  }
   if (item.parse_status === 'failed') {
     return { label: t('knowledgeBase.statusFailed'), theme: 'danger', icon: 'close-circle' };
+  }
+  if (item.parse_status === 'cancelled') {
+    return { label: t('knowledgeBase.statusCancelled'), theme: 'warning', icon: 'close-circle' };
   }
   if (item.parse_status === 'draft') {
     return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
@@ -161,7 +170,11 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem) => {
+const CANCELABLE_PARSE_STATUSES = new Set(['pending', 'processing', 'finalizing']);
+const canCancelParse = (item: KnowledgeItem) =>
+  CANCELABLE_PARSE_STATUSES.has(String(item.parse_status ?? ''));
+
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
   moreOpen.value = null;
   item.isMore = false;
   emit('action', action, item);
@@ -499,6 +512,14 @@ const treeRows = computed<TreeRow[]>(() => {
                       <t-icon class="icon" name="refresh" />
                       <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                     </div>
+                    <div
+                      v-if="canCancelParse(row.item)"
+                      class="row-menu-item danger"
+                      @click.stop="handleAction('cancel-parse', row.item)"
+                    >
+                      <t-icon class="icon" name="close-circle" />
+                      <span>{{ t('knowledgeBase.cancelParse') }}</span>
+                    </div>
                     <div class="row-menu-item" @click.stop="handleAction('move', row.item)">
                       <t-icon class="icon" name="swap" />
                       <span>{{ t('knowledgeBase.moveDocument') }}</span>
@@ -623,6 +644,14 @@ const treeRows = computed<TreeRow[]>(() => {
                   <div class="row-menu-item" @click.stop="handleAction('reparse', item)">
                     <t-icon class="icon" name="refresh" />
                     <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                  </div>
+                  <div
+                    v-if="canCancelParse(item)"
+                    class="row-menu-item danger"
+                    @click.stop="handleAction('cancel-parse', item)"
+                  >
+                    <t-icon class="icon" name="close-circle" />
+                    <span>{{ t('knowledgeBase.cancelParse') }}</span>
                   </div>
                   <div class="row-menu-item" @click.stop="handleAction('move', item)">
                     <t-icon class="icon" name="swap" />

@@ -2,8 +2,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,12 +33,12 @@ func newCurrentUserResponse(user *sdk.AuthUser, tenant *sdk.AuthTenant) *sdk.Cur
 	return r
 }
 
-func TestRunStatus_HumanOutput(t *testing.T) {
+func TestRunStatus_TextOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
 	require.NoError(t, config.Save(&config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TenantID: 7},
 		},
 	}))
@@ -52,9 +52,9 @@ func TestRunStatus_HumanOutput(t *testing.T) {
 			&sdk.AuthTenant{ID: 7, Name: "Acme"},
 		),
 	}
-	require.NoError(t, runStatus(context.Background(), &StatusOptions{}, f, svc))
+	require.NoError(t, runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, svc))
 	got := out.String()
-	assert.Contains(t, got, "context: prod")
+	assert.Contains(t, got, "profile: prod")
 	assert.Contains(t, got, "host:    https://kb.example.com")
 	assert.Contains(t, got, "alice@example.com")
 	assert.Contains(t, got, "Acme")
@@ -64,19 +64,26 @@ func TestRunStatus_JSONOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
 	require.NoError(t, config.Save(&config.Config{
-		CurrentContext: "prod",
-		Contexts:       map[string]config.Context{"prod": {Host: "https://x"}},
+		CurrentProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {Host: "https://x"}},
 	}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	svc := &fakeStatusService{resp: newCurrentUserResponse(&sdk.AuthUser{ID: "u1", Email: "a@b.c", TenantID: 7}, nil)}
-	require.NoError(t, runStatus(context.Background(), &StatusOptions{JSONOut: true}, f, svc))
-	assert.True(t, strings.HasPrefix(out.String(), `{"ok":true`), "got: %q", out.String())
-	assert.Contains(t, out.String(), `"email":"a@b.c"`)
+	require.NoError(t, runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, f, svc))
+	got := out.String()
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "prod", env.Data["profile"], "profile field should be prod")
+	assert.Contains(t, got, `"email":"a@b.c"`)
 }
 
 func TestRunStatus_NoSDKClient(t *testing.T) {
 	iostreams.SetForTest(t)
-	err := runStatus(context.Background(), &StatusOptions{}, &cmdutil.Factory{}, nil)
+	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &cmdutil.Factory{}, nil)
 	require.Error(t, err)
 	assert.True(t, cmdutil.IsAuthError(err))
 }
@@ -84,11 +91,11 @@ func TestRunStatus_NoSDKClient(t *testing.T) {
 func TestRunStatus_SDKError_Transport(t *testing.T) {
 	iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
-	require.NoError(t, config.Save(&config.Config{CurrentContext: "p", Contexts: map[string]config.Context{"p": {Host: "https://x"}}}))
+	require.NoError(t, config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
-	err := runStatus(context.Background(), &StatusOptions{}, f, &fakeStatusService{err: assert.AnError})
+	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: assert.AnError})
 	require.Error(t, err)
-	// Non-HTTP errors (DNS / TCP) are transport problems, not auth problems —
+	// Non-HTTP errors (DNS / TCP) are transport problems, not auth problems -
 	// classify network.error so retry logic / exit code 7 / IsTransient apply.
 	assert.True(t, cmdutil.IsTransient(err), "expected transient/network classification, got %v", err)
 }
@@ -96,9 +103,9 @@ func TestRunStatus_SDKError_Transport(t *testing.T) {
 func TestRunStatus_SDKError_HTTP401(t *testing.T) {
 	iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
-	require.NoError(t, config.Save(&config.Config{CurrentContext: "p", Contexts: map[string]config.Context{"p": {Host: "https://x"}}}))
+	require.NoError(t, config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
-	err := runStatus(context.Background(), &StatusOptions{}, f, &fakeStatusService{err: errors.New("HTTP error 401: invalid token")})
+	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: errors.New("HTTP error 401: invalid token")})
 	require.Error(t, err)
 	assert.True(t, cmdutil.IsAuthError(err))
 }

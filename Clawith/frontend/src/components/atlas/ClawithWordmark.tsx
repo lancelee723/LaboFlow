@@ -1,5 +1,5 @@
 interface Props {
-    /** Rendered height in px. */
+    /** Rendered height in px (width scales to preserve the source aspect ratio). */
     height?: number;
     className?: string;
 }
@@ -14,6 +14,7 @@ export default function ClawithWordmark({ height = 32, className }: Props) {
             alt="LaboFlow"
             className={className}
             style={{ height, width: 'auto', display: 'block' }}
+            decoding="async"
         />
     );
 }

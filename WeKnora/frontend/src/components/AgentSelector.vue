@@ -280,6 +280,7 @@ import AgentAvatar from '@/components/AgentAvatar.vue';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { SharedAgentInfo } from '@/api/organization';
+import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -349,8 +350,10 @@ const isSharedAgentSelected = (shared: SharedAgentInfo) =>
 const isMyAgentSelected = (agent: CustomAgent) =>
   props.currentAgentId === agent.id && !currentAgentSourceTenantId.value;
 
+type AgentCapabilitySource = CustomAgent | SharedAgentInfo['agent'];
+
 // 获取知识库能力描述
-const getKbCapability = (agent: CustomAgent): string => {
+const getKbCapability = (agent: AgentCapabilitySource): string => {
   const config = agent.config || {};
   if (config.kb_selection_mode === 'none') {
     return '';
@@ -363,7 +366,7 @@ const getKbCapability = (agent: CustomAgent): string => {
 };
 
 // 获取 MCP 能力描述（更详细：全部 / 指定 N 个）
-const getMcpCapability = (agent: CustomAgent): string => {
+const getMcpCapability = (agent: AgentCapabilitySource): string => {
   const config = agent.config || {};
   if (config.mcp_selection_mode === 'none' || (!config.mcp_services?.length && config.mcp_selection_mode !== 'all')) {
     return '';
@@ -399,33 +402,37 @@ const goToSettings = (agent: CustomAgent) => {
 // 更新下拉框位置（与模型选择器一致）
 const updateDropdownPosition = () => {
   if (!props.anchorEl) return;
-  
-  const rect = props.anchorEl.getBoundingClientRect();
+
+  // Normalize everything to CSS pixels up front so we can compare anchor
+  // coords, viewport bounds, and the dropdown's own width/height in a single
+  // coordinate system. `getBoundingClientRect()` and `window.innerWidth/Height`
+  // report visual pixels which are pre-multiplied by the root zoom.
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(props.anchorEl.getBoundingClientRect(), zoom);
+  const { width: vw, height: vh } = cssViewportSize(zoom);
+
   const dropdownWidth = 200;
   const offsetY = 8;
-  const vh = window.innerHeight;
-  const vw = window.innerWidth;
-  
+
   // 水平位置：左对齐
   let left = Math.floor(rect.left);
   const minLeft = 16;
   const maxLeft = Math.max(16, vw - dropdownWidth - 16);
   left = Math.max(minLeft, Math.min(maxLeft, left));
-  
+
   // 垂直位置
   const preferredDropdownHeight = 320;
   const minDropdownHeight = 100;
   const topMargin = 20;
   const spaceBelow = vh - rect.bottom;
   const spaceAbove = rect.top;
-  
+
   let actualHeight: number;
-  
+
   if (spaceBelow >= minDropdownHeight + offsetY) {
-    // 向下弹出
     actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16);
     const top = Math.floor(rect.bottom + offsetY);
-    
+
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,
@@ -435,14 +442,13 @@ const updateDropdownPosition = () => {
       zIndex: '9999'
     };
   } else {
-    // 向上弹出
     const availableHeight = spaceAbove - offsetY - topMargin;
-    actualHeight = availableHeight >= preferredDropdownHeight 
-      ? preferredDropdownHeight 
+    actualHeight = availableHeight >= preferredDropdownHeight
+      ? preferredDropdownHeight
       : Math.max(minDropdownHeight, availableHeight);
-    
+
     const bottom = vh - rect.top + offsetY;
-    
+
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,

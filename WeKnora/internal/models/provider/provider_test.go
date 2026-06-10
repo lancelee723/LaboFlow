@@ -36,6 +36,7 @@ func TestDetectProvider(t *testing.T) {
 		expected ProviderName
 	}{
 		{"https://api.openai.com/v1", ProviderOpenAI},
+		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
@@ -58,6 +59,36 @@ func TestDetectProvider(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestAnthropicProviderValidation(t *testing.T) {
+	p := &AnthropicProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "sk-ant-test",
+			ModelName: "claude-sonnet-4-5",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "claude-sonnet-4-5",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderAnthropic, info.Name)
+		assert.Equal(t, AnthropicBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.True(t, info.RequiresAuth)
+	})
 }
 
 func TestOpenAIProviderValidation(t *testing.T) {
@@ -200,14 +231,19 @@ func TestListByModelType(t *testing.T) {
 		providers := ListByModelType(types.ModelTypeRerank)
 		assert.NotEmpty(t, providers)
 		// Check that Aliyun supports rerank
-		found := false
+		foundAliyun := false
+		foundLKEAP := false
 		for _, p := range providers {
 			if p.Name == ProviderAliyun {
-				found = true
-				break
+				foundAliyun = true
+			}
+			if p.Name == ProviderLKEAP {
+				foundLKEAP = true
+				assert.Equal(t, LKEAPRerankBaseURL, p.GetDefaultURL(types.ModelTypeRerank))
 			}
 		}
-		assert.True(t, found, "Aliyun should support rerank")
+		assert.True(t, foundAliyun, "Aliyun should support rerank")
+		assert.True(t, foundLKEAP, "LKEAP should support rerank")
 	})
 
 	t.Run("embedding models include openrouter", func(t *testing.T) {
@@ -224,5 +260,21 @@ func TestListByModelType(t *testing.T) {
 		}
 
 		assert.True(t, found, "OpenRouter should support embedding")
+	})
+
+	t.Run("embedding models include gemini", func(t *testing.T) {
+		providers := ListByModelType(types.ModelTypeEmbedding)
+		assert.NotEmpty(t, providers)
+
+		found := false
+		for _, p := range providers {
+			if p.Name == ProviderGemini {
+				found = true
+				assert.Equal(t, GeminiBaseURL, p.GetDefaultURL(types.ModelTypeEmbedding))
+				break
+			}
+		}
+
+		assert.True(t, found, "Gemini should support embedding via the native Gemini API")
 	})
 }

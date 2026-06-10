@@ -665,7 +665,8 @@
       "discovery": "Discovery",
       "feishu": "Feishu / Lark",
       "agentbay": "AgentBay",
-      "okr": "OKR"
+      "okr": "OKR",
+      "webbrowser": "Web Browser"
     },
     "upload": {
       "success": "Upload successful",
@@ -1503,12 +1504,6 @@
       "period": "Period",
       "agents": "Agents",
       "ttl": "TTL",
-      "deleteUser": "Delete",
-      "deleteUserTitle": "Delete User",
-      "deleteUserConfirmLabel": "Type the username to confirm",
-      "deleteUserConfirm": "This will permanently remove {{name}} from this organization. This action cannot be undone.",
-      "deleteUserSuccess": "User removed successfully",
-      "deleteUserError": "Failed to remove user",
       "edit": "Edit",
       "clickToSort": "Click to toggle sort order",
       "platformAdmin": "Platform\nAdmin",
