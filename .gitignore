@@ -122,3 +122,8 @@ docker-compose.override.yml
 *.tgz
 *.lock
 *.log
+
+# ── PPT-Master sub-allowlist (overrides earlier Python/lockfile patterns) ──
+!PPT-Master/apps/webui/src/lib/
+!PPT-Master/apps/webui/src/lib/**
+!PPT-Master/apps/worker/uv.lock
