@@ -507,7 +507,11 @@ export default function Layout() {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const { token: ssoToken, ppt_master_url } = await res.json();
             const baseUrl = resolveWeKnoraBrowserUrl(ppt_master_url || '/ppt-master');
-            window.open(`${baseUrl}/sso?token=${encodeURIComponent(ssoToken)}`, '_blank', 'noopener,noreferrer');
+            window.open(
+                `${baseUrl}/sso?token=${encodeURIComponent(ssoToken)}&redirect_url=${encodeURIComponent('/ppt-master/projects')}`,
+                '_blank',
+                'noopener,noreferrer'
+            );
         } catch (err) {
             console.error('[PPT Master SSO] failed:', err);
             alert(isChinese ? '打开 PPT Master 失败，请稍后重试' : 'Failed to open PPT Master. Please try again.');

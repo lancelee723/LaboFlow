@@ -78,6 +78,7 @@ async def sso_callback(
         # we're deploying behind HTTPS in production. Mirrors auth/routes.py.
         secure=False,
         samesite="lax",
+        path="/ppt-master",
         max_age=86400 * 7,
     )
     return response

@@ -131,3 +131,30 @@ async def test_sso_callback_handles_missing_email_claim(db_session) -> None:
     assert claims["sub"] == "no-email-user"
     # Synthetic email applied by sso_service.get_or_create_user_by_sso
     assert claims["email"] == "no-email-user@unknown"
+
+
+@pytest.mark.asyncio
+async def test_sso_callback_rejects_protocol_relative_redirect_url(db_session) -> None:
+    """Bypass attempt: redirect_url starting with // should be replaced with /projects."""
+    s = get_settings()
+    token = _mint({
+        "sub": "redirect-test",
+        "email": "redir@example.com",
+        "role": "user",
+        "aud": s.pptmaster_sso_audience,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+    })
+
+    sso_db_ctx = _make_sso_db_session(db_session)
+
+    transport = ASGITransport(app=app)
+    with patch("pptmaster.auth.sso_routes.open_db_session", sso_db_ctx):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/sso",
+                params={"token": token, "redirect_url": "//evil.com/phish"},
+                follow_redirects=False,
+            )
+    assert resp.status_code == 302
+    # Open-redirect guard falls back to /projects
+    assert resp.headers["location"] == "/projects"

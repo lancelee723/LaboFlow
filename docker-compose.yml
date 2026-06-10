@@ -161,7 +161,7 @@ services:
       STORAGE_BACKEND: volume
       STORAGE_ROOT: /data
       PPTMASTER_CONVERTER_URL: http://pptmaster-converter:3000
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3008}
+      PUBLIC_BASE_URL: ${PPTMASTER_PUBLIC_BASE_URL:-${PUBLIC_BASE_URL:-http://localhost:3008}/ppt-master}
       PPTMASTER_SCRIPTS_DIR: /opt/pptmaster-skill/scripts
       PPTMASTER_TEMPLATES_DIR: /opt/pptmaster-skill/templates
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -261,6 +261,8 @@ services:
       - clawith-backend
       - frontend
       - pro-slides
+      - pptmaster-worker
+      - pptmaster-webui
     networks:
       - laboflow
       - WeKnora-network  # must reach frontend (WeKnora) on its own network
