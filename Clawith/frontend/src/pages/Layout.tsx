@@ -27,6 +27,7 @@ import {
     IconArrowUpRight,
     IconBook2,
     IconPresentation,
+    IconSlideshow,
     IconBuilding,
     IconChevronUp,
     IconChevronRight,
@@ -492,6 +493,28 @@ export default function Layout() {
             setKbLoading(false);
         }
     }, [kbLoading, isChinese, resolveWeKnoraBrowserUrl]);
+
+    const [pptMasterLoading, setPptMasterLoading] = useState(false);
+
+    const openPPTMasterSSO = useCallback(async () => {
+        if (pptMasterLoading) return;
+        setPptMasterLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch('/api/enterprise/ppt-master/sso-token', {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const { token: ssoToken, ppt_master_url } = await res.json();
+            const baseUrl = resolveWeKnoraBrowserUrl(ppt_master_url || '/ppt-master');
+            window.open(`${baseUrl}/sso?token=${encodeURIComponent(ssoToken)}`, '_blank', 'noopener,noreferrer');
+        } catch (err) {
+            console.error('[PPT Master SSO] failed:', err);
+            alert(isChinese ? '打开 PPT Master 失败，请稍后重试' : 'Failed to open PPT Master. Please try again.');
+        } finally {
+            setPptMasterLoading(false);
+        }
+    }, [pptMasterLoading, isChinese, resolveWeKnoraBrowserUrl]);
 
     const openProSlidesSSO = useCallback(async () => {
         if (pptLoading) return;
@@ -1124,6 +1147,18 @@ export default function Layout() {
                                 <IconBook2 size={14} stroke={1.5} />
                             </span>
                             <span className="sidebar-item-text">{t('nav.knowledgeBase', 'Knowledge Base')}</span>
+                            <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
+                        </button>
+                        <button
+                            className="sidebar-item"
+                            onClick={openPPTMasterSSO}
+                            disabled={pptMasterLoading}
+                            style={{ cursor: pptMasterLoading ? 'wait' : 'pointer', width: '100%', textAlign: 'left', opacity: pptMasterLoading ? 0.6 : 1 }}
+                        >
+                            <span className="sidebar-item-icon" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                <IconSlideshow size={14} stroke={1.5} />
+                            </span>
+                            <span className="sidebar-item-text">{t('nav.pptMaster', 'PPT Master')}</span>
                             <IconArrowUpRight size={10} stroke={1.5} style={{ marginLeft: 'auto', opacity: 0.4 }} />
                         </button>
                         <button
