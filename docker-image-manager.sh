@@ -27,6 +27,11 @@ DOCKER_MIRROR="docker.1ms.run"
 # 示例: http://mirrors.tuna.tsinghua.edu.cn
 APT_MIRROR=""
 
+# Go module 代理（用于 WeKnora 的 Dockerfile.app 内 go mod download / go install）
+# 国内可用值: https://goproxy.cn,direct  https://goproxy.io,direct
+# 国外直连:   https://proxy.golang.org,direct
+GOPROXY="https://goproxy.cn,direct"
+
 # 镜像清单：name|context_dir|dockerfile（相对仓库根目录）
 # 新增镜像在此追加一行即可，菜单会自动出现。
 IMAGES=(
@@ -430,11 +435,13 @@ build_image() {
 
   local args=(buildx build
     --platform "$platforms"
+    --pull
     --progress=plain
     --build-arg "DEBIAN_MIRROR=$LINUX_MIRROR"
     --build-arg "APT_MIRROR=$APT_MIRROR"
     --build-arg "APK_MIRROR_ARG=$LINUX_MIRROR"
     --build-arg "DOCKER_MIRROR=$DOCKER_MIRROR"
+    --build-arg "GOPROXY_ARG=$GOPROXY"
     -f "$df"
     -t "$full_tag" -t "$minor_tag" -t "$latest_tag"
   )
