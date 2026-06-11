@@ -298,7 +298,8 @@ function confirmLeaveTenant() {
         if (resp.success) {
           MessagePlugin.success(t('tenantMember.leave.success'))
           authStore.logout()
-          window.location.href = '/login'
+          // Respect Vite BASE_URL (e.g. /kb/ under LaboFlow) — see request.ts.
+          window.location.href = `${(import.meta.env.BASE_URL || '/').replace(/\/+$/, '')}/login`
         } else {
           MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
         }

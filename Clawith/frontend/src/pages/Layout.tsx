@@ -530,7 +530,7 @@ export default function Layout() {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const { token: ssoToken, proslides_url } = await res.json();
-            const baseUrl = resolveWeKnoraBrowserUrl(proslides_url || '/ppt');
+            const baseUrl = resolveWeKnoraBrowserUrl(proslides_url || '/pro-slides');
             window.open(`${baseUrl}/sso?token=${encodeURIComponent(ssoToken)}`, '_blank', 'noopener,noreferrer');
         } catch (err) {
             console.error('[Pro Slides SSO] failed:', err);

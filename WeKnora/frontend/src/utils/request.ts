@@ -86,8 +86,13 @@ const processQueue = (error: any, token: string | null = null) => {
 
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
-  if (window.location.pathname === '/login') return;
-  window.location.href = '/login';
+  // Honor Vite's BASE_URL so SPA-on-subpath deployments (e.g. LaboFlow's
+  // /kb/) don't escape to the host root, where the LaboFlow shell would
+  // mistake the request for a Clawith login.
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
+  const loginPath = `${base}/login`;
+  if (window.location.pathname === loginPath) return;
+  window.location.href = loginPath;
 }
 
 instance.interceptors.response.use(

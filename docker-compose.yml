@@ -93,6 +93,10 @@ services:
       - PPT_AGENT_ID=${PPT_AGENT_ID:-}
       - NEXT_PUBLIC_PPT_AGENT_ID=${PPT_AGENT_ID:-}
       - PORT=7456
+      # See docker-compose-fnos.yml for the ROOT_PATH / SSO rationale.
+      - ROOT_PATH=/pro-slides
+      - PRO_SLIDES_SSO_ENABLED=true
+      - PRO_SLIDES_SSO_SECRET=${JWT_SECRET_KEY:-change-me-jwt-secret}
     labels:
       - "traefik.enable=false"
     networks:
@@ -134,7 +138,7 @@ services:
     image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-1.0}
     restart: "no"
     command: >
-      bash -c "alembic upgrade head && python -m pptmaster.bootstrap"
+      sh -c "alembic upgrade head && python -m pptmaster.bootstrap"
     environment:
       DATABASE_URL: postgresql+asyncpg://${PPTMASTER_POSTGRES_USER:-pptmaster}:${PPTMASTER_POSTGRES_PASSWORD:-pptmaster}@pptmaster-postgres:5432/${PPTMASTER_POSTGRES_DB:-pptmaster}
       SYSTEM_AES_KEY: ${SYSTEM_AES_KEY:-}
@@ -190,6 +194,13 @@ services:
     restart: unless-stopped
     depends_on:
       - pptmaster-worker
+    # IPv6-only /etc/hosts 环境下用 localhost 会被 wget 解析到 ::1 失败，
+    # 强制 127.0.0.1 绕过名称解析（详见 docker-compose-fnos.yml 注释）。
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     networks:
       - laboflow
 

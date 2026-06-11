@@ -195,7 +195,7 @@ async def get_pro_slides_sso_token(
 ):
     """Mint a short-lived SSO JWT for Pro Slides.
 
-    The frontend opens ``/ppt/sso?token=<jwt>`` to automatically log
+    The frontend opens ``/pro-slides/sso?token=<jwt>`` to automatically log
     the user into Pro Slides without requiring a separate credential.
     """
     token = create_sso_token(
@@ -204,7 +204,7 @@ async def get_pro_slides_sso_token(
         audience="pro-slides",
         role=getattr(current_user, "role", "user"),
     )
-    slides_url = _resolve_browser_kb_url("/ppt", request)
+    slides_url = _resolve_browser_kb_url("/pro-slides", request)
     return {"token": token, "proslides_url": slides_url}
 
 

@@ -1,9 +1,15 @@
 """Thin wrapper around the PPT-Master skill's svg_to_pptx/pptx_cli.py for in-graph use."""
+import os
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]  # apps/worker/src/pptmaster/scripts/ -> repo root
-_SKILL_SCRIPTS = _REPO_ROOT.parent / "ppt-master" / "skills" / "ppt-master" / "scripts"
+# See total_md_split.py for the rationale (env-var first, guarded dev fallback).
+_PARENTS = Path(__file__).resolve().parents
+_DEV_DEFAULT = (
+    str(_PARENTS[5].parent / "ppt-master" / "skills" / "ppt-master" / "scripts")
+    if len(_PARENTS) > 5 else "/opt/pptmaster-skill/scripts"
+)
+_SKILL_SCRIPTS = Path(os.environ.get("PPTMASTER_SCRIPTS_DIR") or _DEV_DEFAULT)
 
 
 def run(project_path: Path) -> None:

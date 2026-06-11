@@ -17,7 +17,7 @@ REGISTRY="crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow"
 DEFAULT_TAG="1.0.0"
 
 # Linux apt 源地址（仅影响 Dockerfile 内 Debian/apt 源，不影响 Docker 镜像源）
-LINUX_MIRROR="deb.debian.org"
+LINUX_MIRROR="mirrors.tuna.tsinghua.edu.cn"
 
 # Docker Hub 镜像加速源（用于 Dockerfile FROM 拉取基础镜像）
 # 可选值: docker.1ms.run, docker.m.daocloud.io, docker.io（直连，无加速）

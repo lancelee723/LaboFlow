@@ -1,9 +1,19 @@
 """Thin wrapper around the PPT-Master skill's total_md_split.py for in-graph use."""
+import os
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]  # apps/worker/src/pptmaster/scripts/ -> repo root
-_SKILL_SCRIPTS = _REPO_ROOT.parent / "ppt-master" / "skills" / "ppt-master" / "scripts"
+# Container deploys set PPTMASTER_SCRIPTS_DIR (Dockerfile.worker ENV). Dev mode
+# expects the skill repo to sit beside this monorepo at <ws>/ppt-master/skills/...
+# parents[5] only resolves to a real repo root when the dev layout has enough depth,
+# so guard against shorter paths (container layout: /app/src/pptmaster/scripts/...)
+# which would otherwise raise IndexError at import time.
+_PARENTS = Path(__file__).resolve().parents
+_DEV_DEFAULT = (
+    str(_PARENTS[5].parent / "ppt-master" / "skills" / "ppt-master" / "scripts")
+    if len(_PARENTS) > 5 else "/opt/pptmaster-skill/scripts"
+)
+_SKILL_SCRIPTS = Path(os.environ.get("PPTMASTER_SCRIPTS_DIR") or _DEV_DEFAULT)
 
 
 def run(project_path: Path) -> None:
