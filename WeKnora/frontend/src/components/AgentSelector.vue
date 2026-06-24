@@ -350,10 +350,8 @@ const isSharedAgentSelected = (shared: SharedAgentInfo) =>
 const isMyAgentSelected = (agent: CustomAgent) =>
   props.currentAgentId === agent.id && !currentAgentSourceTenantId.value;
 
-type AgentCapabilitySource = CustomAgent | SharedAgentInfo['agent'];
-
 // 获取知识库能力描述
-const getKbCapability = (agent: AgentCapabilitySource): string => {
+const getKbCapability = (agent: CustomAgent): string => {
   const config = agent.config || {};
   if (config.kb_selection_mode === 'none') {
     return '';
@@ -366,16 +364,16 @@ const getKbCapability = (agent: AgentCapabilitySource): string => {
 };
 
 // 获取 MCP 能力描述（更详细：全部 / 指定 N 个）
-const getMcpCapability = (agent: AgentCapabilitySource): string => {
+const getMcpCapability = (agent: CustomAgent): string => {
   const config = agent.config || {};
   if (config.mcp_selection_mode === 'none' || (!config.mcp_services?.length && config.mcp_selection_mode !== 'all')) {
     return '';
   }
   if (config.mcp_selection_mode === 'all') {
-    return t('agent.detail.shareScope.mcpAll');
+    return t('agent.shareScope.mcpAll');
   }
   if (config.mcp_services?.length) {
-    return t('agent.detail.shareScope.mcpSelected', { count: config.mcp_services.length });
+    return t('agent.shareScope.mcpSelected', { count: config.mcp_services.length });
   }
   return t('agent.capabilities.mcpEnabled');
 };

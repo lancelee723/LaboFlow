@@ -218,7 +218,8 @@ async def process_dingtalk_message(
             .order_by(ChatMessage.created_at.desc())
             .limit(ctx_size)
         )
-        history = [{"role": m.role, "content": m.content} for m in reversed(history_r.scalars().all())]
+        from app.services.llm.utils import convert_chat_messages_to_llm_format as _conv
+        history = _conv(reversed(history_r.scalars().all()))
 
         # Build saved_content for DB (no base64 blobs, keep it display-friendly)
         import re as _re_dt
@@ -448,7 +449,7 @@ async def dingtalk_callback(
             pass
 
     # 2. Get DingTalk provider config
-    auth_provider = await auth_provider_registry.get_provider(db, "dingtalk", str(tenant_id) if tenant_id else None)
+    auth_provider = await auth_provider_registry.get_provider("dingtalk", str(tenant_id) if tenant_id else None)
     if not auth_provider:
         return HTMLResponse("Auth failed: DingTalk provider not configured for this tenant")
 

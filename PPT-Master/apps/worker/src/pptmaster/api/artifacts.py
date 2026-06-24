@@ -152,7 +152,7 @@ def _decorate_artifact_entry(project_id: str, artifact: dict[str, str | int]) ->
         content_type=artifact["content_type"],
         size=int(artifact["size"]),
         updated_at=updated_at_str,
-        url=f"/api/projects/{project_id}/artifacts/file?path={path}&t={cache_bust}",
+        url=f"/ppt-master/api/projects/{project_id}/artifacts/file?path={path}&t={cache_bust}",
     )
 
 

@@ -226,9 +226,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // It verifies the Clawith-issued JWT and creates/logs in the user.
 func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 	ctx := c.Request.Context()
-
 	logger.Info(ctx, "Start Clawith SSO login")
-
 	var req struct {
 		Token string `json:"token" binding:"required"`
 	}
@@ -238,8 +236,6 @@ func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
-
-	// Verify the Clawith JWT using the shared JWT_SECRET
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		logger.Error(ctx, "JWT_SECRET not configured")
@@ -247,7 +243,6 @@ func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
-
 	token, err := jwt.Parse(req.Token, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -260,15 +255,12 @@ func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
-
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		appErr := errors.NewUnauthorizedError("Invalid SSO token claims")
 		c.Error(appErr)
 		return
 	}
-
-	// Verify audience
 	aud, _ := claims["aud"].(string)
 	if aud != "weknora" {
 		logger.Warnf(ctx, "SSO: token audience mismatch: %s", aud)
@@ -276,18 +268,13 @@ func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
-
 	email, _ := claims["email"].(string)
 	if email == "" {
 		appErr := errors.NewValidationError("Email is required in SSO token")
 		c.Error(appErr)
 		return
 	}
-
-	// Derive username from email prefix
 	username := strings.Split(email, "@")[0]
-
-	// Login or create user via SSO
 	response, err := h.userService.LoginWithSSO(ctx, email, username)
 	if err != nil {
 		logger.Errorf(ctx, "SSO: login failed: %v", err)
@@ -295,13 +282,11 @@ func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 		c.Error(appErr)
 		return
 	}
-
 	if !response.Success {
 		logger.Warnf(ctx, "SSO: login failed: %s", response.Message)
 		c.JSON(http.StatusUnauthorized, response)
 		return
 	}
-
 	logger.Infof(ctx, "SSO: Clawith user logged in successfully, email: %s", secutils.SanitizeForLog(email))
 	c.JSON(http.StatusOK, response)
 }

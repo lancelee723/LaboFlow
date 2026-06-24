@@ -17,9 +17,10 @@
                 <h2 class="sidebar-title">{{ mode === 'create' ? $t('agent.editor.createTitle') :
                   $t('agent.editor.editTitle') }}</h2>
               </div>
-              <div class="settings-nav">
+              <div class="settings-nav" data-guide="agent-editor-sidebar">
                 <div v-for="(item, index) in navItems" :key="index"
-                  :class="['nav-item', { 'active': currentSection === item.key }]" @click="currentSection = item.key">
+                  :class="['nav-item', { 'active': currentSection === item.key }]"
+                  :data-guide="`agent-editor-nav-${item.key}`" @click="currentSection = item.key">
                   <t-icon :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
                 </div>
@@ -72,7 +73,7 @@
                           $t('agent.editor.normalDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent">
+                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent" data-guide="agent-create-mode">
                           <t-radio-button value="quick-answer">
                             {{ $t('agent.type.normal') }}
                           </t-radio-button>
@@ -84,7 +85,8 @@
                     </div>
 
                     <!-- 智能体类型（仅智能推理模式下显示） -->
-                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize">
+                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize"
+                      data-guide="agent-create-agent-type">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.agentType.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.agentType.desc') }}</p>
@@ -106,7 +108,7 @@
                     </div>
 
                     <!-- 名称 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-name">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.name') }} <span v-if="!isBuiltinAgent"
                             class="required">*</span></label>
@@ -329,7 +331,7 @@
 
                   <div class="settings-group">
                     <!-- 模型选择 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-model">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
@@ -391,7 +393,7 @@
 
                   <div class="settings-group">
                     <!-- 图片上传（多模态） -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-multimodal">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.desc') }}</p>
@@ -721,6 +723,17 @@
                       </div>
                     </div>
 
+                    <!-- 思考模式（写入 config.thinking，映射到 LLM 请求参数） -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.thinking') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="thinkingEnabled" />
+                      </div>
+                    </div>
+
                     <!-- 最大迭代次数 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -846,7 +859,7 @@
 
                   <div class="settings-group">
                     <!-- 关联知识库 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-knowledge">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.knowledgeBases') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.kbScope') }}</p>
@@ -1277,7 +1290,7 @@
                 </div>
 
                 <!-- IM集成（仅编辑模式） -->
-                <div v-if="props.mode === 'edit' && props.agent?.id" v-show="currentSection === 'im'" class="section">
+                <div v-if="props.mode === 'edit' && props.agent?.id && currentSection === 'im'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
                     <p class="section-description">
@@ -1300,7 +1313,8 @@
                 <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
                   $t('common.cancel')
                   }}</t-button>
-                <t-button v-if="!props.readOnly" theme="primary" :loading="saving" @click="handleSave">{{
+                <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
+                  @click="handleSave">{{
                   $t('common.confirm')
                   }}</t-button>
               </div>
@@ -1310,17 +1324,22 @@
       </div>
     </Transition>
   </Teleport>
+
+  <AgentCreateContextualGuide :when="visible && mode === 'create'" :is-agent-mode="isAgentMode" />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
+import {
+  AGENT_EDITOR_FOCUS_SECTION_EVENT,
+  markContextualGuideDone,
+} from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
   updateAgent,
-  getPlaceholders,
-  getAgentTypePresets,
   type CustomAgent,
   type PlaceholderDefinition,
   type AgentTypePreset,
@@ -1328,16 +1347,16 @@ import {
   type AgentTypeKBFilter,
   type KBCapabilities,
 } from '@/api/agent';
-import { listModels, type ModelConfig } from '@/api/model';
-import { listKnowledgeBases } from '@/api/knowledge-base';
-import { listMCPServices, type MCPService } from '@/api/mcp-service';
-import { listSkills, type SkillInfo } from '@/api/skill';
-import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
-import { getStorageEngineStatus, getPromptTemplates, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
-import { getTenantRetrievalConfig } from '@/api/retrieval';
+import { type ModelConfig } from '@/api/model';
+import { type MCPService } from '@/api/mcp-service';
+import { type SkillInfo } from '@/api/skill';
+import { type WebSearchProviderEntity } from '@/api/web-search-provider';
+import { type StorageEngineStatusItem, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
+import { useChatResourcesStore } from '@/stores/chatResources';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
@@ -1354,6 +1373,8 @@ import {
 const uiStore = useUIStore();
 const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
+const chatResources = useChatResourcesStore();
+const editorResources = useEditorResourcesStore();
 
 const { t, locale: i18nLocale } = useI18n();
 
@@ -1400,6 +1421,22 @@ const copyAgentId = async () => {
 };
 
 const currentSection = ref(props.initialSection || 'basic');
+
+const onAgentEditorFocusSection = (event: Event) => {
+  const section = (event as CustomEvent<{ section?: string }>).detail?.section
+  if (section) {
+    currentSection.value = section
+  }
+}
+
+onMounted(() => {
+  window.addEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+})
+
 const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
@@ -1629,8 +1666,7 @@ const groupedAvailableTools = computed(() => {
 // 规则：基于 allowed_tools 过滤
 //   1) 勾选但缺失对应能力（无 KB / 无 Wiki 能力 KB）的工具会被灰显/隐藏
 //   2) 无论是否勾选，web_search / web_fetch 随 web_search_enabled 出现
-//   3) final_answer 始终存在
-//   4) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
+//   3) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
 const effectiveTools = computed(() => {
   const chosen = new Set(formData.value.config.allowed_tools || []);
   const items: Array<{ value: string; label: string; reason?: string; active: boolean }> = [];
@@ -1647,7 +1683,6 @@ const effectiveTools = computed(() => {
     items.push({ value: 'web_search', label: t('agentEditor.tools.webSearch'), active: true });
     items.push({ value: 'web_fetch', label: t('agentEditor.tools.webFetch'), active: true });
   }
-  items.push({ value: 'final_answer', label: t('agentEditor.tools.finalAnswer'), active: true });
   return items;
 });
 
@@ -1863,6 +1898,17 @@ const defaultFormData = {
 };
 
 const formData = ref(JSON.parse(JSON.stringify(defaultFormData)));
+
+const applyDefaultChatModelIfEmpty = () => {
+  if (props.mode !== 'create' || !formData.value) return
+  const chat =
+    allModels.value.find((m) => m.type === 'KnowledgeQA' && m.is_default)
+    || allModels.value.find((m) => m.type === 'KnowledgeQA')
+  if (!formData.value.config.model_id && chat?.id) {
+    formData.value.config.model_id = chat.id
+  }
+}
+
 const agentMode = computed({
   get: () => formData.value.config.agent_mode,
   set: (val: 'quick-answer' | 'smart-reasoning') => { formData.value.config.agent_mode = val; }
@@ -2358,6 +2404,7 @@ watch(() => props.visible, async (val) => {
           formData.value.description = getPresetDefaultDescription(preset);
         }
       }
+      applyDefaultChatModelIfEmpty()
     }
   }
 });
@@ -2577,18 +2624,17 @@ watch(isAgentMode, (isAgent) => {
 
 // 监听设置弹窗关闭，刷新模型列表
 watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
-  // 从设置页面返回时（弹窗关闭），刷新模型列表
   if (prevVisible && !visible && props.visible) {
     try {
-      const [models, statusRes] = await Promise.all([
-        listModels(),
-        getStorageEngineStatus(),
+      await Promise.all([
+        chatResources.ensureModels(true),
+        editorResources.ensureStorageEngine(true),
       ]);
-      if (models && models.length > 0) {
-        allModels.value = models;
+      if (chatResources.allModels.length > 0) {
+        allModels.value = chatResources.allModels;
       }
-      if (statusRes?.data?.engines) {
-        storageEngineStatus.value = statusRes.data.engines;
+      if (editorResources.storageStatus.length > 0) {
+        storageEngineStatus.value = editorResources.storageStatus;
       }
     } catch (e) {
       console.warn('Failed to refresh data after settings closed', e);
@@ -2596,183 +2642,95 @@ watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
   }
 });
 
-// 加载依赖数据
+const mapKbToOption = (kb: any, shared: boolean, orgName?: string) => {
+  const strategy = kb.indexing_strategy;
+  const caps: KBCapabilities | undefined = kb.capabilities;
+  return {
+    label: kb.name,
+    value: kb.id,
+    type: kb.type || 'document',
+    count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
+    shared,
+    orgName,
+    ragEnabled: caps ? (caps.vector || caps.keyword) : (!strategy || strategy.vector_enabled || strategy.keyword_enabled),
+    wikiEnabled: caps ? caps.wiki : (strategy?.wiki_enabled || false),
+    capabilities: caps,
+  };
+};
+
+const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
+  if (!cfg) return;
+  if (cfg.agent_system_prompt && Array.isArray(cfg.agent_system_prompt)) {
+    agentSystemPromptTemplates.value = cfg.agent_system_prompt;
+    const ragDefault =
+      cfg.agent_system_prompt.find(t => t.mode === 'rag' && t.default) ||
+      cfg.agent_system_prompt.find(t => t.mode === 'rag');
+    if (ragDefault?.content) {
+      defaultAgentSystemPrompt.value = ragDefault.content;
+    }
+  }
+  const pickDefault = (arr?: PromptTemplate[]): PromptTemplate | undefined =>
+    Array.isArray(arr) ? arr.find(t => t.default) : undefined;
+  const sysPrompt = pickDefault(cfg.system_prompt);
+  if (sysPrompt?.content) defaultNormalSystemPrompt.value = sysPrompt.content;
+  const ctxTmpl = pickDefault(cfg.context_template);
+  if (ctxTmpl?.content) defaultContextTemplate.value = ctxTmpl.content;
+  const rewriteTmpl = pickDefault(cfg.rewrite);
+  if (rewriteTmpl?.content) defaultRewritePromptSystem.value = rewriteTmpl.content;
+  if (rewriteTmpl?.user) defaultRewritePromptUser.value = rewriteTmpl.user;
+  const fallbackList = Array.isArray(cfg.fallback) ? cfg.fallback : [];
+  const fixedFallback = fallbackList.find(t => t.default && t.mode !== 'model');
+  if (fixedFallback?.content) defaultFallbackResponse.value = fixedFallback.content;
+  const modelFallback = fallbackList.find(t => t.mode === 'model' && t.default) || fallbackList.find(t => t.mode === 'model');
+  if (modelFallback?.content) defaultFallbackPrompt.value = modelFallback.content;
+  if (Array.isArray(cfg.intent_prompts)) {
+    intentPromptTemplates.value = cfg.intent_prompts;
+  }
+};
+
+// 加载依赖数据（复用租户级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
-    // 加载所有模型列表（ModelSelector 组件会自动按类型过滤）
-    const models = await listModels();
-    if (models && models.length > 0) {
-      allModels.value = models;
+    await Promise.all([
+      chatResources.ensureModels(),
+      chatResources.ensureKnowledgeBases(),
+      chatResources.ensureWebSearchProviders(),
+      editorResources.prefetchAgentEditorDeps(),
+    ]);
+
+    if (chatResources.allModels.length > 0) {
+      allModels.value = chatResources.allModels;
     }
 
-    // 加载知识库列表（我的 + 共享的）
-    const kbRes: any = await listKnowledgeBases();
-    const myKbs: typeof kbOptions.value = [];
-    if (kbRes.data) {
-      kbRes.data.forEach((kb: any) => {
-        const strategy = kb.indexing_strategy;
-        const caps: KBCapabilities | undefined = kb.capabilities;
-        myKbs.push({
-          label: kb.name,
-          value: kb.id,
-          type: kb.type || 'document',
-          count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
-          shared: false,
-          ragEnabled: caps ? (caps.vector || caps.keyword) : (!strategy || strategy.vector_enabled || strategy.keyword_enabled),
-          wikiEnabled: caps ? caps.wiki : (strategy?.wiki_enabled || false),
-          capabilities: caps,
-        });
-      });
-    }
-
-    // 加载共享给我的知识库
-    const sharedKbs: typeof kbOptions.value = [];
-    try {
-      const sharedList = await orgStore.fetchSharedKnowledgeBases();
-      if (sharedList && sharedList.length > 0) {
-        const myKbIds = new Set(myKbs.map(kb => kb.value));
-        sharedList.forEach((shared: any) => {
-          const kb = shared.knowledge_base;
-          if (!kb || myKbIds.has(kb.id)) return;
-          const caps: KBCapabilities | undefined = kb.capabilities;
-          sharedKbs.push({
-            label: kb.name,
-            value: kb.id,
-            type: kb.type || 'document',
-            count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
-            shared: true,
-            orgName: shared.org_name,
-            ragEnabled: caps ? (caps.vector || caps.keyword) : (!kb.indexing_strategy || kb.indexing_strategy.vector_enabled || kb.indexing_strategy.keyword_enabled),
-            wikiEnabled: caps ? caps.wiki : (kb.indexing_strategy?.wiki_enabled || false),
-            capabilities: caps,
-          });
-        });
-      }
-    } catch (e) {
-      console.warn('Failed to load shared knowledge bases', e);
-    }
-
+    const myKbs = chatResources.rawKnowledgeBases.map((kb: any) => mapKbToOption(kb, false));
+    const myKbIds = new Set(myKbs.map(kb => kb.value));
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
+      .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
     kbOptions.value = [...myKbs, ...sharedKbs];
 
-    // 加载 MCP 服务列表（只加载启用的）
-    try {
-      const mcpList = await listMCPServices();
-      if (mcpList && mcpList.length > 0) {
-        mcpOptions.value = mcpList
-          .filter((mcp: MCPService) => mcp.enabled)
-          .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
-      }
-    } catch (e) {
-      console.warn('Failed to load MCP services', e);
-    }
+    mcpOptions.value = editorResources.mcpServices
+      .filter((mcp: MCPService) => mcp.enabled)
+      .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
 
-    // 加载预装 Skills 列表及沙箱可用性（skills_available=false 时前端不展示 Skills 配置）
-    try {
-      const skillsRes = await listSkills();
-      skillsAvailable.value = skillsRes.skills_available !== false;
-      if (skillsRes.data && skillsRes.data.length > 0) {
-        skillOptions.value = skillsRes.data;
-      }
-    } catch (e) {
-      console.warn('Failed to load skills', e);
-      skillsAvailable.value = false;
-    }
+    skillsAvailable.value = editorResources.skillsAvailable;
+    skillOptions.value = editorResources.skills;
 
-    // 加载智能体类型预设（smart-reasoning 模式下的"类型"下拉）
-    try {
-      const presetsRes: any = await getAgentTypePresets();
-      if (presetsRes?.data && Array.isArray(presetsRes.data)) {
-        agentTypePresets.value = presetsRes.data as AgentTypePreset[];
-      }
-    } catch (e) {
-      console.warn('Failed to load agent type presets', e);
-    }
+    agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
+    applyPromptTemplateDefaults(editorResources.promptTemplates);
 
-    // 加载 prompt-templates 用于：
-    //   1. agent_system_prompt 列表（applyAgentTypePreset 通过 system_prompt_id 回填正文）
-    //   2. 普通模式（builtin-quick-answer）创建时的默认 system_prompt / context_template /
-    //      rewrite / fallback —— 取每个分类里 default: true 的那条
-    try {
-      const tmplRes = await getPromptTemplates();
-      const cfg = tmplRes?.data;
-      if (cfg?.agent_system_prompt && Array.isArray(cfg.agent_system_prompt)) {
-        agentSystemPromptTemplates.value = cfg.agent_system_prompt;
-        // Smart-reasoning (Progressive RAG) 默认提示词：取 mode='rag' &&
-        // default 的那条；找不到就退化到第一条 mode==='rag'。这块取代了
-        // 之前的 getAgentConfig() —— 后端实现就是从同一份模板里挑这条。
-        const ragDefault =
-          cfg.agent_system_prompt.find(t => t.mode === 'rag' && t.default) ||
-          cfg.agent_system_prompt.find(t => t.mode === 'rag');
-        if (ragDefault?.content) {
-          defaultAgentSystemPrompt.value = ragDefault.content;
-        }
-      }
-      const pickDefault = (arr?: PromptTemplate[]): PromptTemplate | undefined =>
-        Array.isArray(arr) ? arr.find(t => t.default) : undefined;
-      const sysPrompt = pickDefault(cfg?.system_prompt);
-      if (sysPrompt?.content) defaultNormalSystemPrompt.value = sysPrompt.content;
-      const ctxTmpl = pickDefault(cfg?.context_template);
-      if (ctxTmpl?.content) defaultContextTemplate.value = ctxTmpl.content;
-      const rewriteTmpl = pickDefault(cfg?.rewrite);
-      if (rewriteTmpl?.content) defaultRewritePromptSystem.value = rewriteTmpl.content;
-      if (rewriteTmpl?.user) defaultRewritePromptUser.value = rewriteTmpl.user;
-      // fallback templates split into fixed-response (default) and model-mode (mode === 'model').
-      const fallbackList = Array.isArray(cfg?.fallback) ? cfg.fallback : [];
-      const fixedFallback = fallbackList.find(t => t.default && t.mode !== 'model');
-      if (fixedFallback?.content) defaultFallbackResponse.value = fixedFallback.content;
-      const modelFallback = fallbackList.find(t => t.mode === 'model' && t.default) || fallbackList.find(t => t.mode === 'model');
-      if (modelFallback?.content) defaultFallbackPrompt.value = modelFallback.content;
-      if (Array.isArray(cfg?.intent_prompts)) {
-        intentPromptTemplates.value = cfg.intent_prompts;
-      }
-    } catch (e) {
-      console.warn('Failed to load prompt templates', e);
-    }
+    storageEngineStatus.value = editorResources.storageStatus;
 
-    // 加载存储引擎可用状态（用于图片存储 provider 选择）
-    try {
-      const statusRes = await getStorageEngineStatus();
-      if (statusRes?.data?.engines) {
-        storageEngineStatus.value = statusRes.data.engines;
-      }
-    } catch (e) {
-      console.warn('Failed to load storage engine status', e);
-    }
+    webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
 
-    // 加载网络搜索引擎配置列表
-    try {
-      const wsRes: any = await listWebSearchProviders();
-      if (wsRes?.data && Array.isArray(wsRes.data)) {
-        webSearchProviderList.value = wsRes.data;
-      }
-    } catch (e) {
-      console.warn('Failed to load web search providers', e);
-    }
+    placeholderData.value = editorResources.placeholders as PlaceholderDefinition[];
 
-    // 加载占位符定义（从统一 API）
-    try {
-      const placeholdersRes = await getPlaceholders();
-      if (placeholdersRes?.data) {
-        placeholderData.value = placeholdersRes.data;
-      }
-    } catch (e) {
-      console.warn('Failed to load placeholders', e);
-    }
-
-    // 加载租户检索默认参数（embedding_top_k / 阈值 / rerank top_k 等）。
-    // temperature 与 max_completion_tokens 不在 RetrievalConfig 中，保持组件内
-    // 硬编码默认值（0.7 / 2048）；用户在 agent 表单里可逐项调整。
-    try {
-      const retrievalRes: any = await getTenantRetrievalConfig();
-      const rc = retrievalRes?.data;
-      if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;
-      if (rc?.keyword_threshold !== undefined) defaultKeywordThreshold.value = rc.keyword_threshold;
-      if (rc?.vector_threshold !== undefined) defaultVectorThreshold.value = rc.vector_threshold;
-      if (rc?.rerank_top_k) defaultRerankTopK.value = rc.rerank_top_k;
-      if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
-    } catch (e) {
-      console.warn('Failed to load retrieval config', e);
-    }
+    const rc = editorResources.tenantRetrievalConfig as Record<string, number> | null;
+    if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;
+    if (rc?.keyword_threshold !== undefined) defaultKeywordThreshold.value = rc.keyword_threshold;
+    if (rc?.vector_threshold !== undefined) defaultVectorThreshold.value = rc.vector_threshold;
+    if (rc?.rerank_top_k) defaultRerankTopK.value = rc.rerank_top_k;
+    if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
   } catch (e) {
     console.error('Failed to load dependencies', e);
   }
@@ -3673,6 +3631,7 @@ const handleSave = async () => {
   try {
     if (props.mode === 'create') {
       await createAgent(formData.value);
+      markContextualGuideDone('agentCreate')
       MessagePlugin.success(t('agent.messages.created'));
     } else {
       await updateAgent(formData.value.id, formData.value);

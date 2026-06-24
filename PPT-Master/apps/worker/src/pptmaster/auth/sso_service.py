@@ -20,7 +20,7 @@ from pptmaster.db.models import User
 logger = logging.getLogger(__name__)
 
 
-ADMIN_ROLES = {"admin", "platform_admin"}
+ADMIN_ROLES = {"admin", "platform_admin", "org_admin"}
 
 
 def validate_sso_token(token: str) -> dict[str, Any] | None:

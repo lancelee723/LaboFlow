@@ -67,7 +67,7 @@ export function ChatBubble({ onClick }: ChatBubbleProps) {
       type="button"
       onClick={onClick}
       aria-label={t("openChat")}
-      className="fixed bottom-6 right-6 z-20 flex h-12 items-center gap-2.5 rounded-full border border-[#e5e5e5] bg-white px-4 shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-transform hover:-translate-y-px hover:shadow-[0_6px_28px_rgba(0,0,0,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+      className="fixed bottom-20 right-6 z-20 flex h-12 items-center gap-2.5 rounded-full border border-[#e5e5e5] bg-white px-4 shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-transform hover:-translate-y-px hover:shadow-[0_6px_28px_rgba(0,0,0,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
     >
       {/* Phase icon circle */}
       <span

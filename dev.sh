@@ -217,7 +217,11 @@ if [ ! -f "$WEKNORA_DIR/.env" ]; then
 fi
 
 # Start infrastructure containers (postgres-dev, redis-dev, docreader-dev)
-$COMPOSE -f "$WEKNORA_DIR/docker-compose.dev.yml" -f "$ROOT/docker-compose.dev-override.yml" up -d \
+COMPOSE_FILES=(-f "$WEKNORA_DIR/docker-compose.dev.yml")
+if [ -f "$ROOT/docker-compose.dev-override.yml" ]; then
+    COMPOSE_FILES+=(-f "$ROOT/docker-compose.dev-override.yml")
+fi
+$COMPOSE "${COMPOSE_FILES[@]}" up -d \
     > "$LOG_DIR/weknora-infra.log" 2>&1 \
     || { err "WeKnora infra failed. Check $LOG_DIR/weknora-infra.log"; exit 1; }
 

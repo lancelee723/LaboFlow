@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket
 import time
 from contextlib import asynccontextmanager
@@ -543,6 +544,29 @@ def _svg_is_valid(filepath: Path) -> bool:
     return "<svg" in content and "</svg>" in content
 
 
+def _normalize_svg_dimensions(svg: str, width: int, height: int) -> str:
+    """Force pixel width/height on root <svg>.
+
+    LLMs sometimes emit width="100%" height="100%", which renders as 0×0 inside
+    an <img> tag (no intrinsic size). Strip any percentage width/height and
+    inject pixel values matching the canvas.
+    """
+    m = re.search(r"<svg\b[^>]*>", svg)
+    if not m:
+        return svg
+    open_tag = m.group(0)
+    new_tag = open_tag
+    new_tag = re.sub(r'\s+width="[^"]*%"', "", new_tag)
+    new_tag = re.sub(r'\s+height="[^"]*%"', "", new_tag)
+    if not re.search(r'\swidth="', new_tag):
+        new_tag = new_tag.replace("<svg", f'<svg width="{width}"', 1)
+    if not re.search(r'\sheight="', new_tag):
+        new_tag = new_tag.replace("<svg", f'<svg height="{height}"', 1)
+    if new_tag != open_tag:
+        return svg.replace(open_tag, new_tag, 1)
+    return svg
+
+
 async def step_6_executor(state: PPTMasterState) -> dict[str, Any]:
     """Executor Phase — aligned with executor-base.md.
     Design Confirmation → Live Preview → Sequential SVG Generation → Quality Check → Speaker Notes."""
@@ -658,6 +682,7 @@ Use it to produce a content-rich, accurate SVG slide. Specific source content fo
 {canvas['width']}x{canvas['height']}, viewBox="{canvas.get('viewBox', f"0 0 {canvas['width']} {canvas['height']}")}"
 
 ## Hard SVG Constraints (from shared-standards.md)
+- Root <svg>: MUST include width="{canvas['width']}" height="{canvas['height']}" as pixel attributes (NEVER use "100%" or any percentage — that renders 0×0 inside <img>).
 - BANNED: <style>, class, rgba(), <foreignObject>, <mask>, <g opacity>, HTML named entities, <image opacity>
 - Text: one logical line = one <text> with <tspan> children. No adjacent <text> for same line.
 - Groups: 3-8 top-level <g id="..."> per slide. Chrome groups id must contain bg/header/footer/nav/decor/logo/page-number.
@@ -781,6 +806,7 @@ Use it to produce a content-rich, accurate SVG slide. Specific source content fo
 
         # ── Disk write ────────────────────────────────────────────────────────
         if svg_valid:
+            svg_content = _normalize_svg_dimensions(svg_content, canvas["width"], canvas["height"])
             filepath.write_text(svg_content, encoding="utf-8")
             generated_pages.append(str(filepath))
             logger.info(f"Page {idx}/{total_pages}: {filename} written")

@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -15,9 +16,17 @@ import (
 const EncPrefix = "enc:v1:"
 
 // GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
-// Returns nil if not set or not exactly 32 bytes.
+// Accepts either 32 raw bytes (ASCII passphrase) or 64 hex chars
+// (the format docker-entrypoint.sh provisions via `openssl rand -hex 32`).
+// Returns nil if neither form yields exactly 32 bytes.
 func GetAESKey() []byte {
-	key := []byte(os.Getenv("SYSTEM_AES_KEY"))
+	raw := os.Getenv("SYSTEM_AES_KEY")
+	if len(raw) == 64 {
+		if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) == 32 {
+			return decoded
+		}
+	}
+	key := []byte(raw)
 	if len(key) == 32 {
 		return key
 	}

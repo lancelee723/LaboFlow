@@ -86,6 +86,7 @@ async def create_llm_config(
             provider=request.provider,
             model=request.model,
             endpoint=request.endpoint,
+            api_key_encrypted=request.api_key.encode("utf-8") if request.api_key else None,
             role_preference=request.role_preference,
             is_default=request.is_default,
             display_name=request.display_name,

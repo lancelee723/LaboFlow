@@ -60,7 +60,7 @@ from app.services.workspace_collaboration import (
     read_text_if_exists,
     write_workspace_file,
 )
-from app.services.storage import get_storage_backend, normalize_storage_key
+from app.services.storage import ensure_local_path, get_storage_backend, normalize_storage_key
 from app.services.storage_runtime.base import WriteCondition, content_hash_bytes
 from app.services.workspace_locking import workspace_locks
 from app.core.permissions import evaluate_agent_relationship_status, evaluate_human_relationship_status
@@ -15507,6 +15507,24 @@ async def _webbrowser_list_downloads(agent_id: uuid.UUID, arguments: dict) -> st
         return f"❌ 列出下载失败: {str(e)[:200]}"
 
 
+async def _resolve_doc_path(agent_id: uuid.UUID, file_id_or_path: str) -> str:
+    """Resolve doc_read/doc_extract_tables input to an absolute local path.
+
+    Absolute paths pass through unchanged (preserves webbrowser_download `file_id` flow).
+    Workspace-relative paths (e.g. `workspace/uploads/foo.xlsx` returned by /chat/upload)
+    are resolved through the storage layer and materialized locally if needed.
+    """
+    candidate = Path(file_id_or_path)
+    if candidate.is_absolute():
+        return file_id_or_path
+    tenant_id = await _get_agent_tenant_id(agent_id)
+    storage_key, _, _ = _tool_storage_key(agent_id, file_id_or_path, tenant_id)
+    storage = get_storage_backend()
+    if await storage.is_file(storage_key):
+        return str(await ensure_local_path(storage_key))
+    return file_id_or_path
+
+
 async def _doc_read_tool(agent_id: uuid.UUID, arguments: dict) -> str:
     file_id_or_path = arguments.get("file_id_or_path", "")
     page_range = arguments.get("page_range", "")
@@ -15515,7 +15533,8 @@ async def _doc_read_tool(agent_id: uuid.UUID, arguments: dict) -> str:
         return "❌ Missing required argument 'file_id_or_path'"
     try:
         from app.services.doc_parser import doc_read
-        result = doc_read(file_id_or_path, page_range=page_range, max_chars=max_chars)
+        resolved = await _resolve_doc_path(agent_id, file_id_or_path)
+        result = doc_read(resolved, page_range=page_range, max_chars=max_chars)
         text = result.get("text", ""); page_count = result.get("page_count", ""); fmt = result.get("format", ""); truncated = result.get("truncated", False)
         parts = [f"格式: {fmt}"]
         if page_count:
@@ -15534,7 +15553,8 @@ async def _doc_extract_tables_tool(agent_id: uuid.UUID, arguments: dict) -> str:
         return "❌ Missing required argument 'file_id_or_path'"
     try:
         from app.services.doc_parser import doc_extract_tables
-        result = doc_extract_tables(file_id_or_path, page_range=page_range)
+        resolved = await _resolve_doc_path(agent_id, file_id_or_path)
+        result = doc_extract_tables(resolved, page_range=page_range)
         import json
         return json.dumps(result, ensure_ascii=False, indent=2)[:10000]
     except Exception as e:

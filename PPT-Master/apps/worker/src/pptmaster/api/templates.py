@@ -67,7 +67,7 @@ async def list_templates(
                 page_types=t.page_types,
                 is_builtin=(t.uploaded_by is None),
                 preview_url=(
-                    f"/api/templates/{t.id}/preview/{t.preview_paths[0]}"
+                    f"/ppt-master/api/templates/{t.id}/preview/{t.preview_paths[0]}"
                     if t.preview_paths else None
                 ),
             )
@@ -394,7 +394,7 @@ async def get_template(template_id: str, auth: AuthContext = Depends(get_auth_co
             page_types=template.page_types,
             is_builtin=(template.uploaded_by is None),
             preview_url=(
-                f"/api/templates/{template.id}/preview/{template.preview_paths[0]}"
+                f"/ppt-master/api/templates/{template.id}/preview/{template.preview_paths[0]}"
                 if template.preview_paths else None
             ),
         )

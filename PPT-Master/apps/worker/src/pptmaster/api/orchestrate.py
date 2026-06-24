@@ -302,7 +302,10 @@ async def _run_pipeline(
             result = await session.execute(select(Session).where(Session.id == session_id))
             db_session = result.scalar_one_or_none()
             if db_session:
-                db_session.is_interrupted = False
+                # Keep is_interrupted=True so the user can resume the failed session.
+                # status_locked="failed" still tags it terminal for dashboard queries;
+                # resume_pipeline only checks is_interrupted, so this re-enables retry.
+                db_session.is_interrupted = True
                 db_session.status_locked = "failed"  # session terminal state
                 db_session.abort_reason = str(e)[:500]
                 db_session.ended_at = datetime.now(timezone.utc)
@@ -387,7 +390,10 @@ async def _run_pipeline_resume(
             result = await session.execute(select(Session).where(Session.id == session_id))
             db_session = result.scalar_one_or_none()
             if db_session:
-                db_session.is_interrupted = False
+                # Keep is_interrupted=True so the user can resume the failed session.
+                # status_locked="failed" still tags it terminal for dashboard queries;
+                # resume_pipeline only checks is_interrupted, so this re-enables retry.
+                db_session.is_interrupted = True
                 db_session.status_locked = "failed"  # session terminal state
                 db_session.abort_reason = str(e)[:500]
                 db_session.ended_at = datetime.now(timezone.utc)

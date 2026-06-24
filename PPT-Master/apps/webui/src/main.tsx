@@ -9,11 +9,19 @@ import "./index.css"
 // works under a sub-path mount (LaboFlow serves us at /ppt-master/). Without
 // this, raw `fetch("/api/...")` calls scattered across the codebase escape
 // the sub-path and hit the host root, bypassing nginx's /ppt-master rewrite.
+// Must be idempotent: callers going through lib/api.ts already prepend BASE,
+// and re-prefixing produces /ppt-master/ppt-master/... which 405s.
 const __FETCH_BASE = import.meta.env.BASE_URL.replace(/\/$/, "")
 if (__FETCH_BASE) {
   const __origFetch = window.fetch.bind(window)
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    if (typeof input === "string" && input.startsWith("/") && !input.startsWith("//")) {
+    if (
+      typeof input === "string" &&
+      input.startsWith("/") &&
+      !input.startsWith("//") &&
+      input !== __FETCH_BASE &&
+      !input.startsWith(`${__FETCH_BASE}/`)
+    ) {
       input = `${__FETCH_BASE}${input}`
     }
     return __origFetch(input as RequestInfo, init)

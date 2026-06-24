@@ -43,7 +43,7 @@
                   { content: $t('common.edit'), value: 'edit', onClick: () => editChannel(channel) },
                   { content: $t('common.delete'), value: 'delete', theme: 'error' }
                 ]"
-                @click="handleChannelMenuClick($event, channel.id)"
+                @click="(data) => data.value === 'delete' && handleDelete(channel.id)"
               >
                 <t-button variant="text" theme="default" size="small">
                   <t-icon name="more" />
@@ -429,7 +429,7 @@ import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus,
 } from '@/api/agent';
-import { listKnowledgeBases } from '@/api/knowledge-base';
+import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
 
@@ -468,10 +468,6 @@ const formData = ref({
   knowledge_base_id: '',
   credentials: defaultCredentials(),
 });
-
-type ChannelMenuClickData = {
-  value: string;
-};
 
 function platformLabel(platform: string): string {
   const key = `agentEditor.im.${platform}`;
@@ -595,12 +591,13 @@ function stopWeChatPolling() {
 async function loadChannels() {
   loading.value = true;
   try {
-    const [channelRes, kbRes] = await Promise.all([
+    const chatResources = useChatResourcesStore();
+    const [channelRes] = await Promise.all([
       listIMChannels(props.agentId),
-      listKnowledgeBases(),
+      chatResources.ensureKnowledgeBases(),
     ]);
     channels.value = channelRes.data || [];
-    knowledgeBases.value = (kbRes.data || []).map((kb: any) => ({ id: kb.id, name: kb.name }));
+    knowledgeBases.value = chatResources.rawKnowledgeBases.map((kb: any) => ({ id: kb.id, name: kb.name }));
   } catch {
     channels.value = [];
   } finally {
@@ -722,12 +719,6 @@ async function handleDelete(id: string) {
     await loadChannels();
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.operationFailed'));
-  }
-}
-
-function handleChannelMenuClick(data: ChannelMenuClickData, channelId: string) {
-  if (data.value === 'delete') {
-    handleDelete(channelId);
   }
 }
 

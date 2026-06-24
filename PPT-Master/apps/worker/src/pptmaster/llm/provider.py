@@ -245,7 +245,7 @@ def build_chat_model_from_config(config: LLMConfig) -> BaseChatModel:
             api_key=api_key,
             base_url=base_url,
             temperature=0.0,
-            max_tokens=10,
+            max_tokens=4096,
         )
 
     # -- Gemini (Google) -----------------------------------------------------
@@ -270,5 +270,5 @@ def build_chat_model_from_config(config: LLMConfig) -> BaseChatModel:
         api_key=api_key or "not-needed",
         base_url=base_url,
         temperature=0.0,
-        max_tokens=10,
+        max_tokens=4096,
     )

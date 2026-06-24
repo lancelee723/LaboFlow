@@ -27,6 +27,248 @@ export default {
     expandSidebar: 'Expand Sidebar',
     logoutSuccess: 'Logged out successfully',
   },
+  newUserGuide: {
+    stepOf: '{current} / {total}',
+    skip: 'Skip',
+    prev: 'Back',
+    next: 'Next',
+    done: 'Done',
+    reopen: 'Product tour',
+    steps: {
+      welcome: {
+        title: 'Welcome to WeKnora',
+        desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.',
+      },
+      knowledge: {
+        title: 'Create your knowledge base',
+        desc: 'Everything starts here: upload documents, web pages or FAQs and WeKnora parses and indexes them automatically. Click here to open knowledge bases.',
+      },
+      chat: {
+        title: 'Start an AI chat',
+        desc: 'Ask questions grounded in your knowledge base and get accurate answers with cited sources. Click here to start a new chat.',
+      },
+      agents: {
+        title: 'Build dedicated agents',
+        desc: 'Combine knowledge bases, prompts and tools into reusable agents that capture your expertise.',
+      },
+      settings: {
+        title: 'Account & settings',
+        desc: 'Open this to manage your account, members and system settings. You can reopen this tour from the help button next to your name at the top of this menu.',
+      },
+      models: {
+        title: 'Configure your models',
+        desc: 'A key step: add chat, embedding and other models in Model Management so knowledge bases and chat can work. Click "Add model" to get started.',
+      },
+      done: {
+        title: 'You are all set',
+        desc: 'You now know the essentials — start building your knowledge assistant! Revisit this tour anytime from the help button next to your name in this menu.',
+      },
+    },
+  },
+  contextualGuide: {
+    stepOf: '{current} / {total}',
+    skip: 'Skip',
+    prev: 'Back',
+    next: 'Next',
+    done: 'Got it',
+    interactHint: 'Click the highlighted area to continue',
+    kbList: {
+      steps: {
+        create: {
+          title: 'Create your first knowledge base',
+          desc: 'Knowledge bases hold documents and FAQs. Click the highlighted "New knowledge base" button below and we will walk you through the form.',
+        },
+      },
+    },
+    tenantModels: {
+      needModelsFirst: 'Add a chat model and an Embedding model before creating a knowledge base.',
+      needChatModelFirst: 'Add a chat model (KnowledgeQA) before creating an agent.',
+      steps: {
+        intro: {
+          title: 'Configure models first',
+          desc: 'A document knowledge base needs at least one chat model (summaries and Q&A) and one Embedding model (vector search). Add them in system settings.',
+        },
+        addModel: {
+          title: 'Add models',
+          desc: 'Click "Add model" and configure KnowledgeQA (chat) and Embedding types. Lite users can pull local models via Ollama.',
+        },
+        done: {
+          title: 'Then continue',
+          desc: 'After saving models, close settings and click "New knowledge base". The wizard will walk you through type, indexing, and model binding.',
+        },
+      },
+      stepsAgent: {
+        intro: {
+          title: 'Configure a chat model first',
+          desc: 'Creating an agent requires at least one KnowledgeQA model. Add it in system settings (Embedding is only required for knowledge bases).',
+        },
+        addModel: {
+          title: 'Add a chat model',
+          desc: 'Click "Add model" and configure a KnowledgeQA type.',
+        },
+        done: {
+          title: 'Then create an agent',
+          desc: 'After saving, close settings and click "Create agent". The wizard covers mode, knowledge bases, and multimodal options.',
+        },
+      },
+    },
+    kbCreate: {
+      steps: {
+        type: {
+          title: 'Choose a type',
+          desc: 'Document bases are for PDFs, Word files, and similar uploads. FAQ bases are for question–answer pairs. The type cannot be changed later.',
+        },
+        name: {
+          title: 'Enter a name',
+          desc: 'Pick a clear name such as "Product manual" or "Support FAQ". Description is optional.',
+        },
+        indexing: {
+          title: 'Indexing capabilities',
+          desc: 'Vector and keyword search are on by default. You can also enable Wiki or knowledge-graph indexing. Keep at least one search mode enabled.',
+        },
+        navModels: {
+          title: 'Model setup (required)',
+          desc: 'Every knowledge base needs a chat model; retrieval also requires an Embedding model. Open "Model configuration" on the left.',
+        },
+        llm: {
+          title: 'Chat / summary model',
+          desc: 'Used for summaries and answers. If the list is empty, use the dropdown to open settings and add a model.',
+        },
+        embedding: {
+          title: 'Embedding model',
+          desc: 'Turns text into vectors for semantic search. Works with vector/keyword indexing above.',
+        },
+        parser: {
+          title: 'Parser engine (optional)',
+          desc: 'How PDFs and Office files are parsed. Defaults work for most cases; adjust if you need OCR or special layouts.',
+        },
+        chunking: {
+          title: 'Chunking (optional)',
+          desc: 'How documents are split for retrieval. Default chunk sizes are tuned for RAG and rarely need changes.',
+        },
+        storage: {
+          title: 'Storage (optional)',
+          desc: 'Where raw files are stored (local or object storage). The tenant default is usually fine.',
+        },
+        navMultimodal: {
+          title: 'Multimodal / images (optional)',
+          desc: 'Enable this if documents contain charts, scans, or image-heavy content that needs vision understanding.',
+        },
+        multimodalToggle: {
+          title: 'Enable multimodal parsing',
+          desc: 'When on, image-bearing uploads are processed with a vision-language model for better retrieval.',
+        },
+        multimodalVllm: {
+          title: 'Choose a VLM model',
+          desc: 'Multimodal requires a VLM. Add one in system settings if the list is empty.',
+        },
+        faq: {
+          title: 'FAQ indexing',
+          desc: 'Choose how Q&A pairs are indexed. You can add FAQ entries after creation.',
+        },
+        submit: {
+          title: 'Create the knowledge base',
+          desc: 'When type, name, and models look correct, click the highlighted Create button. You will then be guided to upload your first document.',
+        },
+      },
+    },
+    agentList: {
+      steps: {
+        create: {
+          title: 'Create your agent',
+          desc: 'Agents combine models, knowledge bases, tools, and prompts into reusable assistants. Click the highlighted "Create agent" button.',
+        },
+      },
+    },
+    agentCreate: {
+      steps: {
+        mode: {
+          title: 'Choose run mode',
+          desc: '"Quick answer" for straightforward Q&A; "Smart reasoning" uses tools and multi-step thinking for complex tasks.',
+        },
+        agentType: {
+          title: 'Choose an agent type',
+          desc: 'Presets fill in the system prompt, recommended tools, and knowledge scope (e.g. Wiki builder, data analysis). Switch by scenario—name and description update accordingly.',
+        },
+        name: {
+          title: 'Name and description',
+          desc: 'Pick a recognizable name. Smart-reasoning mode may pre-fill a default you can edit.',
+        },
+        navModel: {
+          title: 'Bind a chat model',
+          desc: 'Every agent needs a KnowledgeQA model as its reasoning engine.',
+        },
+        model: {
+          title: 'Select model',
+          desc: 'Choose from configured chat models, or add one in system settings first.',
+        },
+        navKnowledge: {
+          title: 'Link knowledge bases',
+          desc: 'Control which knowledge the agent can retrieve. Default is all knowledge bases.',
+        },
+        knowledge: {
+          title: 'Knowledge scope',
+          desc: '"All" for general assistants; "Selected" for a domain; "None" relies on the model alone or web search.',
+        },
+        navWebsearch: {
+          title: 'Web search (optional)',
+          desc: 'Allow the agent to call external search for up-to-date information.',
+        },
+        navMultimodal: {
+          title: 'Image upload (optional)',
+          desc: 'Lets users send images in chat; requires a VLM model in system settings.',
+        },
+        multimodal: {
+          title: 'Enable image understanding',
+          desc: 'Turn on the switch and select a VLM below when enabled.',
+        },
+        navTools: {
+          title: 'Tools & MCP (optional)',
+          desc: 'In smart-reasoning mode, enable built-in tools and MCP services for search, code, and more.',
+        },
+        submit: {
+          title: 'Save the agent',
+          desc: 'Click the highlighted confirm button to finish. You can then select this agent in chat.',
+        },
+      },
+    },
+    kbDetail: {
+      steps: {
+        intro: {
+          title: 'This knowledge base is empty',
+          desc: 'Add your first item so you can search and chat over it. You can also drag and drop supported file types.',
+        },
+        upload: {
+          title: 'Add documents',
+          desc: 'Use this menu to upload files or folders, import a URL, or create content online.',
+        },
+        done: {
+          title: 'Ready after parsing',
+          desc: 'Once documents are indexed, mention this knowledge base in chat with @ to get answers with citations.',
+        },
+      },
+    },
+    chat: {
+      steps: {
+        kb: {
+          title: 'Choose knowledge scope',
+          desc: 'Click @ to pick one or more knowledge bases or files. Answers use only the selection; otherwise the current agent settings apply.',
+        },
+        input: {
+          title: 'Type your question',
+          desc: 'Describe what you want to know, or click a suggested question above to get started quickly.',
+        },
+        send: {
+          title: 'Send to start chatting',
+          desc: 'Sending creates a new session. The AI answers using your knowledge base and shows cited passages.',
+        },
+        done: {
+          title: 'You are ready to explore',
+          desc: 'Try a question related to your uploaded documents and see grounded answers with references.',
+        },
+      },
+    },
+  },
   batchManage: {
     title: 'Manage Conversations',
     selectAll: 'Select All',
@@ -160,15 +402,6 @@ export default {
     failedFilesList: 'Failed files:', 
     andMoreFiles: '...and {count} more files',
     duplicateFilesSkipped: '{count} duplicate files skipped',
-    uploadResultTitle: 'Upload Results',
-    uploadResultSummary: '{success} succeeded, {skipped} skipped, {failed} failed.',
-    uploadSkippedFilesTitle: 'Skipped Files',
-    uploadFailedFilesTitle: 'Failed Files',
-    uploadReasonHiddenFile: 'Hidden files or files inside hidden folders were filtered out',
-    uploadReasonVideoUnsupported: 'Video upload is not supported yet',
-    uploadReasonImageRequiresVlm: 'VLM is disabled, so image files were skipped',
-    uploadReasonAudioRequiresAsr: 'ASR is disabled, so audio files were skipped',
-    uploadReasonNoParser: 'No available parser engine supports this file type in the current knowledge base',
     uploadFile: 'Upload File',
     uploadFileDesc: 'Supports PDF, Word, TXT, images, audio, etc.',
     importURL: 'Import from URL',
@@ -313,6 +546,7 @@ export default {
     viewModeList: 'List view',
     viewModeTree: 'Tree view',
     viewModeToggle: 'Toggle view',
+    treeDocumentCount: '{count} files',
     columnName: 'Name',
     columnTag: 'Tag',
     columnSize: 'Size',
@@ -321,13 +555,12 @@ export default {
     columnStatus: 'Status',
     columnUpdatedAt: 'Updated',
     columnActions: 'Actions',
-    treeDocumentCount: '{count} files',
     selectAll: 'Select all',
     selectedCount: '{count} selected',
     clearSelection: 'Deselect all',
+    batchDelete: 'Delete selected',
     batchUpdateTag: 'Batch Update Category',
     batchUpdateTagTip: 'Set category for {count} selected documents',
-    batchDelete: 'Delete selected',
     batchDeleteConfirmation: 'Confirm Batch Delete',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
     batchDeleteSuccess: 'Deleted {count} documents',
@@ -407,9 +640,98 @@ export default {
     chunkLoadFailed: 'Failed to load chunks',
   },
 
+  uploadConfirm: {
+    title: 'Confirm Upload',
+    fileList: 'Files to upload',
+    parseConfig: 'Parse settings',
+    configNav: 'Parse settings navigation',
+    tabOverview: 'Overview',
+    overviewTitle: 'Parse settings for this batch',
+    overviewDesc: 'Click any row to edit',
+    backToOverview: 'Back to overview',
+    summaryChunkOverlapShort: 'Overlap {overlap}',
+    summaryParentChildShort: 'Parent-child',
+    summaryParserMode: 'Mode',
+    summaryParserBuiltin: 'Built-in engine (default)',
+    summaryChunkSize: 'Chunk size',
+    summaryChunkOverlap: 'Overlap',
+    summaryStrategy: 'Strategy',
+    summaryStrategyDefault: 'Default',
+    summaryParentChild: 'Parent-child',
+    summaryParentChildOn: 'On (parent {parent} / child {child})',
+    summaryParentChildOff: 'Off',
+    summaryStatus: 'Status',
+    summaryModel: 'Model',
+    summaryQuestionCount: 'Questions per chunk',
+    summaryQuestionCountValue: '{count}',
+    summaryGraphTags: 'Relation types',
+    summaryGraphTagsValue: '{count}',
+    navChunkingSummary: 'Chunk {size}',
+    statusOn: 'On',
+    statusOff: 'Off',
+    notSet: 'Not set',
+    confirm: 'Upload and parse',
+    cancel: 'Cancel',
+    uploading: 'Uploading {current}/{total}',
+    tabParser: 'Parser',
+    tabChunking: 'Chunking',
+    tabMultimodal: 'Multimodal',
+    tabAsr: 'Audio',
+    tabQuestion: 'Question generation',
+    tabGraph: 'Knowledge graph',
+    noFiles: 'Keep at least one file to upload',
+    noItems: 'Add at least one file or URL',
+    urlItemLabel: 'URL',
+    urlAdded: 'URL added',
+    urlDuplicate: 'This URL is already in the list',
+    addUrl: 'Add',
+    vlmModelRequired: 'This batch includes images. Enable multimodal and select a VLM model.',
+    multimodalRequiredForImages: 'Off (batch includes images)',
+    asrModelRequired: 'This batch includes audio. Enable ASR and select a speech recognition model.',
+    asrRequiredForAudio: 'Off (batch includes audio)',
+    vlmModelSelectRequired: 'Multimodal is enabled. Please select a VLM model.',
+    asrModelSelectRequired: 'Speech recognition is enabled. Please select an ASR model.',
+    continueAdd: 'Add more',
+    addMoreFiles: 'Add more files',
+    addMoreFolder: 'Add more from folder',
+    filesAdded: 'Added {count} file(s)',
+    filesAllDuplicate: 'Selected files are already in the list',
+    titleUrl: 'Confirm URL import',
+    titleManual: 'Confirm online publish',
+    overviewDescUrl: 'The URL will be fetched and parsed after you confirm the settings',
+    overviewDescManual: 'The document will be published and indexed after you confirm the settings',
+    confirmUrl: 'Import and parse',
+    confirmManual: 'Publish and parse',
+    titleReparse: 'Confirm reparse',
+    overviewDescReparse: 'After you confirm the settings, existing content will be cleared and the document re-parsed',
+    confirmReparse: 'Confirm and reparse',
+    reparseSource: 'Document to reparse',
+    reparseHint: 'Reuses the last parse settings; adjust them here',
+    urlSource: 'Import source',
+    manualSource: 'Document to publish',
+    editUrl: 'Edit URL',
+    manualCharCount: '{count} characters',
+  },
+
   knowledgeStages: {
     title: 'Processing pipeline',
     root: 'Knowledge processing',
+    processConfig: {
+      title: 'Parse config for this run',
+      kbDefault: 'Using knowledge base defaults',
+      chunking: 'Chunking',
+      chunkSize: 'size {n}',
+      parentChildOn: 'parent-child on',
+      parentChildOff: 'parent-child off',
+      parser: 'Parser engine',
+      multimodal: 'Multimodal',
+      asr: 'Audio (ASR)',
+      question: 'Question generation',
+      questionOn: 'on ({n} per chunk)',
+      graph: 'Knowledge graph',
+      on: 'on',
+      off: 'off',
+    },
     attempt: 'Attempt {n}',
     attemptLatest: 'Attempt {n} (latest)',
     retry: 'Retry parsing',
@@ -488,6 +810,7 @@ export default {
     status: {
       pending: 'Pending',
       running: 'Running',
+      finalizing: 'Finalizing',
       done: 'Done',
       failed: 'Failed',
       skipped: 'Skipped',
@@ -532,6 +855,10 @@ export default {
     toolFallback: 'Tool',
     stepsCompleted: 'Completed <strong>{steps}</strong> step(s)',
     stepsCompletedWithDuration: 'Completed <strong>{steps}</strong> step(s) in <strong>{duration}</strong>',
+    reasoningRounds: '<strong>{rounds}</strong> reasoning round(s)',
+    toolCalls: '<strong>{tools}</strong> tool call(s)',
+    durationSuffix: '<strong>{duration}</strong>',
+    stepSummarySeparator: ' · ',
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',
@@ -907,6 +1234,11 @@ export default {
     parser: {
       title: 'Parser Engine',
       description: 'Document parser engine status and configuration. Settings here take priority over server environment variables. Leave empty to use environment variable defaults.',
+      // Section / label keys for the redesigned drawer
+      supportedFileTypes: 'Supported Formats',
+      statusSection: 'Status',
+      configSection: 'Configuration',
+      featuresLabel: 'Features',
       loading: 'Loading...',
       retry: 'Retry',
       noEngineDetected: 'No parser engine detected. Please ensure the DocReader service is running properly.',
@@ -920,6 +1252,8 @@ export default {
       selfHostedEndpoint: 'Self-hosted Endpoint',
       formulaRecognition: 'Formula Recognition',
       tableRecognition: 'Table Recognition',
+      sealRecognition: 'Seal Recognition',
+      chartRecognition: 'Chart Recognition',
       language: 'Language',
       testConnection: 'Test Connection',
       saveConfig: 'Save Configuration',
@@ -940,10 +1274,19 @@ export default {
       serverUrl: 'Server URL',
       vlmServerUrlPlaceholder: 'e.g. http://your-vllm-server:8000',
       vlmServerUrlHint: 'Required when Backend is vlm-http-client or hybrid-http-client',
+      paddleocrVlEndpointPlaceholder: 'e.g. http://your-paddleocr-vl:8080',
+      paddleocrVlEndpointHint: 'Base URL of the full PaddleOCR-VL pipeline service; no /layout-parsing suffix needed',
+      paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token',
     },
     storage: {
       title: 'Storage Engine',
       description: 'Configure document and image storage. Set engine parameters here; knowledge bases only select which engine to use.',
+      // Section / label keys for the redesigned drawer
+      basicSection: 'Basic',
+      modeSection: 'Deployment Mode',
+      credentialsSection: 'Credentials',
+      bucketSection: 'Bucket',
+      useSslDesc: 'Connect to MinIO over HTTPS',
       loading: 'Loading...',
       retry: 'Retry',
       defaultEngine: 'Default Engine',
@@ -1022,6 +1365,10 @@ export default {
   webSearchSettings: {
     title: 'Web Search Configuration',
     description: 'Configure web search so answers can include up-to-date information from the internet.',
+    // Section keys for the redesigned drawer
+    basicSection: 'Basic',
+    credentialsSection: 'Connection',
+    optionsSection: 'Options',
     // Provider entity management
     providersTitle: 'Search Engine Providers',
     addProvider: 'Add Provider',
@@ -1089,6 +1436,8 @@ export default {
   vectorStoreSettings: {
     title: 'Vector Database Engine',
     description: 'Register and manage vector database instances for knowledge base search.',
+    // Section key for the redesigned drawer
+    basicSection: 'Basic',
     storesTitle: 'Vector Databases',
     addStore: 'Add Database',
     editStore: 'Edit Database',
@@ -1109,6 +1458,7 @@ export default {
       use_tls: 'Use TLS',
       scheme: 'Scheme',
       grpc_address: 'gRPC Address',
+      database: 'Database Name',
       use_default_connection: 'Use Default Connection',
       index_name: 'Index Name',
       number_of_shards: 'Shards',
@@ -1120,11 +1470,17 @@ export default {
       shards_num: 'Shards',
       replica_number: 'In-memory Replicas',
       desired_shard_count: 'Shard Count',
+      insecure_skip_verify: 'Skip TLS Verification',
+      hnsw_m: 'HNSW M (graph degree)',
+      hnsw_ef_construction: 'HNSW ef_construction',
+      hnsw_ef_search: 'HNSW ef_search',
+      knn_engine: 'k-NN Engine',
     },
     envTag: 'DEFAULT',
     testConnection: 'Test Connection',
     testing: 'Testing...',
     immutableNotice: 'Engine type, connection, and index settings cannot be changed after creation.\nTo change these, delete and recreate.',
+    insecureSkipVerifyWarning: 'Disabling TLS certificate verification exposes the connection to man-in-the-middle attacks. Use only for self-signed development clusters — never in production.',
     validation: {
       nameRequired: 'Name is required',
       engineTypeRequired: 'Engine type is required',
@@ -1494,9 +1850,11 @@ export default {
     noAccount: 'Don\'t have an account?',
     backToLogin: 'Back to Login',
     registerNow: 'Register Now',
+    loginHint: 'Sign in to continue, or create an account below if this is your first time.',
+    firstTime: 'New to WeKnora?',
     registerSuccess: 'Registration successful! The system has created an exclusive tenant for you, please login',
     registerFailed: 'Registration failed',
-    subtitle: 'Document understanding and semantic search framework based on large models',
+    subtitle: 'RAG Q&A, ReAct Agent and Wiki — an LLM-powered enterprise knowledge framework',
     registerSubtitle: 'The system will create an exclusive tenant for you after registration',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',
@@ -2422,6 +2780,13 @@ export default {
     referencesDocAndWebCount: 'Referenced {docCount} document(s) and {webCount} web page(s)',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    requestInfoTitle: 'Request info',
+    requestInfoRequestId: 'Request ID',
+    requestInfoMessageId: 'Message ID',
+    requestInfoSessionId: 'Session ID',
+    requestInfoUrl: 'Request',
+    requestInfoSentAt: 'Sent at',
+    requestInfoEmpty: 'No request info available',
     channelWeb: 'Web',
     channelApi: 'API',
     channelIm: 'IM',
@@ -2430,6 +2795,11 @@ export default {
     referenceIconAlt: 'Reference materials icon',
     chunkIdLabel: 'Chunk ID:',
     documentIdLabel: 'Document ID:',
+    faqIdLabel: 'FAQ ID:',
+    faqContainerIdLabel: 'Container ID:',
+    faqAnswersLabel: 'Answers:',
+    chunkOrdinal: 'Chunk {index}',
+    previewContent: 'Preview content',
     noPlanSteps: 'No detailed steps provided',
     chunkIndexLabel: 'Chunk #{index}',
     chunkPositionLabel: '(Position: {position})',
@@ -2717,6 +3087,14 @@ export default {
     buildTimeDescription: 'Time when the system was built',
     goVersionLabel: 'Go Version',
     goVersionDescription: 'Go language version used by the backend',
+    startedAtLabel: 'Service started at',
+    startedAtDescription: 'When the current backend process last started',
+    uptimeLabel: 'Uptime',
+    uptimeDescription: 'How long the service has been running since this start',
+    uptimeDays: '{n}d',
+    uptimeHours: '{n}h',
+    uptimeMinutes: '{n}m',
+    uptimeSeconds: '{n}s',
     dbVersionLabel: 'Database Version',
     dbVersionDescription: 'Current database migration version',
     dbMigrationFailedTag: 'Migration failed',
@@ -2762,6 +3140,9 @@ export default {
         tenant: {
           max_owned_per_user: 'Max tenants owned per user',
           default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
+        },
+        asynq: {
+          concurrency: 'Async task worker concurrency',
         },
       },
       enumLabels: {
@@ -2978,9 +3359,12 @@ export default {
     editor: {
       addTitle: 'Add Model',
       editTitle: 'Edit Model',
+      sectionSource: 'Source',
+      sectionProvider: 'Provider Settings',
+      sectionAdvanced: 'Advanced Options',
       sourceLabel: 'Model Source',
-      sourceLocal: 'Ollama (Local)',
-      sourceRemote: 'Remote API',
+      sourceLocal: 'Ollama',
+      sourceRemote: 'API',
       description: {
         chat: 'Configure large language models for conversations',
         embedding: 'Configure embedding models for text vectorization',
@@ -3005,6 +3389,17 @@ export default {
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
       apiKeyOptional: 'API Key (optional)',
       apiKeyPlaceholder: 'Enter API Key',
+      lkeap: {
+        secretIdLabel: 'SecretId',
+        secretIdPlaceholder: 'Tencent Cloud API SecretId',
+        secretKeyLabel: 'SecretKey',
+        secretKeyPlaceholder: 'Tencent Cloud API SecretKey',
+        regionLabel: 'Region',
+        regionPlaceholder: 'ap-guangzhou',
+        regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
+        rerankCredentialHint:
+          'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.',
+      },
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
       customHeadersAdd: 'Add Header',
@@ -3024,6 +3419,27 @@ export default {
       remoteDimensionDetected: 'Detected vector dimension: {value}',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      thinkingControlLabel: 'Thinking mode request format',
+      thinkingControlDesc:
+        'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
+      thinkingControl: {
+        none: {
+          label: 'Do not send thinking fields',
+          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests',
+        },
+        chatTemplateKwargs: {
+          label: 'chat_template_kwargs',
+          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen',
+        },
+        enableThinking: {
+          label: 'enable_thinking',
+          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo',
+        },
+        thinkingType: {
+          label: 'thinking.type',
+          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)',
+        },
+      },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
       listRefreshed: 'List refreshed',
@@ -3102,7 +3518,7 @@ export default {
         },
         minimax: {
           label: 'MiniMax',
-          description: 'MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5, etc.',
+          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.',
         },
         mimo: {
           label: 'MiMo',
@@ -3138,7 +3554,7 @@ export default {
         },
         lkeap: {
           label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3 series with chain-of-thought',
+          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base, etc.',
         },
         nvidia: {
           label: "NVIDIA",
@@ -3222,22 +3638,26 @@ export default {
     },
   },
   platform: {
-    subtitle: 'Enterprise-level Intelligent Document Retrieval Framework',
-    description: 'Making complex document understanding and precise retrieval simple',
+    subtitle: 'LLM-Powered Enterprise Knowledge Framework',
+    description: 'RAG retrieval, agentic reasoning and Wiki knowledge bases — so your documents are truly understood and put to work',
     rag: 'RAG Enhanced Generation',
+    agent: 'ReAct Agent',
+    wiki: 'Wiki Knowledge Base',
     hybridSearch: 'Hybrid Search',
     localDeploy: 'Local Deployment',
     multimodalParsing: 'Multimodal Document Parsing',
-    hybridSearchEngine: 'Hybrid Search Engine',
-    ragQandA: 'RAG Intelligent Q&A',
+    hybridSearchEngine: 'Hybrid Search + Knowledge Graph',
+    ragQandA: 'ReAct Agent Q&A',
     independentTenant: 'Independent Tenant Space',
     fullApiAccess: 'Full API Access',
     knowledgeBaseManagement: 'Knowledge Base Management',
     carousel: {
       agenticRagTitle: 'Agentic RAG',
-      agenticRagDesc: 'Query rewriting + smart recall + re-ranking',
+      agenticRagDesc: 'ReAct reasoning + tool calls + multi-step thinking',
       hybridSearchTitle: 'Hybrid search strategy',
       hybridSearchDesc: 'BM25 + Vector + Knowledge Graph',
+      wikiTitle: 'Wiki Knowledge Base',
+      wikiDesc: 'Distills documents into structured, interlinked knowledge',
       smartDocRetrievalTitle: 'Intelligent document retrieval',
       smartDocRetrievalDesc: 'PDF/Word/Image multi-format parsing'
     }
@@ -3501,6 +3921,9 @@ export default {
   mcpSettings: {
     title: 'MCP Services',
     description: 'Manage external MCP (Model Context Protocol) services for tools/resources in Agent mode',
+    // Drawer subtitle chip
+    enabled: 'Enabled',
+    disabled: 'Disabled',
     configuredServices: 'Configured Services',
     manageAndTest: 'Manage and test MCP service connections',
     addService: 'Add Service',
@@ -3541,7 +3964,8 @@ export default {
     },
     source: {
       remote: 'Remote',
-      openaiCompatible: 'OpenAI-compatible'
+      openaiCompatible: 'OpenAI-compatible',
+      custom: 'Custom',
     },
     rawModelName: 'Model name',
     chat: {
@@ -3648,6 +4072,13 @@ export default {
   mcpServiceDialog: {
     addTitle: 'Add MCP Service',
     editTitle: 'Edit MCP Service',
+    // Section + drawer-only keys
+    basicSection: 'Basic',
+    connectionSection: 'Connection',
+    enableServiceDesc: 'When off, this service will not be invoked',
+    testAfterSaveHint: 'Save first to test the connection',
+    unitSecond: 's',
+    unitTimes: '×',
     name: 'Service Name',
     namePlaceholder: 'Enter service name',
     description: 'Description',
@@ -4029,6 +4460,7 @@ export default {
       agents: 'Open agents',
       organizations: 'Open shared spaces',
       settings: 'Open settings',
+      productTour: 'Product tour',
     },
     empty: {
       noResults: 'No matches found',
@@ -4175,9 +4607,25 @@ export default {
           name: 'MinerU Cloud',
           desc: 'MinerU Cloud API',
         },
+        paddleocr_vl: {
+          name: 'PaddleOCR-VL',
+          desc: 'PaddleOCR-VL self-hosted service',
+        },
+        paddleocr_vl_cloud: {
+          name: 'PaddleOCR-VL Cloud',
+          desc: 'PaddleOCR-VL Cloud API',
+        },
         weknoracloud: {
           name: 'WeKnora Cloud',
           desc: 'Document parsing via WeKnora Cloud',
+        },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: "Microsoft MarkItDown converter (PDF/Office/HTML and more)",
+        },
+        opendataloader: {
+          name: 'OpenDataLoader',
+          desc: 'OpenDataLoader PDF parser (layout analysis; requires Java 11+ and opendataloader-pdf)',
         },
       },
     },
@@ -4214,7 +4662,6 @@ export default {
       thinking: 'Thinking',
       imageAnalysis: 'Image Analysis',
       queryKnowledgeGraph: 'Knowledge Graph Query',
-      finalAnswer: 'Generate Answer',
       readSkill: 'Read Skill',
       executeSkillScript: 'Execute Skill Script',
       dataAnalysis: 'Data Analysis',
@@ -4241,6 +4688,7 @@ export default {
       getDocument: 'Get document: {title}',
       document: 'Document',
       listChunks: 'View {title}',
+      listFaqEntry: 'View FAQ: {question}',
       deepThinking: 'Deep Thinking',
     },
     plan: {
@@ -4253,8 +4701,13 @@ export default {
       foundResultsFromFiles: 'Found {count} result(s) from {files} file(s)',
       foundResults: 'Found {count} result(s)',
       webResults: 'Found {count} web search result(s)',
-      foundMatches: 'Found {count} match(es)',
-      showingCount: '(showing {count})',
+      grepSummary: 'Found {chunks} matching chunk(s) across {docs} document(s)',
+    },
+    grepResults: {
+      chunkHits: '{count} chunks',
+      keywordHits: '{count} hits',
+      titleMatch: 'title',
+      faqEntry: 'FAQ entry',
     },
     toolStatus: {
       calling: 'Calling {name}...',
@@ -4393,7 +4846,6 @@ export default {
       // Runtime system-injected tools (preview only)
       webSearch: 'Web Search',
       webFetch: 'Web Fetch',
-      finalAnswer: 'Submit Final Answer',
       // Groups
       groupBase: 'Basic',
       groupRag: 'Knowledge Retrieval (RAG)',
@@ -4809,6 +5261,8 @@ export default {
     saveFailed: 'Failed to save credential',
     removedToast: 'Credential removed',
     removeFailed: 'Failed to remove credential',
+    confirmRemovePrompt: 'Remove this credential? This cannot be undone.',
+    confirmRemove: 'Confirm remove',
     confirmRemoveTitle: 'Remove {field}?',
     confirmRemoveBody:
       'This permanently deletes the stored credential. Integrations using it will stop working until you configure a new value.',
@@ -5017,9 +5471,5 @@ export default {
       notFound: 'Invitation not found or already withdrawn.',
       generic: 'Something went wrong. Please try again.',
     },
-  },
-  sso: {
-    authenticating: 'Authenticating...',
-    failed: 'SSO Login Failed',
   },
 }

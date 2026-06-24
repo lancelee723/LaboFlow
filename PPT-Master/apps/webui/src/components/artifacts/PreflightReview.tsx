@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Play, FileText, Palette, Type, Image, Layout, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -34,6 +34,14 @@ export function PreflightReview(props: PreflightReviewProps) {
   const [confirmed, setConfirmed] = useState(false)
   const [localPageCount, setLocalPageCount] = useState<number>(pageCount || pages.length || 0)
   const [reasoningOpen, setReasoningOpen] = useState<boolean>(pageCountMode === "ai_decide")
+
+  // Sync local state when the AI recommendation arrives after first render.
+  // useState only captures the initial value once; without this effect the
+  // input stays at 0 even after preflightData loads with a real page_count.
+  useEffect(() => {
+    if (pageCount && pageCount > 0) setLocalPageCount(pageCount)
+    else if (pages.length > 0) setLocalPageCount(pages.length)
+  }, [pageCount, pages.length])
 
   const isDirty = localPageCount !== pageCount
 

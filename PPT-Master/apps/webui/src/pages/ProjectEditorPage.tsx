@@ -120,6 +120,11 @@ export function ProjectEditorPage() {
   const queryClient = useQueryClient()
   const isNew = !id
   const scrollRef = useRef<HTMLDivElement>(null)
+  // When step_7 broadcasts artifact_updated for the export, queue its path
+  // here so the artifacts useEffect can promote it to the active selection
+  // once the refetch lands. Without this the user stays on whichever SVG
+  // they last clicked and has to manually open the Exports group.
+  const pendingExportSelectRef = useRef<string | null>(null)
 
   // Clear stale pipeline state when entering the editor for any project.
   // Without this, a leftover activeGate or pipelineStep from a previous
@@ -205,6 +210,18 @@ export function ProjectEditorPage() {
     enabled: !!id,
   })
 
+  // Sync pipelineStep from server when re-opening a project whose sessionStorage
+  // was cleared (different tab, after browser restart). Without this, completed
+  // projects open with pipelineStep=0 → annotationMode=false → SVG renders as
+  // <img> without click handlers, and annotation mode silently fails.
+  // Monotonic: only advances forward, never clobbers in-flight WS updates.
+  useEffect(() => {
+    if (!project) return
+    if (project.current_step > usePipelineStore.getState().pipelineStep) {
+      setPipelineStep(project.current_step)
+    }
+  }, [project?.current_step, setPipelineStep])
+
   const { data: artifacts = [], isLoading: isArtifactsLoading } = useQuery({
     queryKey: ["project-artifacts", id],
     queryFn: () => apiFetch<ArtifactEntry[]>(`/api/projects/${id}/artifacts`),
@@ -215,6 +232,15 @@ export function ProjectEditorPage() {
     if (!artifacts.length) {
       setSelectedArtifactPath(null)
       return
+    }
+
+    if (pendingExportSelectRef.current) {
+      const target = pendingExportSelectRef.current
+      if (artifacts.some((artifact) => artifact.path === target)) {
+        pendingExportSelectRef.current = null
+        setSelectedArtifactPath(target)
+        return
+      }
     }
 
     if (!selectedArtifactPath || !artifacts.some((artifact) => artifact.path === selectedArtifactPath)) {
@@ -346,6 +372,9 @@ export function ProjectEditorPage() {
           queryClient.invalidateQueries({ queryKey: ["project-artifacts", id] })
           if (typeof event.path === "string") {
             queryClient.invalidateQueries({ queryKey: ["project-artifact-content", id, event.path] })
+            if (event.kind === "export") {
+              pendingExportSelectRef.current = event.path
+            }
           }
         }
         break

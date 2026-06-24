@@ -2,8 +2,9 @@
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { getKnowledgeSpans, reparseKnowledge } from '@/api/knowledge-base/index'
+import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace'
+import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
 interface SpanNode {
   span_id?: string
@@ -92,6 +93,7 @@ const STAGES = ['docreader', 'chunking', 'embedding', 'multimodal', 'postprocess
 const POLL_INTERVAL_MS = 2000
 
 const data = ref<SpansResponse | null>(null)
+const processOverrides = ref<KnowledgeProcessOverrides | null>(null)
 const loading = ref(false)
 const refreshing = ref(false)
 const selectedAttempt = ref<number | undefined>(undefined)
@@ -463,6 +465,32 @@ async function onManualRefresh() {
   await fetchSpans({ manual: true })
 }
 
+const cancelling = ref(false)
+
+// Mirrors the backend CancelKnowledgeParse gate (pending / processing /
+// finalizing). Uses the freshest status we have: live span data first,
+// the parent's hint before the first fetch lands.
+const canCancelParse = computed<boolean>(() => {
+  const status = data.value?.parse_status ?? props.parseStatus
+  return isPolling(status)
+})
+
+async function onCancelParseConfirm() {
+  if (cancelling.value) return
+  const id = props.knowledgeId
+  if (!id) return
+  cancelling.value = true
+  try {
+    await cancelKnowledgeParse(id)
+    MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'))
+    await fetchSpans({ manual: true })
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.cancelParseFailed'))
+  } finally {
+    cancelling.value = false
+  }
+}
+
 function onAttemptChange(n: number) {
   if (Number.isNaN(n)) return
   selectedAttempt.value = n
@@ -493,8 +521,21 @@ function onKeydown(ev: KeyboardEvent) {
   }
 }
 
+async function fetchProcessOverrides() {
+  if (props.compact || !props.knowledgeId) return
+  try {
+    const res: any = await getKnowledgeDetails(props.knowledgeId)
+    if (res?.success && res.data) {
+      processOverrides.value = res.data.metadata?.process_overrides ?? null
+    }
+  } catch {
+    processOverrides.value = null
+  }
+}
+
 onMounted(() => {
   fetchSpans()
+  fetchProcessOverrides()
   // One permanent interval for the entire component lifetime. The
   // tick decides whether to actually fetch — no clearing, no
   // re-arming, no watchers wired into it. If this interval ever
@@ -1068,14 +1109,56 @@ function attemptGlyph(status: string): { ch: string; cls: string } {
   }
 }
 
+// True when the panel is showing the most recent attempt (or there's
+// only one). Historical attempts must keep their own per-attempt
+// trace.status; only the latest attempt's header should defer to the
+// knowledge-level parse_status.
+const viewingLatestAttempt = computed<boolean>(() => {
+  const latest = data.value?.latest_attempt || 0
+  if (latest <= 1) return true
+  const active = selectedAttempt.value ?? data.value?.attempt ?? latest
+  return active === latest
+})
+
+// Project the knowledge-level parse_status onto the trace-span status
+// vocabulary localizedStatus() speaks, so the header badge reads the
+// same whether it comes from the root span or from parse_status.
+// 'finalizing' keeps its own label ("优化中") to match the doc card.
+function parseStatusToTraceStatus(s?: string): string {
+  switch (s) {
+    case 'completed':
+      return 'done'
+    case 'processing':
+      return 'running'
+    case 'finalizing':
+      return 'finalizing'
+    default:
+      return s || ''
+  }
+}
+
+// The authoritative status for the header badge. During the async
+// post-pipeline window (summary / question / graph / wiki), the latest
+// attempt's ROOT span closes — so trace.status reads 'done' — while
+// those subspans keep running and the row is still 'finalizing'.
+// Trusting trace.status there flashes "已完成" mid-wiki even though the
+// doc card (and LIVE badge) still say "优化中". Prefer parse_status while
+// it is non-terminal on the latest attempt so all three agree.
+const headerStatus = computed(() => {
+  const parseStatus = data.value?.parse_status
+  if (viewingLatestAttempt.value && isPolling(parseStatus)) {
+    return parseStatusToTraceStatus(parseStatus)
+  }
+  return data.value?.trace?.status || parseStatusToTraceStatus(parseStatus)
+})
+
 const headerStatusText = computed(() => {
-  const s = data.value?.trace?.status || data.value?.parse_status || ''
+  const s = headerStatus.value
   return s ? localizedStatus(s) : ''
 })
 
 const headerStatusTheme = computed(() => {
-  const s = data.value?.trace?.status || data.value?.parse_status || ''
-  switch (s) {
+  switch (headerStatus.value) {
     case 'done':
     case 'completed':
       return 'success'
@@ -1084,6 +1167,7 @@ const headerStatusTheme = computed(() => {
     case 'running':
     case 'processing':
     case 'pending':
+    case 'finalizing':
       return 'warning'
     default:
       return 'default'
@@ -1221,6 +1305,46 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
     pct: typeof s.duration_ms === 'number' && s.duration_ms > 0 ? Math.min(100, (s.duration_ms / total) * 100) : 0,
   }))
 })
+
+// Human-readable summary of the per-upload parse overrides stored in
+// knowledge.metadata.process_overrides. Empty overrides → KB defaults.
+const processConfigLines = computed<string[]>(() => {
+  const o = processOverrides.value
+  if (!o) return [t('knowledgeStages.processConfig.kbDefault')]
+  const k = (s: string) => `knowledgeStages.processConfig.${s}`
+  const onOff = (v: boolean) => (v ? t(k('on')) : t(k('off')))
+  const lines: string[] = []
+
+  const cc = o.chunking_config
+  if (cc) {
+    const parts: string[] = []
+    if (cc.chunk_size != null) parts.push(t(k('chunkSize'), { n: cc.chunk_size }))
+    if (cc.enable_parent_child != null) {
+      parts.push(cc.enable_parent_child ? t(k('parentChildOn')) : t(k('parentChildOff')))
+    }
+    if (parts.length) lines.push(`${t(k('chunking'))}: ${parts.join(' · ')}`)
+  }
+
+  const rules = o.parser_engine_rules || cc?.parser_engine_rules
+  if (rules?.length) {
+    lines.push(`${t(k('parser'))}: ${rules.map(r => `${r.file_types.join('/')}→${r.engine}`).join(', ')}`)
+  }
+
+  const mm = o.vlm_config?.enabled ?? o.enable_multimodel
+  if (mm != null) lines.push(`${t(k('multimodal'))}: ${onOff(mm)}`)
+
+  if (o.asr_config?.enabled != null) lines.push(`${t(k('asr'))}: ${onOff(o.asr_config.enabled)}`)
+
+  const qg = o.question_generation_config
+  if (qg?.enabled != null) {
+    lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 3 }) : t(k('off'))}`)
+  }
+
+  const graph = o.graph_enabled ?? o.extract_config?.enabled
+  if (graph != null) lines.push(`${t(k('graph'))}: ${onOff(graph)}`)
+
+  return lines.length ? lines : [t('knowledgeStages.processConfig.kbDefault')]
+})
 </script>
 
 <template>
@@ -1264,6 +1388,19 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <span class="kp-live-text">{{ t('knowledgeStages.live') }}</span>
             </span>
             <div class="kp-head-actions">
+              <t-popup trigger="hover" placement="bottom-right" :overlay-style="{ maxWidth: '340px' }">
+                <button type="button" class="kp-icon-btn"
+                  :title="t('knowledgeStages.processConfig.title')"
+                  :aria-label="t('knowledgeStages.processConfig.title')">
+                  <t-icon name="info-circle" size="14px" />
+                </button>
+                <template #content>
+                  <div class="kp-proccfg-pop">
+                    <div class="kp-proccfg-title">{{ t('knowledgeStages.processConfig.title') }}</div>
+                    <div v-for="(line, i) in processConfigLines" :key="i" class="kp-proccfg-line">{{ line }}</div>
+                  </div>
+                </template>
+              </t-popup>
               <button type="button" class="kp-icon-btn" :class="{
                 'kp-icon-btn-spin': refreshing,
                 'kp-icon-btn-autoflow': isLive && !refreshing,
@@ -1273,6 +1410,22 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 @click="onManualRefresh">
                 <t-icon name="refresh" size="14px" />
               </button>
+              <t-popconfirm
+                v-if="canCancelParse"
+                theme="warning"
+                :content="t('knowledgeBase.cancelParseConfirmBody', { title: props.docTitle || props.knowledgeId })"
+                :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                :cancel-btn="{ content: t('common.cancel') }"
+                placement="bottom"
+                @confirm="onCancelParseConfirm"
+              >
+                <button type="button" class="kp-icon-btn kp-icon-btn-danger"
+                  :class="{ 'kp-icon-btn-spin': cancelling }" :disabled="cancelling"
+                  :title="t('knowledgeBase.cancelParse')" :aria-label="t('knowledgeBase.cancelParse')"
+                  @click.stop>
+                  <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="15px" />
+                </button>
+              </t-popconfirm>
               <t-button v-if="data?.parse_status === 'failed'" size="small" theme="primary" variant="outline"
                 @click="onRetry">
                 <t-icon name="refresh" size="14px" />
@@ -1792,6 +1945,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 .kp-icon-btn:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+/* Stop-parse control — stays a quiet placeholder icon until hover, then
+   reveals its destructive intent with the error tint. Matches the other
+   header icon buttons rather than shouting with a full outline button. */
+.kp-icon-btn-danger:hover:not(:disabled) {
+  background: var(--td-error-color-light);
+  color: var(--td-error-color);
 }
 
 .kp-icon-btn-spin :deep(.t-icon) {
@@ -3069,5 +3230,27 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 .kp-stage-emph {
   color: var(--td-brand-color);
   font-weight: 600;
+}
+
+.kp-proccfg-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+  max-width: 320px;
+}
+
+.kp-proccfg-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  margin-bottom: 2px;
+}
+
+.kp-proccfg-line {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+  word-break: break-word;
 }
 </style>

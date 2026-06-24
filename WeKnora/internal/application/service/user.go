@@ -240,117 +240,65 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 // but never propagated — a missing memberships array degrades gracefully
 // to length 0 rather than failing the whole login.
 //
+// When the membership service is unavailable (e.g. in tests that wire only
+// part of the dependency graph), this falls back to a single synthesized
 // LoginWithSSO authenticates or creates a user from SSO claims and returns tokens.
 // If the user does not exist, a new user and tenant are provisioned automatically.
 func (s *userService) LoginWithSSO(ctx context.Context, email, username string) (*types.LoginResponse, error) {
 	logger.Infof(ctx, "Start SSO login, email: %s", secutils.SanitizeForLog(email))
-
 	if email == "" {
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Email is required for SSO login",
-		}, nil
+		return &types.LoginResponse{Success: false, Message: "Email is required for SSO login"}, nil
 	}
-
 	if username == "" {
 		username = strings.Split(email, "@")[0]
 	}
-
-	// Try to find existing user by email (ignore "not found" — we auto-create below)
 	user, _ := s.userRepo.GetUserByEmail(ctx, email)
-
 	if user == nil {
-		// Auto-provision user and tenant
 		logger.Infof(ctx, "SSO: creating new user for email: %s", secutils.SanitizeForLog(email))
-
-		tenant := &types.Tenant{
-			Name:        fmt.Sprintf("%s's Workspace", secutils.SanitizeForLog(username)),
-			Description: "Default workspace",
-			Status:      "active",
-		}
+		tenant := &types.Tenant{Name: fmt.Sprintf("%s's Workspace", secutils.SanitizeForLog(username)), Description: "Default workspace", Status: "active"}
 		createdTenant, err := s.tenantService.CreateTenant(ctx, tenant)
 		if err != nil {
 			logger.Errorf(ctx, "SSO: failed to create tenant: %v", err)
-			return &types.LoginResponse{
-				Success: false,
-				Message: "Failed to create workspace",
-			}, nil
+			return &types.LoginResponse{Success: false, Message: "Failed to create workspace"}, nil
 		}
-
-		// Generate a random password hash for SSO users
 		randomPassword := make([]byte, 32)
 		if _, err := rand.Read(randomPassword); err != nil {
-			return &types.LoginResponse{
-				Success: false,
-				Message: "Failed to create user",
-			}, nil
+			return &types.LoginResponse{Success: false, Message: "Failed to create user"}, nil
 		}
 		hashedPassword, err := bcrypt.GenerateFromPassword(randomPassword, bcrypt.DefaultCost)
 		if err != nil {
 			logger.Errorf(ctx, "SSO: failed to hash password: %v", err)
-			return &types.LoginResponse{
-				Success: false,
-				Message: "Failed to create user",
-			}, nil
+			return &types.LoginResponse{Success: false, Message: "Failed to create user"}, nil
 		}
-
 		user = &types.User{
-			ID:           uuid.New().String(),
-			Username:     username,
-			Email:        email,
-			PasswordHash: string(hashedPassword),
-			TenantID:     createdTenant.ID,
-			IsActive:     true,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID: uuid.New().String(), Username: username, Email: email,
+			PasswordHash: string(hashedPassword), TenantID: createdTenant.ID,
+			IsActive: true, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		}
 		if err := s.userRepo.CreateUser(ctx, user); err != nil {
 			logger.Errorf(ctx, "SSO: failed to create user: %v", err)
-			return &types.LoginResponse{
-				Success: false,
-				Message: "Failed to create user",
-			}, nil
+			return &types.LoginResponse{Success: false, Message: "Failed to create user"}, nil
 		}
 		logger.Infof(ctx, "SSO: user created successfully, id: %s", user.ID)
-	} else {
-		if !user.IsActive {
-			logger.Warn(ctx, "SSO: user account is disabled")
-			return &types.LoginResponse{
-				Success: false,
-				Message: "Account is disabled",
-			}, nil
-		}
+	} else if !user.IsActive {
+		logger.Warn(ctx, "SSO: user account is disabled")
+		return &types.LoginResponse{Success: false, Message: "Account is disabled"}, nil
 	}
-
-	// Generate tokens
 	accessToken, refreshToken, err := s.GenerateTokens(ctx, user)
 	if err != nil {
 		logger.Errorf(ctx, "SSO: failed to generate tokens: %v", err)
-		return &types.LoginResponse{
-			Success: false,
-			Message: "SSO login failed",
-		}, nil
+		return &types.LoginResponse{Success: false, Message: "SSO login failed"}, nil
 	}
-
-	// Get tenant information
 	tenant, err := s.tenantService.GetTenantByID(ctx, user.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "SSO: failed to get tenant info: %v", err)
 	}
-
 	logger.Infof(ctx, "SSO: user logged in successfully, id: %s", user.ID)
 	return &types.LoginResponse{
-		Success:      true,
-		Message:      "SSO login successful",
-		User:         user,
-		ActiveTenant: tenant,
-		Token:        accessToken,
-		RefreshToken: refreshToken,
+		Success: true, Message: "SSO login successful", User: user,
+		ActiveTenant: tenant, Token: accessToken, RefreshToken: refreshToken,
 	}, nil
 }
-
-// When the membership service is unavailable (e.g. in tests that wire only
-// part of the dependency graph), this falls back to a single synthesized
 // row built from User.TenantID + the active tenant so callers always get
 // at least one entry.
 func (s *userService) BuildLoginMemberships(
