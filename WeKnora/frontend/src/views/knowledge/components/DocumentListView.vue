@@ -503,26 +503,59 @@ const treeRows = computed<TreeRow[]>(() => {
                       <t-icon class="icon" name="edit" />
                       <span>{{ t('knowledgeBase.editDocument') }}</span>
                     </div>
-                    <div class="row-menu-item" @click.stop="handleAction('reparse', row.item)">
+                    <div
+                      v-if="isParseInFlight(row.item)"
+                      class="row-menu-item"
+                      @click.stop="handleAction('reparse', row.item)"
+                    >
                       <t-icon class="icon" name="refresh" />
                       <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                     </div>
-                    <div
-                      v-if="canCancelParse(row.item)"
-                      class="row-menu-item danger"
-                      @click.stop="handleAction('cancel-parse', row.item)"
+                    <t-popconfirm
+                      v-else
+                      theme="warning"
+                      :content="t('knowledgeBase.rebuildConfirm', { fileName: row.item.file_name || '' })"
+                      :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="handleAction('reparse', row.item)"
                     >
-                      <t-icon class="icon" name="close-circle" />
-                      <span>{{ t('knowledgeBase.cancelParse') }}</span>
-                    </div>
+                      <div class="row-menu-item" @click.stop>
+                        <t-icon class="icon" name="refresh" />
+                        <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                      </div>
+                    </t-popconfirm>
+                    <t-popconfirm
+                      v-if="canCancelParse(row.item)"
+                      theme="warning"
+                      :content="t('knowledgeBase.cancelParseConfirmBody', { title: row.item.file_name || row.item.id })"
+                      :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="handleAction('cancel-parse', row.item)"
+                    >
+                      <div class="row-menu-item danger" @click.stop>
+                        <t-icon class="icon" name="close-circle" />
+                        <span>{{ t('knowledgeBase.cancelParse') }}</span>
+                      </div>
+                    </t-popconfirm>
                     <div class="row-menu-item" @click.stop="handleAction('move', row.item)">
                       <t-icon class="icon" name="swap" />
                       <span>{{ t('knowledgeBase.moveDocument') }}</span>
                     </div>
-                    <div class="row-menu-item danger" @click.stop="handleAction('delete', row.item)">
-                      <t-icon class="icon" name="delete" />
-                      <span>{{ t('knowledgeBase.deleteDocument') }}</span>
-                    </div>
+                    <t-popconfirm
+                      theme="warning"
+                      :content="t('knowledgeBase.confirmDeleteDocument', { fileName: row.item.file_name || '' })"
+                      :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="handleAction('delete', row.item)"
+                    >
+                      <div class="row-menu-item danger" @click.stop>
+                        <t-icon class="icon" name="delete" />
+                        <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                      </div>
+                    </t-popconfirm>
                   </div>
                 </template>
               </t-popup>

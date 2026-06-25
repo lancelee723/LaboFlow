@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // SilenceGinRouteSpam mutes Gin's per-route "[GIN-debug] METHOD path -->
@@ -74,6 +75,7 @@ type envVarSpec struct {
 var startupEnvVars = []envVarSpec{
 	// Security
 	{name: "SYSTEM_AES_KEY", sensitive: true},
+	{name: "TENANT_AES_KEY", sensitive: true},
 	{name: "JWT_SECRET", sensitive: true},
 	// Runtime
 	{name: "GIN_MODE"},
@@ -129,13 +131,27 @@ func LogStartupEnv(ctx context.Context) {
 		logger.Infof(ctx, "[startup-env]   %s=%s", s.name, formatEnvValue(s, val))
 	}
 
-	// Targeted warnings for footguns. SYSTEM_AES_KEY set to wrong length
-	// is the most common one — utils.GetAESKey() silently falls back to
-	// nil (== "no encryption") when len != 32.
-	if k := os.Getenv("SYSTEM_AES_KEY"); k != "" && len(k) != 32 {
-		logger.Warnf(ctx,
-			"[startup-env] SYSTEM_AES_KEY is set but %d bytes long; AES-256 requires exactly 32 bytes — encryption is DISABLED",
-			len(k))
+	// Fail-fast for AES keys that are SET but malformed. Previously these
+	// surfaced as a request-handler panic ("crypto/aes: invalid key size N")
+	// the first time a tenant API key was created — long after deployment
+	// had been declared healthy. Now they crash the binary at boot with a
+	// clear, actionable message.
+	//
+	// Empty values are tolerated (callers degrade gracefully: encryption is
+	// skipped). Only the "set but unparseable" case is fatal.
+	for _, name := range []string{"SYSTEM_AES_KEY", "TENANT_AES_KEY"} {
+		raw := os.Getenv(name)
+		if raw == "" {
+			continue
+		}
+		if utils.AESKeyFromEnv(name) == nil {
+			logger.Errorf(ctx,
+				"[startup-env] %s is set (%d chars) but does not normalise to a 32-byte AES key — "+
+					"accepted formats: 32 ASCII chars OR 64 hex chars (`openssl rand -hex 32`)",
+				name, len(raw))
+			panic(fmt.Sprintf(
+				"%s is set but malformed; refusing to start (see [startup-env] error above)", name))
+		}
 	}
 }
 

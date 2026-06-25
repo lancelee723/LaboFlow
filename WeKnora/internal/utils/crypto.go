@@ -15,22 +15,30 @@ import (
 // EncPrefix marks a string as AES-256-GCM encrypted
 const EncPrefix = "enc:v1:"
 
-// GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
-// Accepts either 32 raw bytes (ASCII passphrase) or 64 hex chars
-// (the format docker-entrypoint.sh provisions via `openssl rand -hex 32`).
-// Returns nil if neither form yields exactly 32 bytes.
-func GetAESKey() []byte {
-	raw := os.Getenv("SYSTEM_AES_KEY")
+// AESKeyFromEnv reads an AES key from the named env var and normalises it
+// to 32 raw bytes. Accepts either 32 ASCII bytes (passphrase form, e.g.
+// `weknorarag-api-key-secret-secret`) or 64 hex chars (the form docker-
+// entrypoint.sh provisions via `openssl rand -hex 32`). Returns nil if the
+// env var is unset, empty, or set to anything that cannot be normalised —
+// callers MUST treat nil as "encryption unavailable" rather than passing
+// it to aes.NewCipher.
+func AESKeyFromEnv(name string) []byte {
+	raw := os.Getenv(name)
 	if len(raw) == 64 {
 		if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) == 32 {
 			return decoded
 		}
 	}
-	key := []byte(raw)
-	if len(key) == 32 {
-		return key
+	if len(raw) == 32 {
+		return []byte(raw)
 	}
 	return nil
+}
+
+// GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
+// See AESKeyFromEnv for the accepted formats.
+func GetAESKey() []byte {
+	return AESKeyFromEnv("SYSTEM_AES_KEY")
 }
 
 // EncryptAESGCM encrypts plaintext with AES-256-GCM.

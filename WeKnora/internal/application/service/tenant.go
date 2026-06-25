@@ -7,10 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -22,16 +20,7 @@ import (
 )
 
 var apiKeySecret = func() []byte {
-	raw := os.Getenv("TENANT_AES_KEY")
-	// docker-entrypoint.sh provisions this as a 64-char hex string
-	// (`openssl rand -hex 32`); decode it back to 32 raw bytes so AES accepts it.
-	// Also accept a 32-byte ASCII passphrase set directly via .env.
-	if len(raw) == 64 {
-		if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) == 32 {
-			return decoded
-		}
-	}
-	return []byte(raw)
+	return utils.AESKeyFromEnv("TENANT_AES_KEY")
 }
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination

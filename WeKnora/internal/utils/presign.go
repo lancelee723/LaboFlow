@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,13 +22,14 @@ const (
 )
 
 // getPresignKey returns the HMAC key derived from SYSTEM_AES_KEY.
+// Routes through GetAESKey() so the bytes used to sign presigned URLs
+// are exactly the bytes used for AES-GCM elsewhere — operators rotating
+// between 32-byte ASCII and 64-char hex formats (e.g. moving from a
+// hand-written .env to docker-entrypoint.sh's auto-provisioned key) won't
+// silently desync presign verification from the rest of the crypto stack.
 // Returns nil if the key is not configured or invalid.
 func getPresignKey() []byte {
-	key := os.Getenv("SYSTEM_AES_KEY")
-	if len(key) < 16 {
-		return nil
-	}
-	return []byte(key)
+	return GetAESKey()
 }
 
 // signPayload computes HMAC-SHA256 over the canonical payload string.
