@@ -20,7 +20,7 @@ import (
 )
 
 var apiKeySecret = func() []byte {
-	return utils.GetAESKeyFromEnv("TENANT_AES_KEY")
+	return utils.AESKeyFromEnv("TENANT_AES_KEY")
 }
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
@@ -115,6 +115,11 @@ func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Te
 	}
 
 	return tenant, nil
+}
+
+// GetTenantsByIDs batches GetTenantByID; returns a map keyed by tenant ID.
+func (s *tenantService) GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error) {
+	return s.repo.GetTenantsByIDs(ctx, ids)
 }
 
 // ListTenants retrieves a list of all tenants
@@ -327,6 +332,23 @@ func (s *tenantService) ListAllTenants(ctx context.Context) ([]*types.Tenant, er
 
 	logger.Infof(ctx, "All tenants list retrieved successfully, total: %d", len(tenants))
 	return tenants, nil
+}
+
+// BulkSetStorageQuota delegates to the repository. Validation is
+// minimal — quotaBytes <= 0 is rejected because the storage-quota
+// enforcement in knowledge_create.go treats <=0 as "unlimited", which
+// is never what a SystemAdmin pressing "apply default" intends.
+func (s *tenantService) BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error) {
+	if quotaBytes <= 0 {
+		return 0, errors.New("quota must be positive")
+	}
+	affected, err := s.repo.BulkSetStorageQuota(ctx, quotaBytes)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"quota_bytes": quotaBytes})
+		return 0, err
+	}
+	logger.Infof(ctx, "Bulk set storage_quota=%d on %d tenants", quotaBytes, affected)
+	return affected, nil
 }
 
 // SearchTenants searches tenants with pagination and filters

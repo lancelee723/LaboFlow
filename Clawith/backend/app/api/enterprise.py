@@ -186,6 +186,50 @@ async def get_weknora_sso_token(
     return {"token": token, "weknora_url": weknora_url}
 
 
+# ─── Pro Slides SSO Token ──────────────────────────────────
+
+@router.get("/pro-slides/sso-token")
+async def get_pro_slides_sso_token(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Mint a short-lived SSO JWT for Pro Slides.
+
+    The frontend opens ``/pro-slides/sso?token=<jwt>`` to automatically log
+    the user into Pro Slides without requiring a separate credential.
+    """
+    token = create_sso_token(
+        user_id=str(current_user.id),
+        email=current_user.email or "",
+        audience="pro-slides",
+        role=getattr(current_user, "role", "user"),
+    )
+    slides_url = _resolve_browser_kb_url("/pro-slides", request)
+    return {"token": token, "proslides_url": slides_url}
+
+
+# ─── PPT-Master SSO Token ──────────────────────────────────
+
+@router.get("/ppt-master/sso-token")
+async def get_ppt_master_sso_token(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Mint a short-lived SSO JWT for PPT-Master.
+
+    The frontend opens ``/ppt-master/sso?token=<jwt>`` to automatically log
+    the user into PPT-Master without requiring a separate credential.
+    """
+    token = create_sso_token(
+        user_id=str(current_user.id),
+        email=current_user.email or "",
+        audience="ppt-master",
+        role=getattr(current_user, "role", "user"),
+    )
+    ppt_master_url = _resolve_browser_kb_url("/ppt-master", request)
+    return {"token": token, "ppt_master_url": ppt_master_url}
+
+
 class LLMTestRequest(BaseModel):
     provider: str
     model: str
@@ -749,7 +793,7 @@ async def get_email_templates_endpoint(
         DEFAULT_EMAIL_TEMPLATES,
     )
 
-    templates = await get_email_templates(db=db)
+    templates = await get_email_templates()
     return {
         "templates": templates,
         "variables": EMAIL_TEMPLATE_VARIABLES,
@@ -1000,7 +1044,7 @@ async def update_aippt_llm_config(
 
 @router.get("/aippt-llm-runtime")
 async def get_aippt_llm_runtime(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -1859,6 +1903,23 @@ def _require_tenant_admin(current_user: User) -> None:
         raise HTTPException(status_code=400, detail="No company assigned")
 
 
+async def _ensure_invitation_email_enabled(db: AsyncSession) -> None:
+    """Require enabled system email before accepting email invitations."""
+    from app.services.system_email_service import resolve_email_config_async
+
+    if await resolve_email_config_async(db):
+        return
+    if await resolve_email_config_async(db, include_disabled=True):
+        raise HTTPException(
+            status_code=400,
+            detail="System email SMTP is configured but disabled. Enable system email before sending invitations.",
+        )
+    raise HTTPException(
+        status_code=400,
+        detail="System email SMTP settings are not configured. Configure system email before sending invitations.",
+    )
+
+
 @router.post("/invitation-codes")
 async def create_invitation_codes(
     data: InvitationCodeCreate,
@@ -1909,6 +1970,8 @@ async def invite_users(
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
         raise HTTPException(status_code=404, detail="Company not found")
+
+    await _ensure_invitation_email_enabled(db)
 
     base_url = await platform_service.get_public_base_url(db, request=request)
     

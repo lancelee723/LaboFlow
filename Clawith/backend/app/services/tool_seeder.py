@@ -18,6 +18,36 @@ SYNC_IS_DEFAULT_TOOL_NAMES = {
     "jina_search",
     "jina_read",
     "update_objective",
+    # AgentBay tools should NOT be is_default=True. Older seeder versions may
+    # have set them to True; include them here so the seeder corrects the DB.
+    "agentbay_browser_navigate",
+    "agentbay_browser_screenshot",
+    "agentbay_browser_save_screenshot",
+    "agentbay_browser_click",
+    "agentbay_browser_type",
+    "agentbay_browser_extract",
+    "agentbay_browser_observe",
+    "agentbay_browser_login",
+    "agentbay_code_execute",
+    "agentbay_code_write_file",
+    "agentbay_code_read_file",
+    "agentbay_code_edit_file",
+    "agentbay_command_exec",
+    "agentbay_computer_screenshot",
+    "agentbay_computer_save_screenshot",
+    "agentbay_computer_click",
+    "agentbay_computer_precision_screenshot",
+    "agentbay_computer_input_text",
+    "agentbay_computer_press_keys",
+    "agentbay_computer_scroll",
+    "agentbay_computer_move_mouse",
+    "agentbay_computer_drag_mouse",
+    "agentbay_computer_get_installed_apps",
+    "agentbay_computer_start_app",
+    "agentbay_computer_list_windows",
+    "agentbay_computer_close_window",
+    "agentbay_computer_dismiss_dialog",
+    "agentbay_file_transfer",
 }
 
 LEGACY_IMAGE_TOOL_MODEL_DEFAULTS = {
@@ -29,8 +59,8 @@ LEGACY_IMAGE_TOOL_MODEL_DEFAULTS = {
 
 def _global_builtin_config(tool_data: dict) -> dict:
     """Return config safe to store on the global builtin Tool row."""
-    if (tool_data.get("config_schema") or {}).get("fields"):
-        return {}
+    # Builtin tools specify defaults (like 'allow_network': True) in their 'config' dict.
+    # The actual sensitive data defaults are empty strings ("") so this is safe to store globally.
     return tool_data.get("config", {})
 
 # Builtin tool definitions — these map to the hardcoded AGENT_TOOLS
@@ -933,7 +963,7 @@ BUILTIN_TOOLS = [
                     "type": "number",
                     "default": 30,
                     "min": 5,
-                    "max": 300,
+                    "max": 3600,
                 },
                 {
                     "key": "max_timeout",
@@ -941,7 +971,7 @@ BUILTIN_TOOLS = [
                     "type": "number",
                     "default": 60,
                     "min": 10,
-                    "max": 300,
+                    "max": 3600,
                 },
             ]
         },
@@ -984,7 +1014,7 @@ BUILTIN_TOOLS = [
                     "type": "number",
                     "default": 30,
                     "min": 5,
-                    "max": 300,
+                    "max": 3600,
                 },
                 {
                     "key": "max_timeout",
@@ -992,7 +1022,7 @@ BUILTIN_TOOLS = [
                     "type": "number",
                     "default": 60,
                     "min": 10,
-                    "max": 300,
+                    "max": 3600,
                 },
             ]
         },
@@ -3100,13 +3130,13 @@ AGENTBAY_TOOLS = [
     },
 ]
 
-# ── Built-in Playwright Browser Tools ────────────────────────────────────────
-PLAYWRIGHT_TOOLS = [
+# ── Built-in Web Browser Tools ────────────────────────────────────────────
+WEBBROWSER_TOOLS = [
     {
-        "name": "playwright_browser_navigate",
-        "display_name": "内置浏览器: 导航",
-        "description": "Navigate the built-in headless browser to a URL. Raises an error for local filesystem URLs and internal Docker services. After this call, use playwright_browser_snapshot to see the page structure; do NOT call navigate again just to screenshot.",
-        "category": "playwright",
+        "name": "webbrowser_navigate",
+        "display_name": "网页浏览器: 导航",
+        "description": "Navigate the WebBrowser to a URL. Raises an error for local filesystem URLs and internal Docker services. After this call, use webbrowser_snapshot to see the page structure; do NOT call navigate again just to screenshot. For web searches, prefer Bing (https://cn.bing.com) or Baidu (https://www.baidu.com) as they are accessible from China without a VPN.",
+        "category": "webbrowser",
         "icon": "🌐",
         "is_default": False,
         "parameters_schema": {
@@ -3121,10 +3151,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_snapshot",
-        "display_name": "内置浏览器: 可访问性快照",
+        "name": "webbrowser_snapshot",
+        "display_name": "网页浏览器: 可访问性快照",
         "description": "Return a text accessibility tree of the current page, with each interactive element tagged [ref=eN]. Use these refs to click/type/select. Refs are invalidated after the next snapshot or navigation.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "🔍",
         "is_default": False,
         "parameters_schema": {"type": "object", "properties": {}},
@@ -3132,10 +3162,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_click",
-        "display_name": "内置浏览器: 点击",
-        "description": "Click an element by ref (from playwright_browser_snapshot). Do NOT call navigate after clicking — the page may have already navigated; call snapshot or screenshot instead.",
-        "category": "playwright",
+        "name": "webbrowser_click",
+        "display_name": "网页浏览器: 点击",
+        "description": "Click an element by ref (from webbrowser_snapshot). Do NOT call navigate after clicking — the page may have already navigated; call snapshot or screenshot instead.",
+        "category": "webbrowser",
         "icon": "👆",
         "is_default": False,
         "parameters_schema": {
@@ -3147,10 +3177,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_type",
-        "display_name": "内置浏览器: 输入文字",
+        "name": "webbrowser_type",
+        "display_name": "网页浏览器: 输入文字",
         "description": "Type text into an input/textarea identified by ref. Set submit=true to press Enter after typing (common for search boxes).",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "⌨️",
         "is_default": False,
         "parameters_schema": {
@@ -3166,10 +3196,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_select",
-        "display_name": "内置浏览器: 下拉选择",
+        "name": "webbrowser_select",
+        "display_name": "网页浏览器: 下拉选择",
         "description": "Select one or more options in a <select> element by ref.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "📋",
         "is_default": False,
         "parameters_schema": {
@@ -3184,10 +3214,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_hover",
-        "display_name": "内置浏览器: 悬停",
+        "name": "webbrowser_hover",
+        "display_name": "网页浏览器: 悬停",
         "description": "Hover the mouse over an element by ref (triggers tooltips / hover menus).",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "🖱️",
         "is_default": False,
         "parameters_schema": {
@@ -3199,10 +3229,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_screenshot",
-        "display_name": "内置浏览器: 截图",
+        "name": "webbrowser_screenshot",
+        "display_name": "网页浏览器: 截图",
         "description": "Take a PNG screenshot of the current page. Use only when accessibility snapshot is insufficient (canvas, SVG, etc.).",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "📸",
         "is_default": False,
         "parameters_schema": {
@@ -3213,10 +3243,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_click_xy",
-        "display_name": "内置浏览器: 坐标点击",
+        "name": "webbrowser_click_xy",
+        "display_name": "网页浏览器: 坐标点击",
         "description": "Fallback: click at pixel coordinates. Use only when ref-based click fails.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "🎯",
         "is_default": False,
         "parameters_schema": {
@@ -3228,10 +3258,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_type_xy",
-        "display_name": "内置浏览器: 坐标输入",
+        "name": "webbrowser_type_xy",
+        "display_name": "网页浏览器: 坐标输入",
         "description": "Fallback: click at (x,y) then type text. Use only when ref-based type fails.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "✍️",
         "is_default": False,
         "parameters_schema": {
@@ -3245,10 +3275,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_wait_for",
-        "display_name": "内置浏览器: 等待元素",
+        "name": "webbrowser_wait_for",
+        "display_name": "网页浏览器: 等待元素",
         "description": "Wait for a selector to appear, for text to appear, or for network idle. Exactly one of selector/text may be provided; empty defaults to network-idle wait.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "⏳",
         "is_default": False,
         "parameters_schema": {
@@ -3263,10 +3293,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_eval",
-        "display_name": "内置浏览器: 执行JS",
+        "name": "webbrowser_eval",
+        "display_name": "网页浏览器: 执行JS",
         "description": "Evaluate a JavaScript expression in the page context and return the result.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "⚡",
         "is_default": False,
         "parameters_schema": {
@@ -3278,10 +3308,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_get_text",
-        "display_name": "内置浏览器: 获取文本",
+        "name": "webbrowser_get_text",
+        "display_name": "网页浏览器: 获取文本",
         "description": "Extract visible text from an element (by ref) or the entire page body (ref empty). Prefer doc_read for downloaded files.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "📝",
         "is_default": False,
         "parameters_schema": {
@@ -3292,10 +3322,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_back",
-        "display_name": "内置浏览器: 后退",
+        "name": "webbrowser_back",
+        "display_name": "网页浏览器: 后退",
         "description": "Navigate back in browser history.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "◀️",
         "is_default": False,
         "parameters_schema": {"type": "object", "properties": {}},
@@ -3303,10 +3333,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_close_tab",
-        "display_name": "内置浏览器: 关闭标签",
+        "name": "webbrowser_close_tab",
+        "display_name": "网页浏览器: 关闭标签",
         "description": "Close the current tab and open a fresh blank one in the same session.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "❌",
         "is_default": False,
         "parameters_schema": {"type": "object", "properties": {}},
@@ -3314,10 +3344,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_download",
-        "display_name": "内置浏览器: 下载文件",
+        "name": "webbrowser_download",
+        "display_name": "网页浏览器: 下载文件",
         "description": "Click an element by ref expected to trigger a file download, save it under this session's download dir, and return {file_id, filename, size, mime}. If file exceeds 100 MB, returns success=false with download_url so you can tell the user to download it manually.",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "⬇️",
         "is_default": False,
         "parameters_schema": {
@@ -3332,10 +3362,10 @@ PLAYWRIGHT_TOOLS = [
         "config_schema": {},
     },
     {
-        "name": "playwright_browser_list_downloads",
-        "display_name": "内置浏览器: 列出下载",
+        "name": "webbrowser_list_downloads",
+        "display_name": "网页浏览器: 列出下载",
         "description": "List files already downloaded by this ChatSession. Returns [{filename, size, file_id}].",
-        "category": "playwright",
+        "category": "webbrowser",
         "icon": "📂",
         "is_default": False,
         "parameters_schema": {"type": "object", "properties": {}},
@@ -3345,8 +3375,8 @@ PLAYWRIGHT_TOOLS = [
     {
         "name": "doc_read",
         "display_name": "文档读取",
-        "description": "Extract plaintext from a document file (pdf/docx/xlsx/pptx/md/txt/csv). file_id_or_path is either a file_id returned by playwright_browser_download or an absolute path. Returns {text, truncated, format, page_count}. max_chars caps output (hard limit 200,000).",
-        "category": "playwright",
+        "description": "Extract plaintext from a document file (pdf/docx/xlsx/pptx/md/txt/csv). file_id_or_path accepts: (1) the absolute file_id returned by webbrowser_download, or (2) the workspace-relative path returned by chat file upload (e.g. `workspace/uploads/foo.xlsx`). Returns {text, truncated, format, page_count}. max_chars caps output (hard limit 200,000).",
+        "category": "webbrowser",
         "icon": "📄",
         "is_default": False,
         "parameters_schema": {
@@ -3364,8 +3394,8 @@ PLAYWRIGHT_TOOLS = [
     {
         "name": "doc_extract_tables",
         "display_name": "文档表格提取",
-        "description": "Extract structured tables from a pdf or xlsx file. Returns {tables: [[[cell, cell, ...], ...], ...]}.",
-        "category": "playwright",
+        "description": "Extract structured tables from a pdf or xlsx file. file_id_or_path accepts: (1) the absolute file_id returned by webbrowser_download, or (2) the workspace-relative path returned by chat file upload (e.g. `workspace/uploads/foo.xlsx`). Returns {tables: [[[cell, cell, ...], ...], ...]}.",
+        "category": "webbrowser",
         "icon": "📊",
         "is_default": False,
         "parameters_schema": {
@@ -3508,8 +3538,8 @@ BUILTIN_TOOLS = [
     *BUILTIN_TOOLS,
     # ── AgentBay Tools ──
     *AGENTBAY_TOOLS,
-    # ── Built-in Playwright Browser Tools ──
-    *PLAYWRIGHT_TOOLS,
+    # ── Built-in Web Browser Tools ──
+    *WEBBROWSER_TOOLS,
     # ── WeKnora Knowledge Retrieval Tools ──
     *WEKNORA_TOOLS,
 ]
@@ -3897,7 +3927,6 @@ async def seed_builtin_tools():
                     continue
                 legacy_config = meaningful_config(tool.config or {})
                 if not legacy_config:
-                    tool.config = {}
                     continue
                 setting_key = tenant_tool_config_key(tool.name)
                 existing_setting_r = await db.execute(
@@ -3913,7 +3942,15 @@ async def seed_builtin_tools():
                         value={"config": legacy_config},
                     ))
                     migrated += 1
-                tool.config = {}
+
+                # Remove sensitive fields from global config instead of wiping it
+                clean_config = {}
+                schema_fields = (tool.config_schema or {}).get("fields", [])
+                sensitive_keys = {f["key"] for f in schema_fields if f.get("type") == "password"}
+                for k, v in (tool.config or {}).items():
+                    if k not in sensitive_keys:
+                        clean_config[k] = v
+                tool.config = clean_config
             if migrated:
                 logger.info(
                     f"[ToolSeeder] Migrated {migrated} legacy builtin tool config(s) "

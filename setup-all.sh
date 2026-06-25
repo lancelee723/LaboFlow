@@ -103,15 +103,12 @@ else
 fi
 
 # Install Playwright Chromium browser binary into the Clawith backend venv.
-# pip installs the Python bindings (from pyproject.toml) but the browser
-# binary must be downloaded separately via `playwright install`.
-# Also ensure playwright Python package is installed (pre-existing venvs may
-# have been created before playwright was added to pyproject.toml).
+# Also ensure additional dependencies: beautifulsoup4 (for read_webpage HTML parsing).
 VENV_PIP="$ROOT/Clawith/backend/.venv/bin/pip"
 PLAYWRIGHT_BIN="$ROOT/Clawith/backend/.venv/bin/playwright"
 if [ -x "$VENV_PIP" ] && ! [ -x "$PLAYWRIGHT_BIN" ]; then
     warn "playwright not in .venv — installing Python bindings..."
-    "$VENV_PIP" install "playwright>=1.47.0" "pypdf>=4.0.0" --quiet || fail "pip install playwright failed"
+    "$VENV_PIP" install "playwright>=1.47.0" "pypdf>=4.0.0" "beautifulsoup4>=4.12.0" "trafilatura>=2.0.0" --quiet || fail "pip install playwright/bs4 failed"
 fi
 if [ -x "$PLAYWRIGHT_BIN" ]; then
     # `playwright install` is idempotent — safe to re-run, fast when already installed

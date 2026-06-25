@@ -8,6 +8,7 @@ export interface ModelConfig {
   id?: string;
   tenant_id?: number;
   name: string;
+  display_name?: string;
   type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
   source: 'local' | 'remote';
   description?: string;
@@ -26,10 +27,19 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    app_id?: string;
+    // Secret fields (api_key, app_secret) are never returned by the server in
+    // this shape — they live behind the /credentials subresource. They are
+    // kept on the type so create-mode payloads can still carry them in the
+    // initial POST body.
+    app_secret?: string;
   };
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
+  // Per-field configured? metadata from the main response. Absent for
+  // builtin models.
+  credentials?: Record<ModelCredentialField, { configured: boolean }>;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
@@ -70,7 +80,9 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
       })
       .catch((error: any) => {
         console.error('Failed to list models:', error);
-        resolve([]);
+        // 抛出而非吞掉：调用方（含缓存层）才能区分「真失败」与「成功但无模型」，
+        // 避免把一次瞬时失败的空结果缓存下来。各 UI 调用点均已 try/catch 兜底。
+        reject(error);
       });
   });
 }
@@ -129,6 +141,32 @@ export function deleteModel(id: string): Promise<void> {
   });
 }
 
+// ----------------------------------------------------------------------------
+// Model credential subresource. See mcp-service.ts for the matching MCP API
+// shape and the design notes in internal/handler/dto/mcp.go.
+// ----------------------------------------------------------------------------
+
+export type ModelCredentialField = 'api_key' | 'app_secret'
+
+export interface ModelCredentialsResponse {
+  fields: Record<ModelCredentialField, { configured: boolean }>
+}
+
+export async function putModelCredentials(
+  id: string,
+  body: Partial<Record<ModelCredentialField, string>>,
+): Promise<ModelCredentialsResponse> {
+  const response: any = await put(`/api/v1/models/${id}/credentials`, body)
+  return (response.data ?? response) as ModelCredentialsResponse
+}
+
+export async function deleteModelCredentialField(
+  id: string,
+  field: ModelCredentialField,
+): Promise<void> {
+  await del(`/api/v1/models/${id}/credentials/${field}`)
+}
+
 export interface InitializeWeKnoraCloudRequest {
   app_id: string
   app_secret: string
@@ -176,4 +214,3 @@ export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
       })
   })
 }
-

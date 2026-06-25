@@ -1,6 +1,7 @@
 """Unit tests for the authentication API (app/api/auth.py)."""
 
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -86,6 +87,7 @@ def _make_user(identity_id, *, role="member", tenant_id=None):
         role=role,
         tenant_id=tenant_id or uuid.uuid4(),
         identity=_make_identity(),
+        is_active=True,
     )
 
 
@@ -154,8 +156,9 @@ async def test_login_unverified_email():
     bg = AsyncMock()
 
     with patch.object(auth_api, "_send_verification_email_task", new_callable=AsyncMock):
-        with pytest.raises(HTTPException) as exc:
-            await auth_api.login(data, bg, db)
+        with patch("app.services.system_email_service.resolve_email_config_async", new=AsyncMock(return_value=object())):
+            with pytest.raises(HTTPException) as exc:
+                await auth_api.login(data, bg, db)
     assert exc.value.status_code == 403
     assert exc.value.detail["needs_verification"] is True
 
@@ -181,9 +184,14 @@ async def test_get_me_returns_user():
     )
 
     with patch("app.api.auth.UserOut") as MockUserOut:
-        MockUserOut.model_validate.return_value = {"id": str(user.id), "email": user.email}
+        MockUserOut.model_validate.return_value = SimpleNamespace(
+            id=str(user.id),
+            email=user.email,
+            is_platform_admin=False,
+        )
         result = await auth_api.get_me(current_user=user)
     MockUserOut.model_validate.assert_called_once_with(user)
+    assert result.is_platform_admin is False
 
 
 @pytest.mark.asyncio
@@ -195,11 +203,33 @@ async def test_oauth_callback_passes_redirect_uri():
     provider.exchange_code_for_token = AsyncMock(return_value={"access_token": "provider-token"})
     provider.get_user_info = AsyncMock(return_value=SimpleNamespace())
     provider.find_or_create_user = AsyncMock(return_value=(user, False))
-    data = SimpleNamespace(code="oauth-code", state="oauth-state", redirect_uri="https://example.com/oauth/callback/google")
+    data = SimpleNamespace(
+        code="oauth-code",
+        state="oauth-state",
+        redirect_uri="https://example.com/oauth/callback/google",
+        pending_token=None,
+        tenant_id=None,
+    )
 
     with patch("app.services.auth_registry.auth_provider_registry.get_provider", new=AsyncMock(return_value=provider)):
         with patch("app.api.auth.UserOut") as MockUserOut:
-            MockUserOut.model_validate.return_value = {"id": str(user.id)}
+            MockUserOut.model_validate.return_value = {
+                "id": user.id,
+                "identity_id": user.identity_id,
+                "username": "testuser",
+                "email": "test@example.com",
+                "display_name": "testuser",
+                "avatar_url": None,
+                "role": user.role,
+                "is_platform_admin": False,
+                "tenant_id": user.tenant_id,
+                "title": None,
+                "primary_mobile": None,
+                "registration_source": None,
+                "is_active": True,
+                "email_verified": True,
+                "created_at": datetime.now(timezone.utc),
+            }
             with patch.object(auth_api, "create_access_token", return_value="jwt-token"):
                 result = await auth_api.oauth_callback("google", data, RecordingDB())
 

@@ -35,7 +35,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
 import type { KnowledgeBaseListData } from '@/types/tool-results';
 
 const props = defineProps<{

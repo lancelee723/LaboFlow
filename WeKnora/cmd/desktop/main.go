@@ -29,7 +29,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/joho/godotenv"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -172,6 +171,10 @@ func main() {
 	} else {
 		gin.SetMode(gin.DebugMode)
 	}
+	// Mute Gin's per-route registration spam; replaced by a single
+	// summary printed after router build.
+	runtime.SilenceGinRouteSpam()
+	runtime.LogStartupEnv(context.Background())
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
@@ -187,10 +190,11 @@ func main() {
 		err := c.Invoke(func(
 			cfg *config.Config,
 			router *gin.Engine,
-			tracer *tracing.Tracer,
 			resourceCleaner interfaces.ResourceCleaner,
 		) error {
 			server := &http.Server{Handler: router}
+
+			runtime.LogGinRouteCount(context.Background())
 
 			// 127.0.0.1 + saved port from settings (desktop-prefs.json), or :0 for random free port.
 			addr := desktopBackendListenAddr()

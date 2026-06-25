@@ -73,7 +73,7 @@ INIT_RERANK_MODEL_API_KEY=your_rerank_model_api_key
 # 启动 MinIO 服务
 docker-compose --profile minio up -d
 
-# 或者启动完整服务（包括 MinIO、Jaeger、Neo4j、Qdrant）
+# 或者启动完整服务（包括 MinIO、Neo4j、Qdrant）
 docker-compose --profile full up -d
 ```
 
@@ -202,6 +202,87 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 2. 开启 **Wiki** 索引功能（可同时结合开启**知识图谱**）。
 3. 当你向该知识库上传文档时，系统会自动触发异步任务，通过大模型提取文档中的实体与核心概念，并自动生成结构化的 Wiki 页面及页面间的知识图谱链接。
 4. 你可以在该知识库的“Wiki”标签页中，使用专用的 Wiki 浏览器查阅、管理页面，并通过可视化的知识图谱查看不同内容之间的关联关系。
+
+## 11. 升级到 0.6.0 后，原本能做的操作变成了「权限不足」？
+
+0.6.0 引入了租户内 RBAC（角色矩阵 + 资源归属），所有写入接口都会按角色 + `creator_id` 鉴权。常见现象：
+
+- **看得到但点不动**：你大概率是该资源的 `Viewer` 或非创建者的 `Contributor`，UI 已经把写操作隐藏/置灰。检查 **用户菜单 → 当前工作区** 角色徽章。
+- **共享空间里的 KB / Agent**：他人共享给你的 KB 默认按 `Viewer` 看待；要写需要在源租户里被授予 `Admin+`。
+- **API Key 调用**：`X-API-Key` 合成虚拟用户固定为所属租户的 `Admin`（仅删除租户需 `Owner`），脚本一般无需迁移。
+- **跨租户超管**：要 `User.CanAccessAllTenants=true` 且 `enable_cross_tenant_access=true`，并通过 `X-Tenant-ID` 切租户。
+
+如需临时回退到「仅审计、不拦截」灰度窗口，可在配置里设置 `tenant.enable_rbac=false`（或环境变量 `WEKNORA_TENANT_ENABLE_RBAC=false`）。完整的角色矩阵和归属链请见 [`docs/RBAC说明.md`](./RBAC说明.md)。
+
+## 12. 为什么登录后没有自动回到上次的工作区？
+
+升级到 0.6.0 后系统会记住「最后活跃工作区」并在登录后自动恢复。若仍未恢复，通常是：
+
+1. 浏览器清理了 LocalStorage / 切换了浏览器；
+2. 你最后访问的那个工作区已经把你移除（`/leave` 或被管理员剔除）— 系统会回退到默认租户；
+3. JWT 中携带了 `tenant_id` 但已无效 — 退出重登录即可。
+
+## 13. 如何让多人协作时正确分配权限？
+
+按照 [`docs/RBAC说明.md`](./RBAC说明.md) 的角色矩阵：
+
+- 只读用户 → `Viewer`
+- 普通成员（上传文档、维护「自己」的 KB / Agent）→ `Contributor`
+- 运维人员（管理共享模型、向量库、解析器等基础设施）→ `Admin`
+- 租户所有者（拥有删除租户权限，每租户唯一）→ `Owner`
+
+如果你希望开启「invite-only」（不允许自助注册到本租户），可在租户设置里打开邀请制，并通过「邀请」入口签发邀请码或链接。
+
+## 14. 文档解析卡在「处理中」/ 解析追踪时间线打不开怎么办？
+
+0.6.1 起每个文档解析都会记录一棵 Langfuse 风格的 Span 树（`knowledge_processing_spans` 表），可在知识库卡片菜单或卡片上的「Trace」入口打开侧边时间线，逐阶段查看进度。常见情况：
+
+- **文档长时间停在「处理中」**：先打开时间线看是哪个阶段没有推进（解析 / 切分 / 向量化 / 后处理）。0.6.1 已修复多数「卡死」场景，并加入看门狗轮询；如确认是某次解析挂死，可在时间线面板点击「中止解析」，文档会进入 finalizing 后处理状态后结束。
+- **时间线一直显示「更新中」但无数据**：通常是轮询请求静默失败（网络 / 反向代理截断 SSE）。0.6.1 会显式暴露轮询失败，刷新页面或检查 Nginx 是否缓冲了响应即可。
+- **升级后没有时间线数据**：确认数据库迁移 `000055_knowledge_processing_spans`、`000056_knowledge_pending_subtasks` 已执行（服务启动会自动迁移）。
+
+## 15. 如何启用 OpenSearch 作为向量库？
+
+0.6.1 新增了 OpenSearch 向量库驱动（k-NN）。在 **设置 → 向量库** 中新增 OpenSearch 引擎并填写连接地址、凭据即可；KB 可绑定该向量库。注意：
+
+- 连接地址会经过 SSRF 策略校验，内网 / 回环地址需符合放行规则；可用「测试连接」先行校验。
+- 集成测试与索引映射细节见 [`docs/dev/opensearch-integration-test.md`](./dev/opensearch-integration-test.md)。
+
+## 16. 内置模型（builtin models）如何用 YAML 声明式管理？
+
+0.6.1 起平台内置模型由 `config/builtin_models.yaml` 声明式驱动，支持 `${ENV}` 变量插值，并通过 `managed_by` 字段与漂移巡检保持数据库与 YAML 一致。常见问题：
+
+- **改了 YAML 不生效**：内置模型在服务启动时做生命周期对账（drift sweep）；确认重启了服务，且条目通过了 schema 校验（ID 长度、必填字段）。
+- **Docker 下环境变量未注入**：`builtin_models` 依赖 `env_file` 数组形式注入变量，确认 compose 中按数组形式挂载了 `.env`。
+- 参考样例：`config/builtin_models.yaml.example`。
+
+## 17. 系统管理员（System Admin）与平台设置怎么用？
+
+0.6.1 引入了系统管理员与统一平台设置面板（含平台审计日志），与租户内 RBAC 区分：系统管理员管理的是「平台级」配置，而非单个租户内的资源。首次启用需通过系统管理员 bootstrap 流程晋升首个管理员；撤销管理员权限有安全防护（避免误撤导致无人可管）。相关迁移为 `000053_system_admin_and_settings`。
+
+## 18. 上传时如何自定义解析配置（process_config）？
+
+0.6.2 起，文件 / URL / 文件夹上传可携带 `process_config`（`KnowledgeProcessOverrides`），在**本次批次**内覆盖知识库默认的解析引擎、分块、多模态（VLM / ASR）、问题生成、图谱抽取等设置，而不会改动 KB 全局配置。Web UI 在上传前会弹出确认对话框供调整；API 与 `weknora doc upload` 传同名 JSON 即可。
+
+- **与 KB 默认配置的关系**：未传的字段沿用 KB 默认值；`graph_enabled` 仅在 `extract_config.enabled` 为 true 时生效。
+- **重新解析**：`POST /knowledge/:id/reparse` 可在 body 中传 `process_config` 以新配置重跑解析，覆盖项会写入 `knowledge.metadata.process_overrides`。
+- **图片 / 音频校验**：批次含图片时需 KB 已配置 VLM；含音频时需已配置 ASR，否则上传会被拒绝。
+- 详见 [`docs/api/knowledge.md`](./api/knowledge.md)。
+
+## 19. 升级到 0.6.2 后 `weknora` CLI 登录或 MCP 工具报错？
+
+0.6.2 随附 **CLI v0.9**（破坏性变更），常见迁移：
+
+- **`auth login` 不再创建 profile**：先 `weknora profile add <name> --host <url> --use`，再 `weknora auth login`；切换 profile 用全局 `--profile <name>`。
+- **`auth logout` / `auth refresh` 去掉 `--name`**：作用于当前 active profile。
+- **MCP 工具 `agent_invoke` 已更名为 `session_ask`**：外部 MCP 客户端需刷新工具 schema。
+- **`agent create --kb` 改为 `--attach-kb`**；`doc delete --all` 与 `search chunks` / `search docs` 的 `--kb` 必填且支持名称或 ID。
+- 新增 `weknora session stop <session-id>` 可中止进行中的 Agent 运行；仓库内附带 `weknora-rag-search` / `weknora-shared` 内置 Skills。
+- 详见 [`cli/CHANGELOG.md`](../cli/CHANGELOG.md)。
+
+## 20. pgvector 检索变慢或刚升级后需要做什么？
+
+0.6.2 新增迁移 `000059_embeddings_hnsw_1024`，为 **1024 维** embedding（如 bge-m3）在 PostgreSQL pgvector 上创建 HNSW 索引。服务启动会自动执行迁移；若你使用其他维度，该索引可能不适用，需按自身 embedding 维度另行调优。升级后首次大批量入库期间索引构建可能占用额外 I/O，属正常现象。
 
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

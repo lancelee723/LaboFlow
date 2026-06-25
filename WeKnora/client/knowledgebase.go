@@ -18,6 +18,7 @@ type KnowledgeBase struct {
 	Name                  string                `json:"name"` // Name must be unique within the same tenant
 	Type                  string                `json:"type"`
 	IsTemporary           bool                  `json:"is_temporary"`
+	IsPinned              bool                  `json:"is_pinned"`
 	Description           string                `json:"description"`
 	TenantID              uint64                `json:"tenant_id"`
 	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
@@ -105,6 +106,25 @@ type GraphRelation struct {
 	Node1 string `json:"node1"`
 	Node2 string `json:"node2"`
 	Type  string `json:"type"`
+}
+
+// ParserEngineRule maps a set of file types to a specific parser engine.
+type ParserEngineRule struct {
+	FileTypes []string `json:"file_types"`
+	Engine    string   `json:"engine"`
+}
+
+// QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
+type QuestionGenerationConfig struct {
+	Enabled         bool `json:"enabled"`
+	QuestionCount   int  `json:"question_count"`
+}
+
+// ASRConfig represents automatic speech recognition settings for audio files.
+type ASRConfig struct {
+	Enabled  bool   `json:"enabled"`
+	ModelID  string `json:"model_id"`
+	Language string `json:"language,omitempty"`
 }
 
 // UnmarshalJSON keeps backward compatibility for legacy responses that still
@@ -370,10 +390,13 @@ func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, param
 	return response.Data, nil
 }
 
-// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+// TogglePinKnowledgeBase toggles the pin status of a knowledge base.
+// Server route is PUT (see internal/router/router.go); using POST silently
+// 404s — the router treats unknown method on a known path as not-found,
+// not 405.
 func (c *Client) TogglePinKnowledgeBase(ctx context.Context, knowledgeBaseID string) (*KnowledgeBase, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/pin", knowledgeBaseID)
-	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, nil, nil)
 	if err != nil {
 		return nil, err
 	}

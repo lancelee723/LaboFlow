@@ -8,23 +8,17 @@ import uuid
 from pathlib import Path
 
 from app.config import get_settings
+from app.services.storage import get_storage_backend, normalize_storage_key
 
 settings = get_settings()
 
-PERSISTENT_DATA = Path(settings.AGENT_DATA_DIR)
-
-
-def _agent_workspace(agent_id: uuid.UUID) -> Path:
-    """Return the canonical persistent workspace path for an agent."""
-    return PERSISTENT_DATA / str(agent_id)
-
-
-def _read_file_safe(path: Path, max_chars: int = 3000) -> str:
-    """Read a file, return empty string if missing. Truncate if too long."""
-    if not path.exists():
+async def _read_file_safe(key: str, max_chars: int = 3000) -> str:
+    """Read a storage-backed text file, return empty string if missing."""
+    storage = get_storage_backend()
+    if not await storage.exists(key) or not await storage.is_file(key):
         return ""
     try:
-        content = path.read_text(encoding="utf-8", errors="replace").strip()
+        content = (await storage.read_text(key, encoding="utf-8", errors="replace")).strip()
         if len(content) > max_chars:
             content = content[:max_chars] + "\n...(truncated)"
         return content
@@ -76,7 +70,7 @@ def _parse_skill_frontmatter(content: str, filename: str) -> tuple[str, str]:
     return name, description
 
 
-def _load_skills_index(agent_id: uuid.UUID) -> str:
+async def _load_skills_index(agent_id: uuid.UUID) -> str:
     """Load skill index (name + description) from skills/ directory.
 
     Supports two formats:
@@ -87,36 +81,36 @@ def _load_skills_index(agent_id: uuid.UUID) -> str:
     prompt. The model is instructed to call read_file to load full content
     when a skill is relevant.
     """
-    ws_root = _agent_workspace(agent_id)
     skills: list[tuple[str, str, str]] = []  # (name, description, path_relative_to_skills)
-    skills_dir = ws_root / "skills"
-    if skills_dir.exists():
-        for entry in sorted(skills_dir.iterdir()):
+    storage = get_storage_backend()
+    skills_prefix = normalize_storage_key(f"{agent_id}/skills")
+    if await storage.exists(skills_prefix) and await storage.is_dir(skills_prefix):
+        for entry in await storage.list_dir(skills_prefix):
             if entry.name.startswith("."):
                 continue
+            entry_key = entry.key
 
             # Case 1: Folder-based skill — skills/<folder>/SKILL.md
-            if entry.is_dir():
-                skill_md = entry / "SKILL.md"
-                if not skill_md.exists():
-                    # Also try lowercase skill.md
-                    skill_md = entry / "skill.md"
-                if skill_md.exists():
+            if entry.is_dir:
+                skill_md_key = f"{entry_key}/SKILL.md"
+                if not await storage.exists(skill_md_key):
+                    skill_md_key = f"{entry_key}/skill.md"
+                if await storage.exists(skill_md_key):
                     try:
-                        content = skill_md.read_text(encoding="utf-8", errors="replace").strip()
+                        content = (await storage.read_text(skill_md_key, encoding="utf-8", errors="replace")).strip()
                         name, desc = _parse_skill_frontmatter(content, entry.name)
                         skills.append((name, desc, f"{entry.name}/SKILL.md"))
                     except Exception:
                         skills.append((entry.name, "", f"{entry.name}/SKILL.md"))
 
             # Case 2: Flat file — skills/<name>.md
-            elif entry.suffix == ".md" and entry.is_file():
+            elif Path(entry.name).suffix == ".md" and not entry.is_dir:
                 try:
-                    content = entry.read_text(encoding="utf-8", errors="replace").strip()
-                    name, desc = _parse_skill_frontmatter(content, entry.stem)
+                    content = (await storage.read_text(entry_key, encoding="utf-8", errors="replace")).strip()
+                    name, desc = _parse_skill_frontmatter(content, Path(entry.name).stem)
                     skills.append((name, desc, entry.name))
                 except Exception:
-                    skills.append((entry.stem, "", entry.name))
+                    skills.append((Path(entry.name).stem, "", entry.name))
 
     # Deduplicate by name
     seen: set[str] = set()
@@ -149,35 +143,138 @@ def _load_skills_index(agent_id: uuid.UUID) -> str:
     return "\n".join(lines)
 
 
+async def _load_relationships_from_db(db, agent_id: uuid.UUID) -> str:
+    """Query relationships directly from the database and format as a markdown list."""
+    from app.models.org import AgentRelationship, AgentAgentRelationship, OrgMember
+    from app.models.identity import IdentityProvider
+    from app.core.permissions import evaluate_human_relationship_status, evaluate_agent_relationship_status
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+
+    RELATION_LABELS = {
+        "direct_leader": "直属上级",
+        "collaborator": "协作伙伴",
+        "stakeholder": "利益相关者",
+        "team_member": "团队成员",
+        "subordinate": "下属",
+        "mentor": "导师",
+        "other": "其他",
+    }
+
+    AGENT_RELATION_LABELS = {
+        "peer": "同级协作",
+        "supervisor": "上级数字员工",
+        "assistant": "助手",
+        "collaborator": "协作伙伴",
+        "other": "其他",
+    }
+
+    # Load human relationships
+    h_result = await db.execute(
+        select(
+            AgentRelationship,
+            IdentityProvider.name.label("provider_name"),
+            IdentityProvider.provider_type.label("provider_type"),
+        )
+        .outerjoin(OrgMember, AgentRelationship.member_id == OrgMember.id)
+        .outerjoin(IdentityProvider, OrgMember.provider_id == IdentityProvider.id)
+        .where(AgentRelationship.agent_id == agent_id)
+        .options(selectinload(AgentRelationship.member))
+    )
+    human_rows = []
+    for rel, provider_name, provider_type in h_result.all():
+        status_info = await evaluate_human_relationship_status(db, rel)
+        if status_info["access_status"] == "active":
+            def _display_provider_name(pn, pt):
+                if not pn and not pt:
+                    return None
+                if (pt or "").lower() in ("web", "platform") or (pn or "").lower() == "web":
+                    return "Platform"
+                return pn
+            human_rows.append((rel, _display_provider_name(provider_name, provider_type)))
+
+    # Load agent relationships
+    a_result = await db.execute(
+        select(AgentAgentRelationship)
+        .where(AgentAgentRelationship.agent_id == agent_id)
+        .options(selectinload(AgentAgentRelationship.target_agent))
+    )
+    agent_rels = []
+    for rel in a_result.scalars().all():
+        status_info = await evaluate_agent_relationship_status(db, rel)
+        if status_info["access_status"] == "active":
+            agent_rels.append(rel)
+
+    if not human_rows and not agent_rels:
+        return ""
+
+    lines = []
+
+    # Human relationships
+    if human_rows:
+        lines.append("## 人类同事\n")
+        for r, provider_name in human_rows:
+            m = r.member
+            if not m:
+                continue
+            label = RELATION_LABELS.get(r.relation, r.relation)
+            source = f"（通过 {provider_name} 同步）" if provider_name else ""
+            lines.append(f"### {m.name} — {m.title or '未设置职位'}{source}")
+            if r.description:
+                lines.append(f"- {r.description}")
+            lines.append("")
+
+    # Agent relationships
+    if agent_rels:
+        lines.append("## 🤖 数字员工同事\n")
+        for r in agent_rels:
+            a = r.target_agent
+            if not a:
+                continue
+            label = AGENT_RELATION_LABELS.get(r.relation, r.relation)
+            lines.append(f"### {a.name} — {a.role_description or '数字员工'}")
+            if r.description:
+                lines.append(f"- {r.description}")
+            lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 async def build_agent_context(agent_id: uuid.UUID, agent_name: str, role_description: str = "", current_user_name: str = None) -> tuple[str, str]:
     """Build a rich system prompt incorporating agent's full context.
 
-    Reads from workspace files:
+    Reads from workspace files and DB:
     - soul.md → personality
     - memory.md → long-term memory
     - skills/ → skill names + summaries
-    - relationships.md → relationship descriptions
+    - Database → relationship network (human + agent)
     """
-    ws_root = _agent_workspace(agent_id)
-
     # --- Soul ---
-    soul = _read_file_safe(ws_root / "soul.md", 2000)
+    # Soul is the agent's full author-curated identity; detailed souls (e.g.
+    # bundle agents) run 4-12k chars. A tight cap silently drops every tail
+    # section — rules, boundaries, facts — and the agent then confidently
+    # denies things its soul plainly states, with no log of the truncation.
+    # Memory and relationships below keep small caps because they grow
+    # unbounded at runtime; the soul does not (only seeded/explicitly edited).
+    soul = await _read_file_safe(normalize_storage_key(f"{agent_id}/soul.md"), 30000)
     # Strip markdown heading if present
     if soul.startswith("# "):
         soul = "\n".join(soul.split("\n")[1:]).strip()
 
     # --- Memory ---
-    memory = _read_file_safe(ws_root / "memory" / "memory.md", 2000) or _read_file_safe(ws_root / "memory.md", 2000)
+    memory = await _read_file_safe(normalize_storage_key(f"{agent_id}/memory/memory.md"), 2000)
+    if not memory:
+        memory = await _read_file_safe(normalize_storage_key(f"{agent_id}/memory.md"), 2000)
     if memory.startswith("# "):
         memory = "\n".join(memory.split("\n")[1:]).strip()
 
     # --- Skills index (progressive disclosure) ---
-    skills_text = _load_skills_index(agent_id)
+    skills_text = await _load_skills_index(agent_id)
 
     # --- Relationships ---
-    relationships = _read_file_safe(ws_root / "relationships.md", 2000)
-    if relationships.startswith("# "):
-        relationships = "\n".join(relationships.split("\n")[1:]).strip()
+    from app.database import async_session
+    async with async_session() as db:
+        relationships = await _load_relationships_from_db(db, agent_id)
 
     # --- Compose static and dynamic system prompt blocks ---
     from datetime import datetime, timezone as _tz
@@ -367,6 +464,7 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
     try:
         from app.database import async_session
         from app.models.system_settings import SystemSetting
+        from app.models.agent import Agent as _AgentModel
         from sqlalchemy import select as sa_select
         async with async_session() as db:
             # Resolve agent's tenant_id
@@ -427,7 +525,6 @@ You have a dedicated workspace with this structure:
   - memory/reflections.md → Your autonomous thinking journal
   - skills/        → Your skill definition files (one .md per skill)
   - workspace/     → Your work files (reports, documents, etc.)
-  - relationships.md → Your relationship list
   - enterprise_info/ → Shared company information
 
 Workspace organization rule:
@@ -575,14 +672,16 @@ If no search or webpage-reading tool is available, say that web lookup is not en
     if memory and memory not in ("_这里记录重要的信息和学到的知识。_", "_Record important information and knowledge here._"):
         dynamic_parts.append(f"\n## Memory\n{memory}")
 
-    # --- Focus (working memory) ---
-    try:
-        from app.services.focus_service import render_focus_context
-        focus = await render_focus_context(agent_id)
-        if focus.strip():
-            dynamic_parts.append(f"\n## Focus\n{focus}")
-    except Exception:
-        pass
+    # --- Focus (working memory) --- DISABLED: injecting completed focus items
+    # into the system prompt was reinforcing stale workflow patterns over updated
+    # soul.md instructions.  Agents can still query focus via list_focus_items.
+    # try:
+    #     from app.services.focus_service import render_focus_context
+    #     focus = await render_focus_context(agent_id)
+    #     if focus.strip():
+    #         dynamic_parts.append(f"\n## Focus\n{focus}")
+    # except Exception:
+    #     pass
 
     # --- Active Triggers ---
     try:

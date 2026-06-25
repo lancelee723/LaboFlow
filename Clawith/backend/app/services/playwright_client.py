@@ -399,7 +399,7 @@ class PlaywrightClient:
         """Return the selector dict for a ref, or raise RefExpiredError."""
         if ref not in getattr(self, "_ref_registry", {}):
             raise RefExpiredError(
-                f"Element ref '{ref}' is stale. Call playwright_browser_snapshot again."
+                f"Element ref '{ref}' is stale. Call webbrowser_snapshot again."
             )
         return self._ref_registry[ref]
 
@@ -412,7 +412,7 @@ class PlaywrightClient:
         if await loc.count() == 0:
             raise RefExpiredError(
                 f"Element ref '{ref}' no longer matches a visible element. "
-                "Call playwright_browser_snapshot again."
+                "Call webbrowser_snapshot again."
             )
         return loc.first
 
@@ -430,7 +430,7 @@ class PlaywrightClient:
             if "Timeout" in msg or "timeout" in msg:
                 raise NavigationTimeoutError(
                     f"Navigation to {url!r} timed out (>30 s). "
-                    "Try playwright_browser_screenshot to check state, or retry."
+                    "Try webbrowser_screenshot to check state, or retry."
                 )
             raise
         return {

@@ -186,7 +186,7 @@ def _extract_wechat_text(item_list: list[dict[str, Any]] | None) -> str:
 
 
 async def _process_wechat_message(agent_id: uuid.UUID, msg: dict[str, Any], config: ChannelConfig) -> None:
-    from app.api.feishu import _call_agent_llm
+    from app.api.feishu import _call_llm_with_config, _load_agent_and_model
     from app.services.activity_logger import log_activity
 
     from_user_id = str(msg.get("from_user_id") or "").strip()
@@ -258,30 +258,39 @@ async def _process_wechat_message(agent_id: uuid.UUID, msg: dict[str, Any], conf
             )
         )
         sess.last_message_at = datetime.now(timezone.utc)
+
+        # Pre-load agent/model before releasing the connection
+        _agent_model, _llm_model, _fallback_model = await _load_agent_and_model(db, agent_id)
+
         await db.commit()
+        # ── Phase 1 complete: release connection before slow LLM call ──
 
-        reply_text = await _call_agent_llm(
-            db=db,
-            agent_id=agent_id,
-            user_text=user_text,
-            history=history,
-            user_id=platform_user_id,
-            session_id=session_conv_id,
-        )
+    # ── Phase 2: LLM call (no DB session) ──
+    token = str((config.extra_config or {}).get("bot_token") or "").strip()
+    base_url = str((config.extra_config or {}).get("baseurl") or WECHAT_ILINK_BASE_URL).strip()
+    route_tag = str((config.extra_config or {}).get("route_tag") or "").strip() or None
 
-        token = str((config.extra_config or {}).get("bot_token") or "").strip()
-        base_url = str((config.extra_config or {}).get("baseurl") or WECHAT_ILINK_BASE_URL).strip()
-        route_tag = str((config.extra_config or {}).get("route_tag") or "").strip() or None
-        await send_wechat_text_message(
-            token=token,
-            base_url=base_url,
-            to_user_id=from_user_id,
-            context_token=context_token,
-            text=reply_text,
-            route_tag=route_tag,
-        )
+    reply_text = await _call_llm_with_config(
+        _agent_model, _llm_model, _fallback_model,
+        agent_id,
+        user_text,
+        history=history,
+        user_id=platform_user_id,
+        session_id=session_conv_id,
+    )
 
-        db.add(
+    await send_wechat_text_message(
+        token=token,
+        base_url=base_url,
+        to_user_id=from_user_id,
+        context_token=context_token,
+        text=reply_text,
+        route_tag=route_tag,
+    )
+
+    # ── Phase 3: Save reply (new short transaction) ──
+    async with async_session() as _save_db:
+        _save_db.add(
             ChatMessage(
                 agent_id=agent_id,
                 user_id=platform_user_id,
@@ -290,15 +299,21 @@ async def _process_wechat_message(agent_id: uuid.UUID, msg: dict[str, Any], conf
                 conversation_id=session_conv_id,
             )
         )
-        sess.last_message_at = datetime.now(timezone.utc)
-        await db.commit()
-
-        await log_activity(
-            agent_id,
-            "chat_reply",
-            f"Replied to WeChat message: {reply_text[:80]}",
-            detail={"channel": "wechat", "user_text": user_text[:200], "reply": reply_text[:500]},
+        from app.models.chat_session import ChatSession
+        _sess_r = await _save_db.execute(
+            select(ChatSession).where(ChatSession.id == uuid.UUID(session_conv_id))
         )
+        _sess_fresh = _sess_r.scalar_one_or_none()
+        if _sess_fresh:
+            _sess_fresh.last_message_at = datetime.now(timezone.utc)
+        await _save_db.commit()
+
+    await log_activity(
+        agent_id,
+        "chat_reply",
+        f"Replied to WeChat message: {reply_text[:80]}",
+        detail={"channel": "wechat", "user_text": user_text[:200], "reply": reply_text[:500]},
+    )
 
 
 class WeChatPollManager:
@@ -307,6 +322,7 @@ class WeChatPollManager:
     def __init__(self) -> None:
         self._tasks: dict[uuid.UUID, asyncio.Task] = {}
         self._connected: dict[uuid.UUID, bool] = {}
+        self._reconcile_interval_seconds = 30
 
     async def start_client(self, agent_id: uuid.UUID, stop_existing: bool = True) -> None:
         if stop_existing:
@@ -327,6 +343,13 @@ class WeChatPollManager:
         await self._set_connected(agent_id, False)
 
     async def start_all(self) -> None:
+        logger.info("[WeChat] Poll manager started")
+        while True:
+            await self.reconcile_clients()
+            await asyncio.sleep(self._reconcile_interval_seconds)
+
+    async def reconcile_clients(self) -> None:
+        configured_agent_ids: set[uuid.UUID] = set()
         async with async_session() as db:
             result = await db.execute(
                 select(ChannelConfig).where(
@@ -337,7 +360,16 @@ class WeChatPollManager:
             for cfg in result.scalars().all():
                 token = str((cfg.extra_config or {}).get("bot_token") or "").strip()
                 if token:
-                    await self.start_client(cfg.agent_id)
+                    configured_agent_ids.add(cfg.agent_id)
+
+        for agent_id in configured_agent_ids:
+            task = self._tasks.get(agent_id)
+            if task is None or task.done():
+                await self.start_client(agent_id)
+
+        for agent_id in list(self._tasks):
+            if agent_id not in configured_agent_ids:
+                await self.stop_client(agent_id)
 
     async def _run_client(self, agent_id: uuid.UUID) -> None:
         retry_delay = 2

@@ -24,7 +24,7 @@
                         <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
                         <div class="suggested-questions-grid">
                             <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
-                                <t-skeleton animation="gradient" :row-col="[{ width: '90%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                                <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                             </div>
                         </div>
                     </div>
@@ -45,12 +45,26 @@
                         </div>
                     </transition>
                 </div>
-                <div v-for="(session, id) in messagesList" :key='id'>
+                <!--
+                  关键：必须用 session.id 作为 key，不能用 v-for 的索引。
+                  向上滚动加载历史时会插入一批消息（push/unshift）到列表，
+                  若用索引作 key 会让所有已渲染消息的 key 漂移，触发整个列表的销毁重建
+                  （botmsg / AgentStreamDisplay 全部重新挂载、markdown 重新渲染），
+                  这是历史加载时白屏 + layout shift 蔓延到 session 列表的根因。
+                  仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
+                -->
+                <div
+                    v-for="(session, index) in messagesList"
+                    :key="session.id || `${session.role}-${session.created_at}-${index}`"
+                    class="msg-item-wrapper"
+                >
+
                     <div v-if="session.role == 'user'">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
-                    <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                    <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
+                        <botmsg :content="session.content" :session="session" :session-id="session_id"
+                            :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
@@ -92,7 +106,7 @@
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onUnmounted, nextTick, watch, reactive, onBeforeUnmount, defineProps } from 'vue';
+import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, markRaw, onBeforeUnmount, defineProps } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -117,15 +131,89 @@ const props = defineProps({
 
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
+
+// Whether the active chat session is using the Agent pipeline (not quick-answer).
+const isAgentStreamSession = () => {
+    if (props.embeddedMode) {
+        return !!(props.agentId && props.agentId !== 'builtin-quick-answer');
+    }
+    return useSettingsStoreInstance.isAgentEnabled;
+};
+
+const ensureAgentMessageShell = (message, requestId) => {
+    message.isAgentMode = true;
+    if (!message.agentEventStream) message.agentEventStream = [];
+    if (!message._eventMap) message._eventMap = new Map();
+    if (!message._pendingToolCalls) message._pendingToolCalls = new Map();
+    if (requestId) {
+        if (!message.id) message.id = requestId;
+        if (!message.request_id) message.request_id = requestId;
+    }
+};
+
+// Agent 占位消息在 agent_query 时仅有空 eventStream。若立刻渲染 botmsg，会把列表
+// 底部的全局 Loading 顶下去造成跳动；等有首个事件再渲染，Loading 位置保持稳定。
+const shouldRenderAssistantMessage = (session) => {
+    if (!session?.isAgentMode) return true;
+    const stream = session.agentEventStream;
+    return Array.isArray(stream) && stream.length > 0;
+};
 const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
 const { menuArr, isFirstSession, firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles } = storeToRefs(usemenuStore);
-const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream } = useStream();
+const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream, lastStreamRequest } = useStream();
+/** Snapshot of the in-flight HTTP request for attaching to the next assistant message. */
+const pendingStreamDebug = ref(null);
+
+const buildStreamDebugPayload = () => {
+    const meta = lastStreamRequest.value;
+    if (!meta) return null;
+    return {
+        requestId: meta.requestId,
+        url: meta.url,
+        method: meta.method,
+        body: meta.body,
+        sentAt: meta.sentAt,
+        sessionId: session_id.value,
+    };
+};
+
+const attachStreamDebugToMessage = (message) => {
+    if (!message) return;
+    const payload = pendingStreamDebug.value || buildStreamDebugPayload();
+    if (!payload) return;
+    if (payload.requestId && !message.request_id) {
+        message.request_id = payload.requestId;
+    }
+    message.debugRequest = payload;
+};
 const route = useRoute();
 const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 const sessionData = ref(null);
+
+// 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
+// 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
+// 避免污染宿主的 settings store。
+const loadSessionAndHydrate = async (sid) => {
+    if (!sid || props.embeddedMode) return;
+    try {
+        const sessionRes = await getSession(sid);
+        if (sessionRes?.data) {
+            sessionData.value = sessionRes.data;
+            const lastState = sessionRes.data.last_request_state;
+            if (lastState) {
+                // 先把当前的"全局默认"快照下来，再用 session 状态覆盖；
+                // 离开会话时会从快照还原，避免本会话的状态污染新建对话。
+                useSettingsStoreInstance.snapshotAsDefaultsIfNeeded();
+                useSettingsStoreInstance.applyLastRequestState(lastState);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load session data:', error);
+    }
+};
 const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
@@ -137,6 +225,8 @@ const isNeedTitle = ref(false);
 const isFirstEnter = ref(true);
 const loading = ref(false);
 const historyLoading = ref(true);
+const historyLoadingMore = ref(false);
+const hasMoreHistory = ref(true);
 let fullContent = ref('')
 let userquery = ref('')
 const scrollContainer = ref(null)
@@ -159,7 +249,31 @@ const suggestedQuestionsLoading = ref(false);
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 
+const cancelSuggestedQuestionsFetch = () => {
+    suggestedQuestionsFetchId++;
+    suggestedQuestionsLoading.value = false;
+    suggestedQuestions.value = [];
+    if (suggestedDebounceTimer) {
+        clearTimeout(suggestedDebounceTimer);
+        suggestedDebounceTimer = null;
+    }
+};
+
+const fetchSuggestedQuestionsIfNeeded = async () => {
+    // 初始历史尚未拉完时不能判断是否有消息，避免有历史的会话误请求推荐问法
+    if (historyLoading.value || messagesList.length > 0) {
+        if (messagesList.length > 0) {
+            cancelSuggestedQuestionsFetch();
+        }
+        return;
+    }
+    await fetchSuggestedQuestions();
+};
+
 const fetchSuggestedQuestions = async () => {
+    if (historyLoading.value || messagesList.length > 0) {
+        return;
+    }
     const fetchId = ++suggestedQuestionsFetchId;
     suggestedQuestionsLoading.value = true;
     // 加载期间保留旧数据，不清空，避免布局抖动
@@ -198,8 +312,9 @@ const handleSuggestedQuestionClick = (question) => {
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
 const debouncedFetchSuggestions = () => {
+    if (historyLoading.value || messagesList.length > 0) return;
     if (suggestedDebounceTimer) clearTimeout(suggestedDebounceTimer);
-    suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
+    suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
 };
 
 // 监听 Agent / 知识库 / 文件切换，重新获取推荐问题
@@ -237,7 +352,17 @@ const getUserQuery = (index) => {
     }
     return '';
 };
-watch([() => route.params], (newvalue) => {
+
+const findLastMessage = (predicate) => {
+    for (let i = messagesList.length - 1; i >= 0; i--) {
+        const item = messagesList[i];
+        if (predicate(item)) {
+            return item;
+        }
+    }
+    return undefined;
+};
+watch([() => route.params], async (newvalue) => {
     isFirstEnter.value = true;
     if (newvalue[0].chatid) {
         if (!firstQuery.value) {
@@ -248,12 +373,20 @@ watch([() => route.params], (newvalue) => {
         
         // 切换会话时，重置状态
         historyLoading.value = true;
+        historyLoadingMore.value = false;
+        hasMoreHistory.value = true;
+        created_at.value = '';
         loading.value = false;
         isReplying.value = false;
         currentAssistantMessageId.value = '';
         userHasScrolledUp.value = false;
-        
+
+        // 跨会话切换：先把旧会话覆盖前的全局默认还原，再让新会话重新拍快照
+        // 并应用自己的 last_request_state（在 loadSessionAndHydrate 内部完成）。
+        useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
+
         checkmenuTitle(session_id.value)
+        await loadSessionAndHydrate(session_id.value);
         let data = {
             session_id: session_id.value,
             created_at: '',
@@ -282,10 +415,11 @@ const debounce = (fn, delay) => {
     }
 }
 const onChatScrollTop = () => {
-    if (scrollLock.value) return;
+    if (scrollLock.value || historyLoadingMore.value || !hasMoreHistory.value) return;
+    if (!scrollContainer.value) return;
     const { scrollTop, scrollHeight } = scrollContainer.value;
     isFirstEnter.value = false
-    if (scrollTop == 0) {
+    if (scrollTop <= 0) {
         let data = {
             session_id: session_id.value,
             created_at: created_at.value,
@@ -301,15 +435,59 @@ const handleScroll = () => {
 };
 
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
-    getMessageList(data).then(res => {
-        if (res && res.data?.length) {
-            created_at.value = res.data[0].created_at;
-            handleMsgList(res.data, isScrollType, scrollHeight);
+    if (isScrollType) {
+        if (historyLoadingMore.value || !hasMoreHistory.value) return;
+        historyLoadingMore.value = true;
+    }
+    getMessageList(data).then(async (res) => {
+        const batch = res?.data;
+        if (!batch?.length) {
+            if (isScrollType) {
+                hasMoreHistory.value = false;
+            }
+            return;
+        }
+        if (!isScrollType) {
+            cancelSuggestedQuestionsFetch();
+        }
+        const nextCursor = batch[0].created_at;
+        if (isScrollType && created_at.value && nextCursor === created_at.value) {
+            hasMoreHistory.value = false;
+            return;
+        }
+        if (batch.length < limit.value) {
+            hasMoreHistory.value = false;
+        }
+        created_at.value = nextCursor;
+        await handleMsgList(batch, isScrollType, scrollHeight);
+    }).catch((err) => {
+        console.error('Failed to load messages:', err);
+        if (isScrollType) {
+            hasMoreHistory.value = false;
         }
     }).finally(() => {
         historyLoading.value = false;
+        historyLoadingMore.value = false;
+        if (!isScrollType && messagesList.length === 0) {
+            fetchSuggestedQuestionsIfNeeded();
+        }
     })
 }
+
+// Recompose the visible answer from the agent event stream: concatenate every
+// non-superseded `answer` event, in arrival order. Superseded events are
+// per-round preambles that were retracted from the answer area (and relocated
+// into the steps tree), so they must not leak into message.content.
+const recomposeAgentAnswer = (message) => {
+    if (!message.agentEventStream) return '';
+    let out = '';
+    for (const e of message.agentEventStream) {
+        if (e.type === 'answer' && !e.superseded && e.content) {
+            out += e.content;
+        }
+    }
+    return out;
+};
 
 // Reconstruct agentEventStream from agent_steps stored in database
 // This allows the frontend to restore the exact conversation state including all agent reasoning steps
@@ -322,24 +500,51 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
         // Compute step timestamp (milliseconds) from step.timestamp if available
         const stepTimestamp = step.timestamp ? new Date(step.timestamp).getTime() : 0;
 
-        // Add thinking event if thought content exists
-        if (step.thought && step.thought.trim()) {
+        const hasToolCalls = step.tool_calls && Array.isArray(step.tool_calls) && step.tool_calls.length > 0;
+
+        // Mirror what the user saw live, as two channels of one round (same
+        // order as live: reasoning streams before the plain-content preamble):
+        //   - `reasoning_content` (e.g. DeepSeek / MiMo thinking-mode) → the
+        //     thinking card body.
+        //   - plain `content` narration (`step.thought`) → only a preamble when
+        //     this round went on to call tools. We replay it as a *superseded*
+        //     answer event, exactly like the live supersede signal, so
+        //     buildFullEventList relocates it into this round's thinking card
+        //     (as its title) instead of the answer area. For a terminal round
+        //     (no tool calls) `step.thought` is the final answer itself and
+        //     already lives in messageContent, so we never duplicate it here.
+        const reasoningText = step.reasoning_content && step.reasoning_content.trim()
+            ? step.reasoning_content
+            : '';
+        if (reasoningText) {
             events.push({
                 type: 'thinking',
                 event_id: `step-${step.iteration}-thought`,
-                content: step.thought,
+                content: reasoningText,
                 done: true,
                 thinking: false,
                 timestamp: stepTimestamp || undefined,
-                // Extract duration from step if available
                 duration_ms: step.duration || undefined,
             });
         }
+        const preambleText = step.thought && step.thought.trim() ? step.thought : '';
+        if (preambleText && hasToolCalls) {
+            events.push({
+                type: 'answer',
+                event_id: `step-${step.iteration}-preamble`,
+                content: preambleText,
+                done: true,
+                superseded: true,
+                timestamp: stepTimestamp || undefined,
+            });
+        }
 
-        // Add tool call and result events (skip final_answer as its content is in the answer event)
+        // Add tool call and result events. Legacy histories may still contain a
+        // final_answer tool call (the tool has since been removed); skip it since
+        // its content is replayed as the answer event.
         if (step.tool_calls && Array.isArray(step.tool_calls)) {
             step.tool_calls.forEach((toolCall) => {
-                if (toolCall.name === 'final_answer') return; // Skip - shown as answer event
+                if (toolCall.name === 'final_answer') return; // legacy data — shown as answer event
                 events.push({
                     type: 'tool_call',
                     tool_call_id: toolCall.id,
@@ -393,38 +598,61 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
     return events;
 };
 const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
-    let chatlist = data.reverse()
+    // API 返回 created_at 升序（同秒时 user 在 assistant 前），保持该顺序渲染。
+    const chatlist = [...data];
+    const existingIds = new Set(messagesList.map(m => m.id).filter(Boolean));
+    const processed = [];
     for (let i = 0, len = chatlist.length; i < len; i++) {
         let item = chatlist[i];
+        if (item.id && existingIds.has(item.id)) {
+            continue;
+        }
+        if (item.id) {
+            existingIds.add(item.id);
+        }
         item.isAgentMode = false; // Agent 模式标记
-        item.agentEventStream = item.agentEventStream || [];
-        item._eventMap = new Map();
-        item._pendingToolCalls = new Map();
-        
+        // 历史消息的 agent_steps / agentEventStream 体量大、嵌套深，且是只读的，
+        // 用 markRaw 跳过 Vue 的深响应式转换，避免一次性 unshift 多条时主线程被 Proxy 转换卡住造成白屏。
+        //
+        // 例外：最后一条「未完成」的消息会通过 continue-stream 继续增量推流，
+        // handleAgentChunk 会持续 push/改写 agentEventStream、_eventMap、_pendingToolCalls。
+        // 若对它 markRaw，Vue 不会追踪这些变更，前端就「后台在推但不渲染」（只能看到刷新前的快照），
+        // 直到生成结束再次刷新才从 agent_steps 静态重建出完整内容。因此这条保持响应式。
+        const willContinueStream = !item.is_completed;
+        if (willContinueStream) {
+            item.agentEventStream = item.agentEventStream || [];
+            item._eventMap = new Map();
+            item._pendingToolCalls = new Map();
+        } else {
+            item.agent_steps = item.agent_steps ? markRaw(item.agent_steps) : item.agent_steps;
+            item.agentEventStream = markRaw(item.agentEventStream || []);
+            item._eventMap = markRaw(new Map());
+            item._pendingToolCalls = markRaw(new Map());
+        }
+
         // Check if this message has agent_steps from database (historical agent conversation)
         // If so, reconstruct the agentEventStream to restore the exact conversation state
         if (item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
-            console.log('[Message Load] Reconstructing agent steps for message:', item.id, 'steps:', item.agent_steps.length);
             item.isAgentMode = true;
-            item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback, item.agent_duration_ms || 0);
+            item.agentEventStream = markRaw(reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback, item.agent_duration_ms || 0));
             // 隐藏最终答案内容，因为它已经包含在 agentEventStream 的 answer 事件中
             item.hideContent = true;
-            console.log('[Message Load] Reconstructed', item.agentEventStream.length, 'events from agent steps');
         }
         
         if (item.content) {
-            if (!item.content.includes('<think>') && !item.content.includes('<\/think>')) {
+            const thinkCloseTag = '</think>';
+            if (!item.content.includes('<think>') && !item.content.includes(thinkCloseTag)) {
                 item.thinkContent = "";
                 item.content = item.content;
                 item.showThink = false;
                 item.thinking = false;
-            } else if (item.content.includes('<\/think>')) {
+            } else if (item.content.includes(thinkCloseTag)) {
                 // 历史消息中包含完整的 <think>...</think> 标签，说明 thinking 已完成
                 item.showThink = true;
                 item.thinking = false;  // 关键：标记 thinking 已完成，使 deepThink 默认折叠
-                const index = item.content.trim().lastIndexOf('<\/think>');
+                const index = item.content.trim().lastIndexOf(thinkCloseTag);
                 item.thinkContent = item.content.trim().substring(0, index).replace('<think>', '').trim();
-                item.content = item.content.trim().substring(index + 8);
+                item.content = item.content.trim().substring(index + thinkCloseTag.length);
             } else if (item.content.includes('<think>')) {
                 // 内容包含 <think> 但没有 </think>，说明 thinking 还在进行中（不太可能出现在历史消息中）
                 item.showThink = true;
@@ -437,15 +665,26 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         // 非 Agent 模式下若 content 为空（例如用户停止时尚未产出任何文字），
         // 保持为空；botmsg.vue 会因 hasActualContent=false 不渲染内容区和 toolbar。
         // 此前这里会兜底为 "chat.cannotAnswer"，会让停止场景显示误导性文案并出现复制按钮。
-        messagesList.unshift(item);
-        if (isFirstEnter.value) {
-            scrollToBottom(true);
-        } else if (isScrollType) {
-            nextTick(() => {
-                const { scrollHeight } = scrollContainer.value;
-                scrollContainer.value.scrollTop = scrollHeight - newScrollHeight
-            })
+        processed.push(item);
+    }
+    if (processed.length > 0) {
+        if (isScrollType) {
+            // 逆序逐个 unshift，才能保持 user → assistant 的对话顺序。
+            for (let i = processed.length - 1; i >= 0; i--) {
+                messagesList.unshift(processed[i]);
+            }
+        } else {
+            messagesList.push(...processed);
         }
+    }
+    if (isFirstEnter.value) {
+        scrollToBottom(true);
+    } else if (isScrollType && scrollContainer.value && typeof newScrollHeight === 'number') {
+        nextTick(() => {
+            if (!scrollContainer.value) return;
+            const { scrollHeight } = scrollContainer.value;
+            scrollContainer.value.scrollTop = scrollHeight - newScrollHeight;
+        });
     }
     if (messagesList[messagesList.length - 1] && !messagesList[messagesList.length - 1].is_completed) {
         isReplying.value = true;
@@ -541,8 +780,12 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
     
-    // Get memory status from settings store
-    const enableMemory = props.embeddedMode ? false : useSettingsStoreInstance.isMemoryEnabled;
+    // Memory toggle is now a server-side per-user preference (see PUT
+    // /auth/me/preferences). For the normal logged-in chat we leave the
+    // field unset so the backend reads `user.preferences.enable_memory`;
+    // for embedded widgets we still send an explicit `false` so a user's
+    // personal "memory on" setting doesn't leak into a KB-embed context.
+    const enableMemoryOverride = props.embeddedMode ? false : undefined;
     
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -577,7 +820,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
-        enable_memory: enableMemory,
+        enable_memory: enableMemoryOverride,
         summary_model_id: modelId,
         mcp_service_ids: mcpServiceIds,
         mentioned_items: mentionedItems,
@@ -616,6 +859,14 @@ onChunk((data) => {
     
     // 处理 agent query 事件 - 保存 assistant message ID 并保持 loading 状态
     if (data.response_type === 'agent_query') {
+        pendingStreamDebug.value = buildStreamDebugPayload();
+        if (data.id) {
+            const earlyMsg = findLastMessage((item) => item.role === 'assistant' && !item.is_completed);
+            if (earlyMsg) {
+                earlyMsg.request_id = data.id;
+                attachStreamDebugToMessage(earlyMsg);
+            }
+        }
         if (data.assistant_message_id) {
             currentAssistantMessageId.value = data.assistant_message_id;
             console.log('[Agent Query] Saved assistant message ID:', data.assistant_message_id);
@@ -628,14 +879,32 @@ onChunk((data) => {
         });
         
         // 检查是否是继续流式传输（消息已存在）
-        const existingMessage = messagesList.findLast((item) => item.id === data.id || item.request_id === data.id);
+        let existingMessage = findLastMessage((item) => item.id === data.id || item.request_id === data.id);
         if (!existingMessage) {
-            // 新消息，设置 loading 状态
-        loading.value = true;
-            console.log('[Agent Query] New message, setting loading=true');
+            // 预建 Agent 占位消息，确保紧随其后的 answer 分片走 handleAgentChunk
+            // 写入 agentEventStream，而不是非 Agent 路径的 message.content。
+            existingMessage = {
+                id: data.id,
+                request_id: data.id,
+                role: 'assistant',
+                content: '',
+                isAgentMode: true,
+                is_completed: false,
+                agentEventStream: [],
+                _eventMap: new Map(),
+                _pendingToolCalls: new Map(),
+                knowledge_references: [],
+            };
+            messagesList.push(existingMessage);
+            attachStreamDebugToMessage(existingMessage);
+            // 保持全局 Loading，直到首个 thinking/answer/tool 到达（handleAgentChunk
+            // 会关闭）。若此处过早 loading=false，eventStream 仍为空时 Agent 内也无
+            // 指示器，会出现「闪一下消失 → 空白 → 再出答案/再 Loading」。
+            scrollToBottom(true);
+            console.log('[Agent Query] Created agent placeholder message');
         } else {
-            // 继续流式传输（刷新页面场景），不设置 loading，因为消息已经在列表中
-            console.log('[Agent Query] Continuing stream for existing message, keeping current loading state');
+            ensureAgentMessageShell(existingMessage, data.id);
+            console.log('[Agent Query] Continuing stream for existing message');
         }
         return;
     }
@@ -667,9 +936,26 @@ onChunk((data) => {
     // 检查当前消息是否已经是 Agent 模式
     const lastMessage = messagesList[messagesList.length - 1];
     const isCurrentlyAgentMode = lastMessage?.isAgentMode === true;
+    const targetsActiveAgentRequest =
+        isAgentStreamSession() &&
+        !!data.id &&
+        (data.id === currentAssistantMessageId.value ||
+            lastMessage?.request_id === data.id ||
+            lastMessage?.id === data.id);
+    // Agent 开场白会先以 answer 分片流出；若此时尚未打上 isAgentMode，
+    // 会误走非 Agent 路径写入 message.content，tool_call 后才切到 Agent，
+    // AgentStreamDisplay 读不到 agentEventStream 中的开场白。
+    const isAgentAnswerChunk =
+        data.response_type === 'answer' && (isAgentStreamSession() || targetsActiveAgentRequest);
+    const isAgentCompleteChunk =
+        data.response_type === 'complete' && (isAgentStreamSession() || targetsActiveAgentRequest);
     
     // 如果是 Agent 专有的响应类型，或者当前消息已经是 Agent 模式，则走 Agent 处理
-    const shouldHandleAsAgent = isAgentOnlyResponse || isCurrentlyAgentMode;
+    const shouldHandleAsAgent =
+        isAgentOnlyResponse ||
+        isCurrentlyAgentMode ||
+        isAgentAnswerChunk ||
+        isAgentCompleteChunk;
     
     // 处理 references 事件 - 在两种模式下都需要处理，但不改变模式
     if (data.response_type === 'references') {
@@ -679,7 +965,7 @@ onChunk((data) => {
             return;
         }
         // 非 Agent 模式：将 references 保存到消息中供 botmsg 使用
-        let existingMessage = messagesList.findLast((item) => item.request_id === data.id || item.id === data.id);
+        let existingMessage = findLastMessage((item) => item.request_id === data.id || item.id === data.id);
         
         // 如果消息还不存在，先创建一个空的 assistant 消息
         if (!existingMessage) {
@@ -695,6 +981,7 @@ onChunk((data) => {
                 knowledge_references: []
             };
             messagesList.push(existingMessage);
+            attachStreamDebugToMessage(existingMessage);
             loading.value = false; // 消息已创建，关闭 loading
             scrollToBottom(true);
         }
@@ -727,7 +1014,7 @@ onChunk((data) => {
     // 文案拼进 content，保留用户点停止时已经流式输出的内容不变。
     if (data.response_type === 'stop') {
         console.log('[Stop Event] Non-agent generation stopped');
-        const stoppedMessage = messagesList.findLast((item) => {
+        const stoppedMessage = findLastMessage((item) => {
             if (item.request_id === data.id) return true;
             return item.id === data.id;
         });
@@ -742,7 +1029,7 @@ onChunk((data) => {
     }
 
     // 检查消息是否已经完成，如果已完成则忽略后续的完成事件（防止空内容覆盖）
-    const existingMessage = messagesList.findLast((item) => {
+    const existingMessage = findLastMessage((item) => {
         if (item.request_id === data.id) {
             return true
         }
@@ -763,19 +1050,20 @@ onChunk((data) => {
         obj.is_fallback = true;
     }
 
-    if (fullContent.value.includes('<think>') && !fullContent.value.includes('<\/think>')) {
+    const thinkCloseTag = '</think>';
+    if (fullContent.value.includes('<think>') && !fullContent.value.includes(thinkCloseTag)) {
         obj.thinking = true;
         obj.showThink = true;
         obj.content = '';
         obj.thinkContent = fullContent.value.replace('<think>', '').trim();
-    } else if (fullContent.value.includes('<think>') && fullContent.value.includes('<\/think>')) {
+    } else if (fullContent.value.includes('<think>') && fullContent.value.includes(thinkCloseTag)) {
         obj.thinking = false;
         obj.showThink = true;
         // Use lastIndexOf to handle edge cases with multiple </think> occurrences,
         // consistent with history loading logic (line 280)
-        const index = fullContent.value.lastIndexOf('<\/think>');
+        const index = fullContent.value.lastIndexOf(thinkCloseTag);
         obj.thinkContent = fullContent.value.substring(0, index).replace('<think>', '').trim();
-        obj.content = fullContent.value.substring(index + 8).trim();
+        obj.content = fullContent.value.substring(index + thinkCloseTag.length).trim();
     } else {
         obj.content = fullContent.value;
     }
@@ -798,7 +1086,7 @@ onChunk((data) => {
 })
 // 处理 Agent 流式数据 (Cursor-style UI)
 const handleAgentChunk = (data) => {
-    let message = messagesList.findLast((item) => item.request_id === data.id || item.id === data.id);
+    let message = findLastMessage((item) => item.request_id === data.id || item.id === data.id);
     
     if (!message) {
         // 创建新的 Assistant 消息 - 此时开始显示内容，关闭 loading
@@ -815,17 +1103,22 @@ const handleAgentChunk = (data) => {
             knowledge_references: []
         };
         messagesList.push(newMsg);
+        attachStreamDebugToMessage(newMsg);
+        pendingStreamDebug.value = null;
         loading.value = false; // 消息已创建，关闭 loading
         scrollToBottom(true);
         // Don't return - continue to process the current event data
         message = newMsg;
+    } else {
+        attachStreamDebugToMessage(message);
+        pendingStreamDebug.value = null;
     }
     
     message.isAgentMode = true;
     
     // 确保在继续流式传输时（刷新页面场景），一旦接收到实际内容就关闭 loading
     // 这是一个保护措施，防止任何边缘情况导致 loading 残留
-    if (loading.value && (data.response_type === 'thinking' || data.response_type === 'answer' || data.response_type === 'tool_call')) {
+    if (loading.value && (data.response_type === 'thinking' || data.response_type === 'answer' || data.response_type === 'tool_call' || data.response_type === 'tool_approval_required')) {
         console.log('[Agent Chunk] Closing loading for continued stream');
         loading.value = false;
     }
@@ -890,11 +1183,63 @@ const handleAgentChunk = (data) => {
                 }
             }
             break;
-            
+
+        case 'tool_approval_required': {
+            if (!message.agentEventStream) message.agentEventStream = [];
+            const d = data.data || {};
+            message.agentEventStream.push({
+                type: 'tool_approval_required',
+                pending_id: d.pending_id,
+                service_name: d.service_name,
+                mcp_tool_name: d.mcp_tool_name,
+                description: d.description,
+                args_json: d.args_json,
+                timeout_seconds: d.timeout_seconds,
+                requested_at: d.requested_at,
+                tool_call_id: d.tool_call_id,
+                resolved: false,
+            });
+            break;
+        }
+        case 'tool_approval_resolved': {
+            const d = data.data || {};
+            const pid = d.pending_id;
+            const ev = message.agentEventStream?.find(
+                (e) => e.type === 'tool_approval_required' && e.pending_id === pid
+            );
+            if (ev) {
+                ev.resolved = true;
+                ev.approved = d.approved;
+                ev.resolve_reason = d.reason;
+                ev.timed_out = d.timed_out;
+                ev.canceled = d.canceled;
+            }
+            break;
+        }
         case 'tool_call':
-            // Skip final_answer tool call from event stream - its content appears as answer events
+            // Legacy guard: the final_answer tool has been removed, but old
+            // streamed/replayed data may still carry it — its content appears
+            // as answer events, so skip the tool-call rendering.
             if (data.data && data.data.tool_name === 'final_answer') {
                 break;
+            }
+            // 任何在本工具调用之前流入答案区的纯文本都是这一轮的开场白，而非最终
+            // 答案（Agent 只会以"纯文本、无工具调用"自然结束）。因此一旦出现工具
+            // 调用，就把先前的答案片段从答案区回撤、交给步骤树重新定位，等效于旧的
+            // 后端 superseded 标记，并用剩余片段重组 message.content。
+            if (message.agentEventStream) {
+                let retracted = false;
+                for (const ev of message.agentEventStream) {
+                    if (ev.type === 'answer' && !ev.superseded && ev.content && ev.content.trim()) {
+                        ev.superseded = true;
+                        ev.done = true;
+                        retracted = true;
+                    }
+                }
+                if (retracted) {
+                    message.content = recomposeAgentAnswer(message);
+                    fullContent.value = message.content;
+                }
             }
             // Store or update pending tool call to pair with result later
             if (data.data && (data.data.tool_name || data.data.tool_call_id)) {
@@ -1027,42 +1372,36 @@ const handleAgentChunk = (data) => {
             }
             break;
             
-        case 'answer':
-            // 最终答案
+        case 'answer': {
+            // 最终答案（乐观流式）。普通 content 先按答案样式流入答案区；若这一轮
+            // 其实调用了工具（是开场白），后续的 tool_call 事件会把该片段从答案区
+            // 回撤、交给步骤树重新定位（见 'tool_call' 分支），并用剩余未被回撤的
+            // 片段重组 message.content。每轮答案各自一个事件（按 event_id 区分），
+            // 这样开场白不会和最终答案合并。
             message.thinking = false;
-            
-            console.log('[Answer Event] Received:', {
-                has_content: !!data.content,
-                content_length: data.content?.length || 0,
-                done: data.done,
-                current_message_content_length: message.content?.length || 0
-            });
-            
+            const eventId = data.data?.event_id;
+            if (!message.agentEventStream) message.agentEventStream = [];
+            if (!message._eventMap) message._eventMap = new Map();
+
+            let answerEvent = eventId
+                ? message._eventMap.get(eventId)
+                : message.agentEventStream.find((e) => e.type === 'answer' && !e.event_id);
+            if (!answerEvent) {
+                answerEvent = { type: 'answer', event_id: eventId, content: '', done: false };
+                message.agentEventStream.push(answerEvent);
+                if (eventId) message._eventMap.set(eventId, answerEvent);
+            }
+
+            // 若 answer 分片曾误走非 Agent 路径，首次进入 Agent 处理时迁入事件流
+            if (!answerEvent.content && message.content && message.content.trim()) {
+                answerEvent.content = message.content;
+            }
+
             // 只有当有实际内容时才追加，避免空内容覆盖
             if (data.content) {
-                message.content = (message.content || '') + data.content;
-                fullContent.value += data.content;
-                console.log('[Answer] Content appended, new length:', message.content.length);
-            }
-            
-            // Add or update answer event in agentEventStream
-            if (!message.agentEventStream) message.agentEventStream = [];
-            
-            let answerEvent = message.agentEventStream.find((e) => e.type === 'answer');
-            if (!answerEvent) {
-                answerEvent = {
-                    type: 'answer',
-                    content: '',
-                    done: false
-                };
-                message.agentEventStream.push(answerEvent);
-                console.log('[Answer] Created new answer event in stream');
-            }
-            
-            // 只有当有实际内容时才更新 answerEvent.content
-            if (data.content) {
-                answerEvent.content = message.content;
-                console.log('[Answer] answerEvent.content updated, length:', answerEvent.content.length);
+                answerEvent.content += data.content;
+                message.content = recomposeAgentAnswer(message);
+                fullContent.value = message.content;
             }
 
             // 检查是否为 fallback 回答
@@ -1070,25 +1409,22 @@ const handleAgentChunk = (data) => {
                 answerEvent.is_fallback = true;
                 message.is_fallback = true;
             }
-            
+
             // 只在第一次收到 done:true 时标记完成，忽略后续重复的完成事件
             if (data.done && !answerEvent.done) {
                 answerEvent.done = true;
-                console.log('[Agent] Answer done, content length:', message.content?.length || 0, 'answerEvent.content length:', answerEvent.content?.length || 0);
-                
+                attachStreamDebugToMessage(message);
+                pendingStreamDebug.value = null;
+
                 // 完成 - 关闭所有状态
                 loading.value = false;
                 isReplying.value = false;
                 fullContent.value = '';
                 // 清空当前 assistant message ID
                 currentAssistantMessageId.value = '';
-                
-                // 标题生成已改为异步事件推送，不再需要在这里手动调用
-                // 如果标题还未生成，前端会通过 SSE 事件接收
-            } else if (data.done && answerEvent.done) {
-                console.log('[Answer] Ignoring duplicate done event, current content preserved:', answerEvent.content?.length || 0);
             }
             break;
+        }
             
         case 'complete':
             // 整个流式响应完成事件 - 确保状态正确关闭
@@ -1130,13 +1466,16 @@ const handleAgentChunk = (data) => {
 };
 
 const updateAssistantSession = (payload) => {
-    const message = messagesList.findLast((item) => {
+    const message = findLastMessage((item) => {
         if (item.request_id === payload.id) {
             return true
         }
         return item.id === payload.id;
     });
     if (message) {
+        if (payload.id && !message.request_id) {
+            message.request_id = payload.id;
+        }
         message.content = payload.content;
         message.thinking = payload.thinking;
         message.thinkContent = payload.thinkContent;
@@ -1150,8 +1489,20 @@ const updateAssistantSession = (payload) => {
         if (payload.is_completed) {
             message.is_completed = true;
         }
+        attachStreamDebugToMessage(message);
+        if (payload.is_completed) {
+            pendingStreamDebug.value = null;
+        }
     } else {
-        messagesList.push(payload);
+        const entry = { ...payload };
+        if (entry.id && !entry.request_id) {
+            entry.request_id = entry.id;
+        }
+        messagesList.push(entry);
+        attachStreamDebugToMessage(entry);
+        if (payload.is_completed) {
+            pendingStreamDebug.value = null;
+        }
     }
     scrollToBottom();
 }
@@ -1159,13 +1510,13 @@ const handleSessionCleared = (e) => {
     if (e.detail?.sessionId === session_id.value) {
         messagesList.splice(0);
         created_at.value = '';
+        hasMoreHistory.value = true;
+        historyLoadingMore.value = false;
+        fetchSuggestedQuestionsIfNeeded();
     }
 };
 
-onMounted(async () => {
-    window.addEventListener('session-messages-cleared', handleSessionCleared);
-    messagesList.splice(0);
-    
+onBeforeMount(async () => {
     // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
     const agentIdFromQuery = props.embeddedAgentId || (route.query.agent_id && String(route.query.agent_id));
     const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
@@ -1174,33 +1525,40 @@ onMounted(async () => {
     } else if (agentIdFromQuery) {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
     }
-    
+
     if (props.embeddedKbIds && props.embeddedKbIds.length > 0) {
         useSettingsStoreInstance.selectKnowledgeBases(props.embeddedKbIds);
     }
-    
+
+    // 必须在 Input-field onMounted 之前完成：按 session.last_request_state 恢复输入栏
+    await loadSessionAndHydrate(session_id.value);
+});
+
+onMounted(async () => {
+    window.addEventListener('session-messages-cleared', handleSessionCleared);
+    messagesList.splice(0);
+
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;
     isReplying.value = false;
-    
-    // Load session data to get agent_config
-    try {
-        const sessionRes = await getSession(session_id.value);
-        if (sessionRes?.data) {
-            sessionData.value = sessionRes.data;
-        }
-    } catch (error) {
-        console.error('Failed to load session data:', error);
-    }
-    
+
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
         historyLoading.value = false;
-         sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
+        if (firstModelId.value) {
+            useSettingsStoreInstance.updateConversationModels({
+                summaryModelId: firstModelId.value,
+                selectedChatModelId: firstModelId.value,
+                rerankModelId: '',
+            });
+        }
+        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
         usemenuStore.changeFirstQuery('', [], '', [], []);
     } else {
         scrollLock.value = false;
+        hasMoreHistory.value = true;
+        historyLoadingMore.value = false;
         let data = {
             session_id: session_id.value,
             created_at: '',
@@ -1208,9 +1566,6 @@ onMounted(async () => {
         }
         getmsgList(data)
     }
-
-    // 初始加载推荐问题
-    fetchSuggestedQuestions();
 })
 const clearData = () => {
     stopStream();
@@ -1224,10 +1579,14 @@ onUnmounted(() => {
 });
 onBeforeRouteLeave((to, from, next) => {
     clearData()
+    // 离开聊天会话 → 还原"用户全局默认"，避免旧会话的请求态泄漏到新建对话。
+    useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
     next()
 })
 onBeforeRouteUpdate((to, from, next) => {
     clearData()
+    // 仅"会话 → 会话"会落到这里；跨会话覆盖的还原放到 route.params 的 watch 里，
+    // 因为新会话的 getSession 也在那边触发，便于保证 restore→snapshot→apply 顺序。
     next()
 })
 </script>
@@ -1411,6 +1770,22 @@ onBeforeRouteUpdate((to, from, next) => {
     margin: 0 auto;
     width: 100%;
 
+    /*
+      给每条消息加 layout/style containment：
+      - 一条消息的内部布局变化不再让浏览器去 invalidate 整个文档，
+        这是修掉"hover 到 session 列表也变白"那个问题的关键。
+      - 不要再用 content-visibility: auto / contain-intrinsic-size：
+        agent 消息真实高度差异巨大（几百 ~ 数千 px），估的占位高度会让消息进入视口时
+        反复发生"占位 -> 真实高度"的大幅 layout shift + 首次 paint 滞后，
+        反而在向上滚动时制造"未画完"的白屏闪烁。
+        当前 handleMsgList 全流程 ~50ms，根本无需跳过渲染，老老实实正常渲染最稳。
+      - 不开 contain: paint：AgentStreamDisplay 里有 tooltip / popover 等会溢出的浮层，
+        paint containment 会把它们裁掉。
+    */
+    .msg-item-wrapper {
+        contain: layout style;
+    }
+
     .botanswer_laoding_gif {
         width: 24px;
         height: 18px;
@@ -1513,7 +1888,31 @@ onBeforeRouteUpdate((to, from, next) => {
     transition: all 0.2s ease;
     max-width: 100%;
 
-    &:hover {
+    &.sq-card-skeleton {
+        pointer-events: none;
+        flex-shrink: 0;
+        border-color: transparent;
+        background: var(--td-bg-color-secondarycontainer);
+
+        :deep(.t-skeleton) {
+            width: 100%;
+        }
+        :deep(.t-skeleton__row) {
+            margin: 0;
+        }
+        :deep(.t-skeleton__col) {
+            border-radius: 4px;
+        }
+
+        &:nth-child(1) { width: 132px; }
+        &:nth-child(2) { width: 168px; }
+        &:nth-child(3) { width: 116px; }
+        &:nth-child(4) { width: 152px; }
+        &:nth-child(5) { width: 124px; }
+        &:nth-child(6) { width: 144px; }
+    }
+
+    &:not(.sq-card-skeleton):hover {
         border-color: var(--td-brand-color);
         background: var(--td-brand-color-light);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);

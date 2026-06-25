@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pptmaster
+          POSTGRES_PASSWORD: pptmaster_test
+          POSTGRES_DB: pptmaster
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/webui/package-lock.json
+
+      - name: Install Python deps
+        working-directory: apps/worker
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -e ".[dev]"
+
+      - name: Install Node deps
+        working-directory: apps/webui
+        run: npm ci
+
+      - name: Lint Python
+        working-directory: apps/worker
+        run: |
+          source .venv/bin/activate
+          ruff check src/
+
+      - name: Lint TypeScript
+        working-directory: apps/webui
+        run: npm run lint
+
+      - name: Run Python tests
+        working-directory: apps/worker
+        env:
+          DATABASE_URL: postgresql+asyncpg://pptmaster:pptmaster_test@localhost:5432/pptmaster
+          JWT_SECRET_KEY: test-secret-key-32-characters-long
+          SYSTEM_AES_KEY: test-32-bytes-aes-key-for-ci!
+        run: |
+          source .venv/bin/activate
+          pytest -v
+
+      - name: Run TypeScript type check
+        working-directory: apps/webui
+        run: npx tsc --noEmit

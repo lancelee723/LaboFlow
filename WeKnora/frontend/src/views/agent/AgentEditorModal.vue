@@ -6,7 +6,7 @@
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
 
@@ -14,15 +14,13 @@
             <!-- 左侧导航 -->
             <div class="settings-sidebar">
               <div class="sidebar-header">
-                <h2 class="sidebar-title">{{ mode === 'create' ? $t('agent.editor.createTitle') : $t('agent.editor.editTitle') }}</h2>
+                <h2 class="sidebar-title">{{ mode === 'create' ? $t('agent.editor.createTitle') :
+                  $t('agent.editor.editTitle') }}</h2>
               </div>
-              <div class="settings-nav">
-                <div 
-                  v-for="(item, index) in navItems" 
-                  :key="index"
+              <div class="settings-nav" data-guide="agent-editor-sidebar">
+                <div v-for="(item, index) in navItems" :key="index"
                   :class="['nav-item', { 'active': currentSection === item.key }]"
-                  @click="currentSection = item.key"
-                >
+                  :data-guide="`agent-editor-nav-${item.key}`" @click="currentSection = item.key">
                   <t-icon :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
                 </div>
@@ -35,25 +33,47 @@
                 <!-- 基础设置 -->
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
-                    <h2>{{ $t('agent.editor.basicInfo') }}</h2>
+                    <div class="section-header-title">
+                      <h2>{{ $t('agent.editor.basicInfo') }}</h2>
+                      <t-tooltip v-if="isBuiltinAgent" :content="$t('agentEditor.builtinHint')" placement="top">
+                        <span class="builtin-agent-hint" tabindex="0" role="img"
+                          :aria-label="$t('agentEditor.builtinHint')">
+                          <t-icon name="info-circle" />
+                        </span>
+                      </t-tooltip>
+                    </div>
                     <p class="section-description">{{ $t('agent.editor.basicInfoDesc') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
-                    <!-- 内置智能体提示 -->
-                    <div v-if="isBuiltinAgent" class="builtin-agent-notice">
-                      <t-icon name="info-circle" />
-                      <span>{{ $t('agentEditor.builtinHint') }}</span>
+                    <!-- 智能体 ID（用于 API 集成） -->
+                    <div v-if="mode === 'edit' && props.agent?.id" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.agentId') }}</label>
+                        <p class="desc">{{ $t('agent.editor.agentIdDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <div class="agent-id-field">
+                          <code class="agent-id-value" :title="props.agent.id">{{ props.agent.id }}</code>
+                          <t-tooltip :content="$t('common.copy')" placement="top">
+                            <t-button theme="default" size="small" variant="text" class="agent-id-copy"
+                              @click="copyAgentId">
+                              <t-icon name="file-copy" />
+                            </t-button>
+                          </t-tooltip>
+                        </div>
+                      </div>
                     </div>
 
                     <!-- 运行模式（首先选择） -->
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.mode') }} <span class="required">*</span></label>
-                        <p class="desc">{{ agentMode === 'smart-reasoning' ? $t('agent.editor.agentDesc') : $t('agent.editor.normalDesc') }}</p>
+                        <p class="desc">{{ agentMode === 'smart-reasoning' ? $t('agent.editor.agentDesc') :
+                          $t('agent.editor.normalDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent">
+                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent" data-guide="agent-create-mode">
                           <t-radio-button value="quick-answer">
                             {{ $t('agent.type.normal') }}
                           </t-radio-button>
@@ -65,25 +85,18 @@
                     </div>
 
                     <!-- 智能体类型（仅智能推理模式下显示） -->
-                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize">
+                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize"
+                      data-guide="agent-create-agent-type">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.agentType.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.agentType.desc') }}</p>
-                        <p
-                          v-if="activeAgentTypePreset"
-                          class="desc agent-type-preset-desc"
-                        >{{ agentTypePresetDescription(activeAgentTypePreset) }}</p>
+                        <p v-if="activeAgentTypePreset" class="desc agent-type-preset-desc">{{
+                          agentTypePresetDescription(activeAgentTypePreset) }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-select
-                          :value="agentType"
-                          @change="onAgentTypeChange"
-                          :disabled="isBuiltinAgent"
-                          :placeholder="$t('agentEditor.agentType.label')"
-                          :options="agentTypeSelectOptions"
-                          :popup-props="{ overlayClassName: 'agent-type-popup' }"
-                          class="agent-type-select"
-                        >
+                        <t-select :value="agentType" @change="onAgentTypeChange" :disabled="isBuiltinAgent"
+                          :placeholder="$t('agentEditor.agentType.label')" :options="agentTypeSelectOptions"
+                          :popup-props="{ overlayClassName: 'agent-type-popup' }" class="agent-type-select">
                           <template #option="{ option }">
                             <div class="agent-type-option">
                               <span class="agent-type-option-label">{{ option.label }}</span>
@@ -95,9 +108,10 @@
                     </div>
 
                     <!-- 名称 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-name">
                       <div class="setting-info">
-                        <label>{{ $t('agent.editor.name') }} <span v-if="!isBuiltinAgent" class="required">*</span></label>
+                        <label>{{ $t('agent.editor.name') }} <span v-if="!isBuiltinAgent"
+                            class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.desc.name') }}</p>
                       </div>
                       <div class="setting-control">
@@ -108,12 +122,8 @@
                           </div>
                           <!-- 自定义智能体使用 AgentAvatar -->
                           <AgentAvatar v-else :name="formData.name || '?'" size="medium" />
-                          <t-input 
-                            v-model="formData.name" 
-                            :placeholder="$t('agent.editor.namePlaceholder')" 
-                            class="name-input"
-                            :disabled="isBuiltinAgent"
-                          />
+                          <t-input v-model="formData.name" :placeholder="$t('agent.editor.namePlaceholder')"
+                            class="name-input" :disabled="isBuiltinAgent" />
                         </div>
                       </div>
                     </div>
@@ -125,33 +135,26 @@
                         <p class="desc">{{ $t('agentEditor.desc.description') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-textarea 
-                          v-model="formData.description" 
+                        <t-textarea v-model="formData.description"
                           :placeholder="$t('agent.editor.descriptionPlaceholder')"
-                          :autosize="{ minRows: 2, maxRows: 4 }"
-                          :disabled="isBuiltinAgent"
-                        />
+                          :autosize="{ minRows: 2, maxRows: 4 }" :disabled="isBuiltinAgent" />
                       </div>
                     </div>
 
                     <!-- 系统提示词 -->
                     <div class="setting-row setting-row-vertical">
                       <div class="setting-info">
-                        <label>{{ $t('agent.editor.systemPrompt') }} <span v-if="!isBuiltinAgent" class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.systemPrompt') }}{{ isBuiltinAgent ? $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
+                        <label>{{ $t('agent.editor.systemPrompt') }} <span v-if="!isBuiltinAgent"
+                            class="required">*</span></label>
+                        <p class="desc">{{ $t('agentEditor.desc.systemPrompt') }}{{ isBuiltinAgent ?
+                          $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
                         <div class="placeholder-tags">
                           <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                          <t-tooltip 
-                            v-for="placeholder in availablePlaceholders" 
-                            :key="placeholder.name"
+                          <t-tooltip v-for="placeholder in availablePlaceholders" :key="placeholder.name"
                             :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                            placement="top"
-                          >
-                            <span 
-                              class="placeholder-tag"
-                              @click="handlePlaceholderClick('system', placeholder.name)"
-                              v-text="'{{' + placeholder.name + '}}'"
-                            ></span>
+                            placement="top">
+                            <span class="placeholder-tag" @click="handlePlaceholderClick('system', placeholder.name)"
+                              v-text="'{{' + placeholder.name + '}}'"></span>
                           </t-tooltip>
                           <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
                         </div>
@@ -159,56 +162,31 @@
                       <div class="setting-control setting-control-full" style="position: relative;">
                         <!-- Agent模式：统一提示词（使用 {{web_search_status}} 占位符动态控制行为） -->
                         <div v-if="isAgentMode" class="textarea-with-template">
-                          <t-textarea 
-                            ref="promptTextareaRef"
-                            v-model="formData.config.system_prompt" 
-                            :placeholder="systemPromptPlaceholder"
-                            :autosize="{ minRows: 10, maxRows: 25 }"
-                            @input="handlePromptInput"
-                            class="system-prompt-textarea"
-                          />
-                          <PromptTemplateSelector 
-                            type="agentSystemPrompt" 
-                            position="corner"
-                            :hasKnowledgeBase="hasKnowledgeBase"
-                            @select="handleSystemPromptTemplateSelect"
-                            @reset-default="handleAgentSystemPromptResetDefault"
-                          />
+                          <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
+                            :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
+                            @input="handlePromptInput" class="system-prompt-textarea" />
+                          <PromptTemplateSelector type="agentSystemPrompt" position="corner"
+                            :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                            @reset-default="handleAgentSystemPromptResetDefault" />
                         </div>
                         <!-- 普通模式：单个提示词 -->
                         <div v-else class="textarea-with-template">
-                          <t-textarea 
-                            ref="promptTextareaRef"
-                            v-model="formData.config.system_prompt" 
-                            :placeholder="systemPromptPlaceholder"
-                            :autosize="{ minRows: 10, maxRows: 25 }"
-                            @input="handlePromptInput"
-                            class="system-prompt-textarea"
-                          />
-                          <PromptTemplateSelector 
-                            type="systemPrompt" 
-                            position="corner"
-                            :hasKnowledgeBase="hasKnowledgeBase"
-                            @select="handleSystemPromptTemplateSelect"
-                            @reset-default="handleSystemPromptTemplateSelect"
-                          />
+                          <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
+                            :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
+                            @input="handlePromptInput" class="system-prompt-textarea" />
+                          <PromptTemplateSelector type="systemPrompt" position="corner"
+                            :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                            @reset-default="handleSystemPromptTemplateSelect" />
                         </div>
                         <!-- 占位符提示下拉框 -->
                         <Teleport to="body">
-                          <div
-                            v-if="showPlaceholderPopup && filteredPlaceholders.length > 0"
-                            class="placeholder-popup-wrapper"
-                            :style="popupStyle"
-                          >
+                          <div v-if="showPlaceholderPopup && filteredPlaceholders.length > 0"
+                            class="placeholder-popup-wrapper" :style="popupStyle">
                             <div class="placeholder-popup">
-                              <div
-                                v-for="(placeholder, index) in filteredPlaceholders"
-                                :key="placeholder.name"
-                                class="placeholder-item"
-                                :class="{ active: selectedPlaceholderIndex === index }"
+                              <div v-for="(placeholder, index) in filteredPlaceholders" :key="placeholder.name"
+                                class="placeholder-item" :class="{ active: selectedPlaceholderIndex === index }"
                                 @mousedown.prevent="insertPlaceholder(placeholder.name, true)"
-                                @mouseenter="selectedPlaceholderIndex = index"
-                              >
+                                @mouseenter="selectedPlaceholderIndex = index">
                                 <div class="placeholder-name">
                                   <code v-html="`{{${placeholder.name}}}`"></code>
                                 </div>
@@ -223,59 +201,39 @@
                     <!-- 上下文模板（仅普通模式） -->
                     <div v-if="!isAgentMode" class="setting-row setting-row-vertical">
                       <div class="setting-info">
-                        <label>{{ $t('agent.editor.contextTemplate') }} <span v-if="!isBuiltinAgent" class="required">*</span></label>
-                        <p class="desc">{{ $t('agentEditor.desc.contextTemplate') }}{{ isBuiltinAgent ? $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
+                        <label>{{ $t('agent.editor.contextTemplate') }} <span v-if="!isBuiltinAgent"
+                            class="required">*</span></label>
+                        <p class="desc">{{ $t('agentEditor.desc.contextTemplate') }}{{ isBuiltinAgent ?
+                          $t('agentEditor.desc.leaveEmptyDefault') : '' }}</p>
                         <div class="placeholder-tags">
                           <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                          <t-tooltip 
-                            v-for="placeholder in contextTemplatePlaceholders" 
-                            :key="placeholder.name"
+                          <t-tooltip v-for="placeholder in contextTemplatePlaceholders" :key="placeholder.name"
                             :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                            placement="top"
-                          >
-                            <span 
-                              class="placeholder-tag"
-                              @click="handlePlaceholderClick('context', placeholder.name)"
-                              v-text="'{{' + placeholder.name + '}}'"
-                            ></span>
+                            placement="top">
+                            <span class="placeholder-tag" @click="handlePlaceholderClick('context', placeholder.name)"
+                              v-text="'{{' + placeholder.name + '}}'"></span>
                           </t-tooltip>
                           <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
                         </div>
                       </div>
                       <div class="setting-control setting-control-full" style="position: relative;">
                         <div class="textarea-with-template">
-                          <t-textarea 
-                            ref="contextTemplateTextareaRef"
-                            v-model="formData.config.context_template" 
-                            :placeholder="contextTemplatePlaceholder"
-                            :autosize="{ minRows: 8, maxRows: 20 }"
-                            @input="handleContextTemplateInput"
-                            class="system-prompt-textarea"
-                          />
-                          <PromptTemplateSelector 
-                            type="contextTemplate" 
-                            position="corner"
-                            :hasKnowledgeBase="hasKnowledgeBase"
-                            @select="handleContextTemplateSelect"
-                            @reset-default="handleContextTemplateSelect"
-                          />
+                          <t-textarea ref="contextTemplateTextareaRef" v-model="formData.config.context_template"
+                            :placeholder="contextTemplatePlaceholder" :autosize="{ minRows: 8, maxRows: 20 }"
+                            @input="handleContextTemplateInput" class="system-prompt-textarea" />
+                          <PromptTemplateSelector type="contextTemplate" position="corner"
+                            :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
+                            @reset-default="handleContextTemplateSelect" />
                         </div>
                         <!-- 上下文模板占位符提示下拉框 -->
                         <Teleport to="body">
-                          <div
-                            v-if="showContextPlaceholderPopup && filteredContextPlaceholders.length > 0"
-                            class="placeholder-popup-wrapper"
-                            :style="contextPopupStyle"
-                          >
+                          <div v-if="showContextPlaceholderPopup && filteredContextPlaceholders.length > 0"
+                            class="placeholder-popup-wrapper" :style="contextPopupStyle">
                             <div class="placeholder-popup">
-                              <div
-                                v-for="(placeholder, index) in filteredContextPlaceholders"
-                                :key="placeholder.name"
-                                class="placeholder-item"
-                                :class="{ active: selectedContextPlaceholderIndex === index }"
+                              <div v-for="(placeholder, index) in filteredContextPlaceholders" :key="placeholder.name"
+                                class="placeholder-item" :class="{ active: selectedContextPlaceholderIndex === index }"
                                 @mousedown.prevent="insertContextPlaceholder(placeholder.name, true)"
-                                @mouseenter="selectedContextPlaceholderIndex = index"
-                              >
+                                @mouseenter="selectedContextPlaceholderIndex = index">
                                 <div class="placeholder-name">
                                   <code v-html="`{{${placeholder.name}}}`"></code>
                                 </div>
@@ -284,6 +242,80 @@
                             </div>
                           </div>
                         </Teleport>
+                      </div>
+                    </div>
+
+                    <!-- 意图提示词（仅普通模式，放在上下文模板下方） -->
+                    <div v-if="!isAgentMode" class="setting-row setting-row-vertical">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.intentPrompts.title') }}</label>
+                        <p class="desc">{{ $t('agentEditor.intentPrompts.sectionDesc') }}</p>
+                      </div>
+                      <div class="setting-control setting-control-full">
+                        <div class="intent-prompts-editor">
+                          <div v-if="intentPromptTemplates.length === 0" class="prompt-disabled-hint">
+                            {{ $t('agentEditor.intentPrompts.empty') }}
+                          </div>
+                          <template v-else>
+                            <div class="intent-toggle-group" role="tablist"
+                              :aria-label="$t('agentEditor.intentPrompts.intentLabel')">
+                              <t-button v-for="template in intentPromptTemplates" :key="template.id" theme="default"
+                                variant="outline" size="small" class="intent-toggle-btn"
+                                :class="{ 'intent-toggle-btn--active': selectedIntent === template.id }"
+                                :disabled="props.readOnly" @click="selectedIntent = template.id">
+                                <span class="intent-toggle-label">
+                                  {{ template.name || template.id }}
+                                  <t-tooltip v-if="isIntentCustomized(template.id)"
+                                    :content="$t('agentEditor.intentPrompts.customized')" placement="top">
+                                    <span class="intent-toggle-dot" />
+                                  </t-tooltip>
+                                </span>
+                              </t-button>
+                            </div>
+                            <p v-if="currentIntentTemplateDesc" class="intent-active-desc">{{ currentIntentTemplateDesc
+                            }}</p>
+
+                            <div v-if="placeholderData.system_prompt.length > 0" class="placeholder-tags">
+                              <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                              <t-tooltip v-for="placeholder in placeholderData.system_prompt" :key="placeholder.name"
+                                :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                                placement="top">
+                                <span class="placeholder-tag"
+                                  @click="handlePlaceholderClick('intent', placeholder.name)"
+                                  v-text="'{{' + placeholder.name + '}}'" />
+                              </t-tooltip>
+                              <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+                            </div>
+
+                            <div class="textarea-with-template">
+                              <t-textarea ref="intentPromptTextareaRef" v-model="intentEditorValue"
+                                class="system-prompt-textarea" :autosize="{ minRows: 10, maxRows: 25 }"
+                                :disabled="props.readOnly || !selectedIntent"
+                                :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
+                                @input="handleIntentPromptInput" />
+                              <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
+                                :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                            </div>
+
+                            <Teleport to="body">
+                              <div v-if="intentPromptPopup.show && filteredIntentPlaceholders.length > 0"
+                                class="placeholder-popup-wrapper" :style="intentPromptPopup.style">
+                                <div class="placeholder-popup">
+                                  <div v-for="(placeholder, index) in filteredIntentPlaceholders" :key="placeholder.name"
+                                    class="placeholder-item"
+                                    :class="{ active: intentPromptPopup.selectedIndex === index }"
+                                    @mousedown.prevent="insertGenericPlaceholder('intent', placeholder.name, true)"
+                                    @mouseenter="intentPromptPopup.selectedIndex = index">
+                                    <div class="placeholder-name">
+                                      <code v-html="`{{${placeholder.name}}}`" />
+                                    </div>
+                                    <div class="placeholder-desc">{{ placeholder.description }}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </Teleport>
+                          </template>
+                        </div>
                       </div>
                     </div>
 
@@ -296,23 +328,19 @@
                     <h2>{{ $t('agent.editor.modelConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.modelConfigDesc') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
                     <!-- 模型选择 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-model">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
                       </div>
                       <div class="setting-control">
-                        <ModelSelector
-                          model-type="KnowledgeQA"
-                          :selected-model-id="formData.config.model_id"
+                        <ModelSelector model-type="KnowledgeQA" :selected-model-id="formData.config.model_id"
                           :all-models="allModels"
                           @update:selected-model-id="(val: string) => formData.config.model_id = val"
-                          @add-model="handleAddModel('llm')"
-                          :placeholder="$t('agent.editor.modelPlaceholder')"
-                        />
+                          @add-model="handleAddModel('llm')" :placeholder="$t('agent.editor.modelPlaceholder')" />
                       </div>
                     </div>
 
@@ -337,7 +365,8 @@
                         <p class="desc">{{ $t('agentEditor.desc.maxTokens') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-input-number v-model="formData.config.max_completion_tokens" :min="100" :max="100000" :step="100" theme="column" />
+                        <t-input-number v-model="formData.config.max_completion_tokens" :min="100" :max="100000"
+                          :step="100" theme="column" />
                       </div>
                     </div>
 
@@ -364,7 +393,7 @@
 
                   <div class="settings-group">
                     <!-- 图片上传（多模态） -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-multimodal">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.desc') }}</p>
@@ -381,14 +410,11 @@
                         <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <ModelSelector
-                          model-type="VLLM"
-                          :selected-model-id="formData.config.vlm_model_id"
+                        <ModelSelector model-type="VLLM" :selected-model-id="formData.config.vlm_model_id"
                           :all-models="allModels"
                           @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
                           @add-model="handleAddModel('vllm')"
-                          :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')"
-                        />
+                          :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
                       </div>
                     </div>
 
@@ -399,27 +425,20 @@
                         <p class="desc">{{ $t('agentEditor.imageUpload.storageProviderDesc') }}</p>
                       </div>
                       <div class="setting-control" style="flex-direction: column; align-items: flex-end;">
-                        <t-select
-                          v-model="formData.config.image_storage_provider"
-                          style="width: 280px;"
-                          :placeholder="$t('agentEditor.imageUpload.storageProviderPlaceholder')"
-                          clearable
-                        >
+                        <t-select v-model="formData.config.image_storage_provider" style="width: 280px;"
+                          :placeholder="$t('agentEditor.imageUpload.storageProviderPlaceholder')" clearable>
                           <t-option value="" :label="$t('agentEditor.imageUpload.storageDefault')" />
-                          <t-option
-                            v-for="opt in imageStorageOptions"
-                            :key="opt.value"
-                            :value="opt.value"
-                            :label="opt.label"
-                            :disabled="opt.disabled"
-                          >
+                          <t-option v-for="opt in imageStorageOptions" :key="opt.value" :value="opt.value"
+                            :label="opt.label" :disabled="opt.disabled">
                             <span class="select-option-with-tag">
                               <span>{{ opt.label }}</span>
-                              <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{ $t('agentEditor.imageUpload.notConfigured') }}</t-tag>
+                              <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{
+                                $t('agentEditor.imageUpload.notConfigured') }}</t-tag>
                             </span>
                           </t-option>
                         </t-select>
-                        <a href="javascript:void(0)" class="go-settings-link" @click.prevent="uiStore.openSettings('storage')">
+                        <a href="javascript:void(0)" class="go-settings-link"
+                          @click.prevent="uiStore.openSettings('storage')">
                           {{ $t('agentEditor.imageUpload.goStorageSettings') }}
                         </a>
                       </div>
@@ -443,14 +462,11 @@
                         <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <ModelSelector
-                          model-type="ASR"
-                          :selected-model-id="formData.config.asr_model_id"
+                        <ModelSelector model-type="ASR" :selected-model-id="formData.config.asr_model_id"
                           :all-models="allModels"
                           @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
                           @add-model="handleAddModel('asr')"
-                          :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')"
-                        />
+                          :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')" />
                       </div>
                     </div>
                   </div>
@@ -462,7 +478,7 @@
                     <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.desc.conversationSection') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
                     <!-- 多轮对话 -->
                     <div class="setting-row">
@@ -497,59 +513,57 @@
                       </div>
                     </div>
 
+                    <!-- 问题理解模型（独立模型，留空则复用主对话模型） -->
+                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite"
+                      class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.queryUnderstandModel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.queryUnderstandModel') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <ModelSelector model-type="KnowledgeQA"
+                          :selected-model-id="formData.config.query_understand_model_id" :all-models="allModels"
+                          @update:selected-model-id="(val: string) => formData.config.query_understand_model_id = val"
+                          @add-model="handleAddModel('llm')"
+                          :placeholder="$t('agent.editor.queryUnderstandModelPlaceholder')" />
+                      </div>
+                    </div>
+
                     <!-- 改写系统提示词 -->
-                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite" class="setting-row setting-row-vertical">
+                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite"
+                      class="setting-row setting-row-vertical">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.rewritePromptSystem') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rewriteSystemPrompt') }}</p>
                         <div class="placeholder-tags" v-if="rewriteSystemPlaceholders.length > 0">
                           <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                          <t-tooltip 
-                            v-for="placeholder in rewriteSystemPlaceholders" 
-                            :key="placeholder.name"
+                          <t-tooltip v-for="placeholder in rewriteSystemPlaceholders" :key="placeholder.name"
                             :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                            placement="top"
-                          >
-                            <span 
-                              class="placeholder-tag"
+                            placement="top">
+                            <span class="placeholder-tag"
                               @click="handlePlaceholderClick('rewriteSystem', placeholder.name)"
-                              v-text="'{{' + placeholder.name + '}}'"
-                            ></span>
+                              v-text="'{{' + placeholder.name + '}}'"></span>
                           </t-tooltip>
                           <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
                         </div>
                       </div>
                       <div class="setting-control setting-control-full" style="position: relative;">
                         <div class="textarea-with-template">
-                          <t-textarea 
-                            ref="rewriteSystemTextareaRef"
-                            v-model="formData.config.rewrite_prompt_system" 
+                          <t-textarea ref="rewriteSystemTextareaRef" v-model="formData.config.rewrite_prompt_system"
                             :placeholder="defaultRewritePromptSystem || $t('agent.editor.rewritePromptSystemPlaceholder')"
-                            :autosize="{ minRows: 4, maxRows: 10 }"
-                            @input="handleRewriteSystemInput"
-                          />
-                          <PromptTemplateSelector 
-                            type="rewrite" 
-                            position="corner"
-                            @select="handleRewriteTemplateSelect"
-                            @reset-default="handleRewriteTemplateSelect"
-                          />
+                            :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteSystemInput" />
+                          <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
+                            @reset-default="handleRewriteTemplateSelect" />
                         </div>
                         <Teleport to="body">
-                          <div
-                            v-if="rewriteSystemPopup.show && filteredRewriteSystemPlaceholders.length > 0"
-                            class="placeholder-popup-wrapper"
-                            :style="rewriteSystemPopup.style"
-                          >
+                          <div v-if="rewriteSystemPopup.show && filteredRewriteSystemPlaceholders.length > 0"
+                            class="placeholder-popup-wrapper" :style="rewriteSystemPopup.style">
                             <div class="placeholder-popup">
-                              <div
-                                v-for="(placeholder, index) in filteredRewriteSystemPlaceholders"
-                                :key="placeholder.name"
-                                class="placeholder-item"
+                              <div v-for="(placeholder, index) in filteredRewriteSystemPlaceholders"
+                                :key="placeholder.name" class="placeholder-item"
                                 :class="{ active: rewriteSystemPopup.selectedIndex === index }"
                                 @mousedown.prevent="insertGenericPlaceholder('rewriteSystem', placeholder.name, true)"
-                                @mouseenter="rewriteSystemPopup.selectedIndex = index"
-                              >
+                                @mouseenter="rewriteSystemPopup.selectedIndex = index">
                                 <div class="placeholder-name">
                                   <code v-html="`{{${placeholder.name}}}`"></code>
                                 </div>
@@ -562,58 +576,40 @@
                     </div>
 
                     <!-- 改写用户提示词 -->
-                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite" class="setting-row setting-row-vertical">
+                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite"
+                      class="setting-row setting-row-vertical">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.rewritePromptUser') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rewriteUserPrompt') }}</p>
                         <div class="placeholder-tags" v-if="rewritePlaceholders.length > 0">
                           <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                          <t-tooltip 
-                            v-for="placeholder in rewritePlaceholders" 
-                            :key="placeholder.name"
+                          <t-tooltip v-for="placeholder in rewritePlaceholders" :key="placeholder.name"
                             :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                            placement="top"
-                          >
-                            <span 
-                              class="placeholder-tag"
+                            placement="top">
+                            <span class="placeholder-tag"
                               @click="handlePlaceholderClick('rewriteUser', placeholder.name)"
-                              v-text="'{{' + placeholder.name + '}}'"
-                            ></span>
+                              v-text="'{{' + placeholder.name + '}}'"></span>
                           </t-tooltip>
                           <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
                         </div>
                       </div>
                       <div class="setting-control setting-control-full" style="position: relative;">
                         <div class="textarea-with-template">
-                          <t-textarea 
-                            ref="rewriteUserTextareaRef"
-                            v-model="formData.config.rewrite_prompt_user" 
+                          <t-textarea ref="rewriteUserTextareaRef" v-model="formData.config.rewrite_prompt_user"
                             :placeholder="defaultRewritePromptUser || $t('agent.editor.rewritePromptUserPlaceholder')"
-                            :autosize="{ minRows: 4, maxRows: 10 }"
-                            @input="handleRewriteUserInput"
-                          />
-                          <PromptTemplateSelector 
-                            type="rewrite" 
-                            position="corner"
-                            @select="handleRewriteTemplateSelect"
-                            @reset-default="handleRewriteTemplateSelect"
-                          />
+                            :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteUserInput" />
+                          <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
+                            @reset-default="handleRewriteTemplateSelect" />
                         </div>
                         <Teleport to="body">
-                          <div
-                            v-if="rewriteUserPopup.show && filteredRewriteUserPlaceholders.length > 0"
-                            class="placeholder-popup-wrapper"
-                            :style="rewriteUserPopup.style"
-                          >
+                          <div v-if="rewriteUserPopup.show && filteredRewriteUserPlaceholders.length > 0"
+                            class="placeholder-popup-wrapper" :style="rewriteUserPopup.style">
                             <div class="placeholder-popup">
-                              <div
-                                v-for="(placeholder, index) in filteredRewriteUserPlaceholders"
-                                :key="placeholder.name"
-                                class="placeholder-item"
+                              <div v-for="(placeholder, index) in filteredRewriteUserPlaceholders"
+                                :key="placeholder.name" class="placeholder-item"
                                 :class="{ active: rewriteUserPopup.selectedIndex === index }"
                                 @mousedown.prevent="insertGenericPlaceholder('rewriteUser', placeholder.name, true)"
-                                @mouseenter="rewriteUserPopup.selectedIndex = index"
-                              >
+                                @mouseenter="rewriteUserPopup.selectedIndex = index">
                                 <div class="placeholder-name">
                                   <code v-html="`{{${placeholder.name}}}`"></code>
                                 </div>
@@ -668,11 +664,8 @@
                       </div>
                       <div class="setting-control setting-control-full">
                         <t-checkbox-group v-model="formData.config.allowed_tools" class="tool-groups">
-                          <section
-                            v-for="group in groupedAvailableTools"
-                            :key="group.key"
-                            :class="['tool-group', `tool-group--${group.key}`]"
-                          >
+                          <section v-for="group in groupedAvailableTools" :key="group.key"
+                            :class="['tool-group', `tool-group--${group.key}`]">
                             <header class="tool-group-header">
                               <span class="tool-group-bar" />
                               <span class="tool-group-title">{{ group.label }}</span>
@@ -683,13 +676,9 @@
                               </span>
                             </header>
                             <div class="tool-grid">
-                              <t-checkbox
-                                v-for="tool in group.tools"
-                                :key="tool.value"
-                                :value="tool.value"
+                              <t-checkbox v-for="tool in group.tools" :key="tool.value" :value="tool.value"
                                 :disabled="tool.disabled"
-                                :class="['tool-card', { 'tool-card--disabled': tool.disabled, 'tool-card--danger': tool.danger }]"
-                              >
+                                :class="['tool-card', { 'tool-card--disabled': tool.disabled, 'tool-card--danger': tool.danger }]">
                                 <div class="tool-card-body">
                                   <div class="tool-card-head">
                                     <span class="tool-card-name">{{ tool.label }}</span>
@@ -723,17 +712,25 @@
                             </div>
                           </template>
                           <template v-else>
-                            <span
-                              v-for="item in effectiveTools"
-                              :key="item.value"
+                            <span v-for="item in effectiveTools" :key="item.value"
                               :class="['effective-chip', { 'effective-chip--inactive': !item.active }]"
-                              :title="item.reason || ''"
-                            >
+                              :title="item.reason || ''">
                               <span class="effective-chip-label">{{ item.label }}</span>
                               <span v-if="!item.active" class="effective-chip-reason">{{ item.reason }}</span>
                             </span>
                           </template>
                         </div>
+                      </div>
+                    </div>
+
+                    <!-- 思考模式（写入 config.thinking，映射到 LLM 请求参数） -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.thinking') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="thinkingEnabled" />
                       </div>
                     </div>
 
@@ -756,14 +753,8 @@
                         <p class="desc-hint">{{ $t('agentEditor.llmCallTimeout.hint') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-input-number 
-                          v-model="formData.config.llm_call_timeout" 
-                          :min="0"
-                          :max="3600"
-                          theme="column"
-                          :placeholder="$t('agentEditor.llmCallTimeout.placeholder')"
-                          clearable
-                        />
+                        <t-input-number v-model="formData.config.llm_call_timeout" :min="0" :max="3600" theme="column"
+                          :placeholder="$t('agentEditor.llmCallTimeout.placeholder')" clearable />
                       </div>
                     </div>
 
@@ -789,18 +780,9 @@
                         <p class="desc">{{ $t('agentEditor.mcp.selectDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-select
-                          v-model="formData.config.mcp_services"
-                          multiple
-                          :placeholder="$t('agentEditor.mcp.selectPlaceholder')"
-                          filterable
-                        >
-                          <t-option 
-                            v-for="mcp in mcpOptions" 
-                            :key="mcp.value" 
-                            :value="mcp.value" 
-                            :label="mcp.label" 
-                          />
+                        <t-select v-model="formData.config.mcp_services" multiple
+                          :placeholder="$t('agentEditor.mcp.selectPlaceholder')" filterable>
+                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label" />
                         </t-select>
                       </div>
                     </div>
@@ -831,19 +813,16 @@
                     </div>
 
                     <!-- 选择指定 Skills -->
-                    <div v-if="skillsSelectionMode === 'selected' && skillOptions.length > 0" class="setting-row setting-row-vertical">
+                    <div v-if="skillsSelectionMode === 'selected' && skillOptions.length > 0"
+                      class="setting-row setting-row-vertical">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.selectSkills') }}</label>
                         <p class="desc">{{ $t('agent.editor.selectSkillsDesc') }}</p>
                       </div>
                       <div class="setting-control setting-control-full">
                         <t-checkbox-group v-model="formData.config.selected_skills" class="skills-checkbox-group">
-                          <t-checkbox
-                            v-for="skill in skillOptions"
-                            :key="skill.name"
-                            :value="skill.name"
-                            class="skill-checkbox-item"
-                          >
+                          <t-checkbox v-for="skill in skillOptions" :key="skill.name" :value="skill.name"
+                            class="skill-checkbox-item">
                             <div class="skill-item-content">
                               <span class="skill-name">{{ skill.name }}</span>
                               <span class="skill-desc">{{ skill.description }}</span>
@@ -877,10 +856,10 @@
                     <h2>{{ $t('agent.editor.knowledgeConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.knowledgeConfigDesc') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
                     <!-- 关联知识库 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-knowledge">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.knowledgeBases') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.kbScope') }}</p>
@@ -888,7 +867,8 @@
                       <div class="setting-control">
                         <t-radio-group v-model="kbSelectionMode">
                           <t-radio-button value="all">{{ $t('agent.editor.allKnowledgeBases') }}</t-radio-button>
-                          <t-radio-button value="selected">{{ $t('agent.editor.selectedKnowledgeBases') }}</t-radio-button>
+                          <t-radio-button value="selected">{{ $t('agent.editor.selectedKnowledgeBases')
+                            }}</t-radio-button>
                           <t-radio-button value="none">{{ $t('agent.editor.noKnowledgeBase') }}</t-radio-button>
                         </t-radio-group>
                       </div>
@@ -901,21 +881,12 @@
                         <p class="desc">{{ $t('agent.editor.selectKnowledgeBasesDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-select 
-                          v-model="formData.config.knowledge_bases" 
-                          multiple 
-                          :placeholder="$t('agent.editor.selectKnowledgeBases')"
-                          filterable
-                          :min-collapsed-num="3"
-                        >
-                          <t-option-group v-if="filteredMyKbOptions.length" :label="$t('agent.editor.myKnowledgeBases')">
-                            <t-option
-                              v-for="kb in filteredMyKbOptions"
-                              :key="kb.value"
-                              :value="kb.value"
-                              :label="kb.label"
-                              :disabled="kb.disabled"
-                            >
+                        <t-select v-model="formData.config.knowledge_bases" multiple
+                          :placeholder="$t('agent.editor.selectKnowledgeBases')" filterable :min-collapsed-num="3">
+                          <t-option-group v-if="filteredMyKbOptions.length"
+                            :label="$t('agent.editor.myKnowledgeBases')">
+                            <t-option v-for="kb in filteredMyKbOptions" :key="kb.value" :value="kb.value"
+                              :label="kb.label" :disabled="kb.disabled">
                               <div class="kb-option-item" :title="kb.disabled ? kb.disabledReason : ''">
                                 <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
                                   <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
@@ -928,14 +899,10 @@
                               </div>
                             </t-option>
                           </t-option-group>
-                          <t-option-group v-if="filteredSharedKbOptions.length" :label="$t('agent.editor.sharedKnowledgeBases')">
-                            <t-option
-                              v-for="kb in filteredSharedKbOptions"
-                              :key="kb.value"
-                              :value="kb.value"
-                              :label="kb.label"
-                              :disabled="kb.disabled"
-                            >
+                          <t-option-group v-if="filteredSharedKbOptions.length"
+                            :label="$t('agent.editor.sharedKnowledgeBases')">
+                            <t-option v-for="kb in filteredSharedKbOptions" :key="kb.value" :value="kb.value"
+                              :label="kb.label" :disabled="kb.disabled">
                               <div class="kb-option-item" :title="kb.disabled ? kb.disabledReason : ''">
                                 <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
                                   <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
@@ -960,19 +927,10 @@
                         <p class="desc">{{ $t('agentEditor.fileTypes.desc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-select 
-                          v-model="formData.config.supported_file_types" 
-                          multiple 
-                          :placeholder="$t('agentEditor.fileTypes.allTypes')"
-                          :min-collapsed-num="3"
-                          clearable
-                        >
-                          <t-option 
-                            v-for="ft in availableFileTypes" 
-                            :key="ft.value" 
-                            :value="ft.value" 
-                            :label="ft.label"
-                          />
+                        <t-select v-model="formData.config.supported_file_types" multiple
+                          :placeholder="$t('agentEditor.fileTypes.allTypes')" :min-collapsed-num="3" clearable>
+                          <t-option v-for="ft in availableFileTypes" :key="ft.value" :value="ft.value"
+                            :label="ft.label" />
                         </t-select>
                       </div>
                     </div>
@@ -988,21 +946,27 @@
                       </div>
                     </div>
 
-                    <!-- ReRank 模型（当配置了知识库时显示） -->
-                    <div v-if="needsRerankModel" class="setting-row">
+                    <!-- ReRank 模型（关联知识库时常驻显示，仅在作用域内存在 RAG 类型 KB 时必填） -->
+                    <div v-if="hasKnowledgeBase" class="setting-row">
                       <div class="setting-info">
-                        <label>{{ $t('agent.editor.rerankModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agent.editor.rerankModelDesc') }}</p>
+                        <label>
+                          {{ $t('agent.editor.rerankModel') }}
+                          <span v-if="needsRerankModel" class="required">*</span>
+                        </label>
+                        <p class="desc">
+                          {{ $t('agent.editor.rerankModelDesc') }}
+                          <template v-if="!needsRerankModel">
+                            <br />
+                            <span class="hint">{{ $t('agent.editor.rerankModelOptionalHint') }}</span>
+                          </template>
+                        </p>
                       </div>
                       <div class="setting-control">
-                        <ModelSelector
-                          model-type="Rerank"
-                          :selected-model-id="formData.config.rerank_model_id"
+                        <ModelSelector model-type="Rerank" :selected-model-id="formData.config.rerank_model_id"
                           :all-models="allModels"
                           @update:selected-model-id="(val: string) => formData.config.rerank_model_id = val"
                           @add-model="handleAddModel('rerank')"
-                          :placeholder="$t('agent.editor.rerankModelPlaceholder')"
-                        />
+                          :placeholder="$t('agent.editor.rerankModelPlaceholder')" />
                       </div>
                     </div>
 
@@ -1035,8 +999,10 @@
                         </div>
                         <div class="setting-control">
                           <div class="slider-wrapper">
-                            <t-slider v-model="formData.config.faq_direct_answer_threshold" :min="0.7" :max="1" :step="0.05" />
-                            <span class="slider-value">{{ formData.config.faq_direct_answer_threshold?.toFixed(2) }}</span>
+                            <t-slider v-model="formData.config.faq_direct_answer_threshold" :min="0.7" :max="1"
+                              :step="0.05" />
+                            <span class="slider-value">{{ formData.config.faq_direct_answer_threshold?.toFixed(2)
+                              }}</span>
                           </div>
                         </div>
                       </div>
@@ -1055,6 +1021,7 @@
                         </div>
                       </div>
                     </div>
+
                   </div>
                 </div>
 
@@ -1064,7 +1031,7 @@
                     <h2>{{ $t('agent.editor.webSearchConfig') }}</h2>
                     <p class="section-description">{{ $t('agent.editor.webSearchConfigDesc') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
                     <!-- 网络搜索 -->
                     <div class="setting-row">
@@ -1084,20 +1051,13 @@
                         <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-select
-                          v-model="formData.config.web_search_provider_id"
-                          clearable
-                          :placeholder="$t('agent.editor.webSearchProviderPlaceholder')"
-                          style="width: 240px;"
-                        >
-                          <t-option
-                            v-for="p in webSearchProviderList"
-                            :key="p.id"
-                            :value="p.id"
-                            :label="p.name"
-                          >
+                        <t-select v-model="formData.config.web_search_provider_id" clearable
+                          :placeholder="$t('agent.editor.webSearchProviderPlaceholder')" style="width: 240px;">
+                          <t-option v-for="p in webSearchProviderList" :key="p.id" :value="p.id" :label="p.name">
                             <span>{{ p.name }}</span>
-                            <t-tag v-if="p.is_default" theme="primary" size="small" style="margin-left: 6px;">{{ $t('common.default') }}</t-tag>
+                            <t-tag v-if="p.is_default" theme="primary" size="small" style="margin-left: 6px;">{{
+                              $t('common.default')
+                              }}</t-tag>
                           </t-option>
                         </t-select>
                       </div>
@@ -1129,7 +1089,8 @@
                     </div>
 
                     <!-- 抓取页面数 -->
-                    <div v-if="formData.config.web_search_enabled && formData.config.web_fetch_enabled" class="setting-row">
+                    <div v-if="formData.config.web_search_enabled && formData.config.web_fetch_enabled"
+                      class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.webFetchTopN') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.webFetchTopN') }}</p>
@@ -1150,7 +1111,7 @@
                     <h2>{{ $t('agent.editor.retrievalStrategy') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.desc.retrievalSection') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
                     <!-- 查询扩展（仅普通模式） -->
                     <div v-if="!isAgentMode" class="setting-row">
@@ -1202,8 +1163,8 @@
                       </div>
                     </div>
 
-                    <!-- 重排TopK -->
-                    <div class="setting-row">
+                    <!-- 重排TopK（仅在配置了 Rerank 模型时展示） -->
+                    <div v-if="formData.config.rerank_model_id" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.rerankTopK') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rerankTopK') }}</p>
@@ -1213,8 +1174,8 @@
                       </div>
                     </div>
 
-                    <!-- 重排阈值 -->
-                    <div class="setting-row">
+                    <!-- 重排阈值（仅在配置了 Rerank 模型时展示） -->
+                    <div v-if="formData.config.rerank_model_id" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.rerankThreshold') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rerankThreshold') }}</p>
@@ -1224,6 +1185,17 @@
                           <t-slider v-model="formData.config.rerank_threshold" :min="-10" :max="10" :step="0.01" />
                           <span class="slider-value">{{ formData.config.rerank_threshold?.toFixed(1) }}</span>
                         </div>
+                      </div>
+                    </div>
+
+                    <!-- 表格数据分析（仅普通模式，命中 CSV/Excel 时会多一次 LLM 调用生成 SQL） -->
+                    <div v-if="!isAgentMode" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.dataAnalysis.enableLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.dataAnalysis.enableDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.data_analysis_enabled" />
                       </div>
                     </div>
 
@@ -1243,83 +1215,60 @@
                       </div>
 
                       <!-- 固定兜底回复 -->
-                      <div v-if="formData.config.fallback_strategy === 'fixed'" class="setting-row setting-row-vertical">
+                      <div v-if="formData.config.fallback_strategy === 'fixed'"
+                        class="setting-row setting-row-vertical">
                         <div class="setting-info">
                           <label>{{ $t('agent.editor.fallbackResponse') }}</label>
                           <p class="desc">{{ $t('agentEditor.desc.fallbackResponse') }}</p>
                         </div>
                         <div class="setting-control setting-control-full">
                           <div class="textarea-with-template">
-                            <t-textarea 
-                              v-model="formData.config.fallback_response" 
+                            <t-textarea v-model="formData.config.fallback_response"
                               :placeholder="defaultFallbackResponse || $t('agent.editor.fallbackResponsePlaceholder')"
-                              :autosize="{ minRows: 2, maxRows: 6 }"
-                            />
-                            <PromptTemplateSelector 
-                              type="fallback" 
-                              position="corner"
-                              fallbackMode="fixed"
+                              :autosize="{ minRows: 2, maxRows: 6 }" />
+                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed"
                               @select="handleFallbackResponseTemplateSelect"
-                              @reset-default="handleFallbackResponseTemplateSelect"
-                            />
+                              @reset-default="handleFallbackResponseTemplateSelect" />
                           </div>
                         </div>
                       </div>
 
                       <!-- 兜底提示词 -->
-                      <div v-if="formData.config.fallback_strategy === 'model'" class="setting-row setting-row-vertical">
+                      <div v-if="formData.config.fallback_strategy === 'model'"
+                        class="setting-row setting-row-vertical">
                         <div class="setting-info">
                           <label>{{ $t('agent.editor.fallbackPrompt') }}</label>
                           <p class="desc">{{ $t('agentEditor.desc.fallbackPrompt') }}</p>
                           <div class="placeholder-tags" v-if="fallbackPlaceholders.length > 0">
                             <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                            <t-tooltip 
-                              v-for="placeholder in fallbackPlaceholders" 
-                              :key="placeholder.name"
+                            <t-tooltip v-for="placeholder in fallbackPlaceholders" :key="placeholder.name"
                               :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                              placement="top"
-                            >
-                              <span 
-                                class="placeholder-tag"
+                              placement="top">
+                              <span class="placeholder-tag"
                                 @click="handlePlaceholderClick('fallback', placeholder.name)"
-                                v-text="'{{' + placeholder.name + '}}'"
-                              ></span>
+                                v-text="'{{' + placeholder.name + '}}'"></span>
                             </t-tooltip>
                             <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
                           </div>
                         </div>
                         <div class="setting-control setting-control-full" style="position: relative;">
                           <div class="textarea-with-template">
-                            <t-textarea 
-                              ref="fallbackPromptTextareaRef"
-                              v-model="formData.config.fallback_prompt" 
+                            <t-textarea ref="fallbackPromptTextareaRef" v-model="formData.config.fallback_prompt"
                               :placeholder="defaultFallbackPrompt || $t('agent.editor.fallbackPromptPlaceholder')"
-                              :autosize="{ minRows: 4, maxRows: 10 }"
-                              @input="handleFallbackPromptInput"
-                            />
-                            <PromptTemplateSelector 
-                              type="fallback" 
-                              position="corner"
-                              fallbackMode="model"
+                              :autosize="{ minRows: 4, maxRows: 10 }" @input="handleFallbackPromptInput" />
+                            <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model"
                               @select="handleFallbackPromptTemplateSelect"
-                              @reset-default="handleFallbackPromptTemplateSelect"
-                            />
+                              @reset-default="handleFallbackPromptTemplateSelect" />
                           </div>
                           <Teleport to="body">
-                            <div
-                              v-if="fallbackPromptPopup.show && filteredFallbackPlaceholders.length > 0"
-                              class="placeholder-popup-wrapper"
-                              :style="fallbackPromptPopup.style"
-                            >
+                            <div v-if="fallbackPromptPopup.show && filteredFallbackPlaceholders.length > 0"
+                              class="placeholder-popup-wrapper" :style="fallbackPromptPopup.style">
                               <div class="placeholder-popup">
-                                <div
-                                  v-for="(placeholder, index) in filteredFallbackPlaceholders"
-                                  :key="placeholder.name"
-                                  class="placeholder-item"
+                                <div v-for="(placeholder, index) in filteredFallbackPlaceholders"
+                                  :key="placeholder.name" class="placeholder-item"
                                   :class="{ active: fallbackPromptPopup.selectedIndex === index }"
                                   @mousedown.prevent="insertGenericPlaceholder('fallback', placeholder.name, true)"
-                                  @mouseenter="fallbackPromptPopup.selectedIndex = index"
-                                >
+                                  @mouseenter="fallbackPromptPopup.selectedIndex = index">
                                   <div class="placeholder-name">
                                     <code v-html="`{{${placeholder.name}}}`"></code>
                                   </div>
@@ -1335,17 +1284,19 @@
                 </div>
 
                 <!-- 共享管理（仅编辑模式且非内置智能体） -->
-                <div v-if="props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin" v-show="currentSection === 'share'" class="section">
+                <div v-if="props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin"
+                  v-show="currentSection === 'share'" class="section">
                   <AgentShareSettings :agent-id="props.agent.id" :agent="props.agent" />
                 </div>
 
                 <!-- IM集成（仅编辑模式） -->
-                <div v-if="props.mode === 'edit' && props.agent?.id" v-show="currentSection === 'im'" class="section">
+                <div v-if="props.mode === 'edit' && props.agent?.id && currentSection === 'im'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
                     <p class="section-description">
                       {{ $t('agentEditor.im.description') }}
-                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md" target="_blank" rel="noopener noreferrer" class="doc-link">
+                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md"
+                        target="_blank" rel="noopener noreferrer" class="doc-link">
                         {{ $t('agentEditor.im.docLink') }}
                         <t-icon name="link" class="link-icon" />
                       </a>
@@ -1359,8 +1310,13 @@
 
               <!-- 底部操作栏 -->
               <div class="settings-footer">
-                <t-button variant="outline" @click="handleClose">{{ $t('common.cancel') }}</t-button>
-                <t-button theme="primary" :loading="saving" @click="handleSave">{{ $t('common.confirm') }}</t-button>
+                <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
+                  $t('common.cancel')
+                  }}</t-button>
+                <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
+                  @click="handleSave">{{
+                  $t('common.confirm')
+                  }}</t-button>
               </div>
             </div>
           </div>
@@ -1368,17 +1324,22 @@
       </div>
     </Transition>
   </Teleport>
+
+  <AgentCreateContextualGuide :when="visible && mode === 'create'" :is-agent-mode="isAgentMode" />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
+import {
+  AGENT_EDITOR_FOCUS_SECTION_EVENT,
+  markContextualGuideDone,
+} from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
   updateAgent,
-  getPlaceholders,
-  getAgentTypePresets,
   type CustomAgent,
   type PlaceholderDefinition,
   type AgentTypePreset,
@@ -1386,20 +1347,22 @@ import {
   type AgentTypeKBFilter,
   type KBCapabilities,
 } from '@/api/agent';
-import { listModels, type ModelConfig } from '@/api/model';
-import { listKnowledgeBases } from '@/api/knowledge-base';
-import { listMCPServices, type MCPService } from '@/api/mcp-service';
-import { listSkills, type SkillInfo } from '@/api/skill';
-import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
-import { getAgentConfig, getConversationConfig, getStorageEngineStatus, getPromptTemplates, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
+import { type ModelConfig } from '@/api/model';
+import { type MCPService } from '@/api/mcp-service';
+import { type SkillInfo } from '@/api/skill';
+import { type WebSearchProviderEntity } from '@/api/web-search-provider';
+import { type StorageEngineStatusItem, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
+import { useChatResourcesStore } from '@/stores/chatResources';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
+import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import {
   evaluateToolRequirement,
   deriveKbFilterFromTools,
@@ -1410,6 +1373,8 @@ import {
 const uiStore = useUIStore();
 const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
+const chatResources = useChatResourcesStore();
+const editorResources = useEditorResourcesStore();
 
 const { t, locale: i18nLocale } = useI18n();
 
@@ -1418,6 +1383,12 @@ const props = defineProps<{
   mode: 'create' | 'edit';
   agent?: CustomAgent | null;
   initialSection?: string;
+  // readOnly hides the save button so a Viewer who clicks an agent
+  // card to inspect its config doesn't see a "确定" that 403s on the
+  // backend update endpoint. Field-level disable is intentionally NOT
+  // wired here yet (the modal has 3000+ lines of form inputs); instead
+  // we just remove the only mutation surface — the footer button.
+  readOnly?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -1425,7 +1396,47 @@ const emit = defineEmits<{
   (e: 'success'): void;
 }>();
 
+const copyAgentId = async () => {
+  const id = props.agent?.id;
+  if (!id) return;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = id;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    MessagePlugin.success(t('common.copied'));
+  } catch {
+    MessagePlugin.error(t('common.copyFailed'));
+  }
+};
+
 const currentSection = ref(props.initialSection || 'basic');
+
+const onAgentEditorFocusSection = (event: Event) => {
+  const section = (event as CustomEvent<{ section?: string }>).detail?.section
+  if (section) {
+    currentSection.value = section
+  }
+}
+
+onMounted(() => {
+  window.addEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+})
+
 const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
@@ -1434,6 +1445,7 @@ const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq';
 const agentTypePresets = ref<AgentTypePreset[]>([]);
 // Agent 系统提示词模板缓存（用于切换智能体类型时根据 system_prompt_id 解析出实际文本填入）
 const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
+const intentPromptTemplates = ref<PromptTemplate[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
@@ -1457,8 +1469,11 @@ const imageStorageOptions = computed(() => {
 });
 
 // 系统默认配置（用于内置智能体显示默认提示词）
-const defaultAgentSystemPrompt = ref('');  // Agent 模式的默认系统提示词（来自 agent-config）
-const defaultNormalSystemPrompt = ref('');  // 普通模式的默认系统提示词（来自 conversation-config）
+// Agent (smart-reasoning) 模式的默认系统提示词。直接从 prompt-templates
+// 的 agent_system_prompt 数组里挑 mode==='rag' && default 的那条得到，
+// 与后端 agent.GetProgressiveRAGSystemPrompt 是同一份数据源。
+const defaultAgentSystemPrompt = ref('');
+const defaultNormalSystemPrompt = ref('');  // 普通模式默认系统提示词（来自 prompt-templates 的 default 项）
 const defaultContextTemplate = ref('');
 const defaultRewritePromptSystem = ref('');
 const defaultRewritePromptUser = ref('');
@@ -1527,12 +1542,12 @@ const allTools = computed(() => [
 
 // 工具分组元信息
 const toolGroups = computed(() => [
-  { key: 'base',       label: t('agentEditor.tools.groupBase') },
-  { key: 'rag',        label: t('agentEditor.tools.groupRag') },
-  { key: 'wiki_read',  label: t('agentEditor.tools.groupWikiRead') },
-  { key: 'wiki_edit',  label: t('agentEditor.tools.groupWikiEdit') },
+  { key: 'base', label: t('agentEditor.tools.groupBase') },
+  { key: 'rag', label: t('agentEditor.tools.groupRag') },
+  { key: 'wiki_read', label: t('agentEditor.tools.groupWikiRead') },
+  { key: 'wiki_edit', label: t('agentEditor.tools.groupWikiEdit') },
   { key: 'wiki_issue', label: t('agentEditor.tools.groupWikiIssue') },
-  { key: 'data',       label: t('agentEditor.tools.groupData') },
+  { key: 'data', label: t('agentEditor.tools.groupData') },
 ]);
 
 // 知识库分组：我的 vs 共享的
@@ -1607,13 +1622,13 @@ const scopeCapabilities = computed<ScopeCapabilities>(() => {
 // 后续可按需增加独立的 i18n 键。
 const missKindToReason = (kind: RequirementMissKind): string | undefined => {
   switch (kind) {
-    case 'needsKb':    return t('agentEditor.tools.requiresKb');
-    case 'needsWiki':  return t('agentEditor.tools.requiresWikiKb');
+    case 'needsKb': return t('agentEditor.tools.requiresKb');
+    case 'needsWiki': return t('agentEditor.tools.requiresWikiKb');
     case 'needsRag':
     case 'needsGraph':
-    case 'needsFaq':   return t('agentEditor.tools.requiresRagKb');
+    case 'needsFaq': return t('agentEditor.tools.requiresRagKb');
     case 'none':
-    default:           return undefined;
+    default: return undefined;
   }
 };
 
@@ -1651,8 +1666,7 @@ const groupedAvailableTools = computed(() => {
 // 规则：基于 allowed_tools 过滤
 //   1) 勾选但缺失对应能力（无 KB / 无 Wiki 能力 KB）的工具会被灰显/隐藏
 //   2) 无论是否勾选，web_search / web_fetch 随 web_search_enabled 出现
-//   3) final_answer 始终存在
-//   4) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
+//   3) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
 const effectiveTools = computed(() => {
   const chosen = new Set(formData.value.config.allowed_tools || []);
   const items: Array<{ value: string; label: string; reason?: string; active: boolean }> = [];
@@ -1667,9 +1681,8 @@ const effectiveTools = computed(() => {
   }
   if (formData.value.config.web_search_enabled) {
     items.push({ value: 'web_search', label: t('agentEditor.tools.webSearch'), active: true });
-    items.push({ value: 'web_fetch',  label: t('agentEditor.tools.webFetch'),  active: true });
+    items.push({ value: 'web_fetch', label: t('agentEditor.tools.webFetch'), active: true });
   }
-  items.push({ value: 'final_answer', label: t('agentEditor.tools.finalAnswer'), active: true });
   return items;
 });
 
@@ -1736,6 +1749,12 @@ const contextPlaceholderPrefix = ref('');
 const contextPopupStyle = ref({ top: '0px', left: '0px' });
 let contextPlaceholderPopupTimer: any = null;
 
+// 意图提示词编辑相关
+const selectedIntent = ref('');
+const intentEditorValue = ref('');
+const intentPromptsSyncing = ref(false);
+const intentPromptTextareaRef = ref<any>(null);
+
 // 通用占位符弹出相关（用于改写提示词和兜底提示词）
 interface PlaceholderPopupState {
   show: boolean;
@@ -1746,6 +1765,10 @@ interface PlaceholderPopupState {
   fieldKey: string;
   placeholders: PlaceholderDefinition[];
 }
+
+const intentPromptPopup = ref<PlaceholderPopupState>({
+  show: false, selectedIndex: 0, prefix: '', style: { top: '0px', left: '0px' }, timer: null, fieldKey: 'intent_prompt', placeholders: []
+});
 
 const rewriteSystemPopup = ref<PlaceholderPopupState>({
   show: false, selectedIndex: 0, prefix: '', style: { top: '0px', left: '0px' }, timer: null, fieldKey: 'rewrite_prompt_system', placeholders: []
@@ -1808,7 +1831,7 @@ const defaultFormData = {
     // 基础设置
     agent_mode: 'smart-reasoning' as 'quick-answer' | 'smart-reasoning',
     system_prompt: '',
-    context_template: '{{query}}',
+    context_template: '',
     // 模型设置
     model_id: '',
     rerank_model_id: '',
@@ -1841,6 +1864,8 @@ const defaultFormData = {
     image_storage_provider: '',
     // 文件类型限制
     supported_file_types: [] as string[],
+    // 数据分析阶段开关（默认关闭，避免在普通问答上多一次 LLM 调用生成 SQL）
+    data_analysis_enabled: false,
     // FAQ 策略设置
     faq_priority_enabled: true, // 是否启用 FAQ 优先策略
     faq_direct_answer_threshold: 0.9, // FAQ 直接回答阈值（相似度高于此值直接使用 FAQ 答案）
@@ -1860,6 +1885,7 @@ const defaultFormData = {
     // 高级设置（普通模式）
     enable_query_expansion: true,
     enable_rewrite: true,
+    query_understand_model_id: '',
     rewrite_prompt_system: '',
     rewrite_prompt_user: '',
     fallback_strategy: 'model' as 'fixed' | 'model',
@@ -1872,12 +1898,119 @@ const defaultFormData = {
 };
 
 const formData = ref(JSON.parse(JSON.stringify(defaultFormData)));
+
+const applyDefaultChatModelIfEmpty = () => {
+  if (props.mode !== 'create' || !formData.value) return
+  const chat =
+    allModels.value.find((m) => m.type === 'KnowledgeQA' && m.is_default)
+    || allModels.value.find((m) => m.type === 'KnowledgeQA')
+  if (!formData.value.config.model_id && chat?.id) {
+    formData.value.config.model_id = chat.id
+  }
+}
+
 const agentMode = computed({
   get: () => formData.value.config.agent_mode,
   set: (val: 'quick-answer' | 'smart-reasoning') => { formData.value.config.agent_mode = val; }
 });
 
 const isAgentMode = computed(() => agentMode.value === 'smart-reasoning');
+
+const currentIntentTemplate = computed(() =>
+  intentPromptTemplates.value.find((template) => template.id === selectedIntent.value),
+);
+
+const currentIntentTemplateDesc = computed(() =>
+  currentIntentTemplate.value?.description || '',
+);
+
+const isIntentCustomized = (intentId: string) => {
+  const overrides = formData.value.config.intent_prompts || {};
+  const override = overrides[intentId];
+  if (!override?.trim()) return false;
+  const template = intentPromptTemplates.value.find((item) => item.id === intentId);
+  return override.trim() !== (template?.content || '').trim();
+};
+
+const filteredIntentPlaceholders = computed(() => {
+  if (!intentPromptPopup.value.prefix) {
+    return placeholderData.value.system_prompt;
+  }
+  const prefix = intentPromptPopup.value.prefix.toLowerCase();
+  return placeholderData.value.system_prompt.filter(p => p.name.toLowerCase().startsWith(prefix));
+});
+
+const syncIntentEditorFromSelection = () => {
+  const key = selectedIntent.value;
+  if (!key) {
+    intentEditorValue.value = '';
+    return;
+  }
+  const overrides = formData.value.config.intent_prompts || {};
+  intentEditorValue.value = overrides[key] ?? currentIntentTemplate.value?.content ?? '';
+};
+
+watch(selectedIntent, () => {
+  intentPromptPopup.value.show = false;
+  intentPromptPopup.value.prefix = '';
+  syncIntentEditorFromSelection();
+});
+
+watch(
+  () => intentPromptTemplates.value,
+  (templates) => {
+    if (!selectedIntent.value && templates.length > 0) {
+      selectedIntent.value = templates[0].id;
+    } else if (selectedIntent.value) {
+      syncIntentEditorFromSelection();
+    }
+  },
+  { immediate: true },
+);
+
+watch(intentEditorValue, (value) => {
+  const key = selectedIntent.value;
+  if (!key || intentPromptsSyncing.value) return;
+  const defaultContent = currentIntentTemplate.value?.content || '';
+  const next = value.trim();
+  if (!next || next === defaultContent.trim()) {
+    if (formData.value.config.intent_prompts) {
+      const { [key]: _removed, ...rest } = formData.value.config.intent_prompts;
+      if (Object.keys(rest).length === 0) {
+        delete formData.value.config.intent_prompts;
+      } else {
+        formData.value.config.intent_prompts = rest;
+      }
+    }
+    return;
+  }
+  formData.value.config.intent_prompts = {
+    ...(formData.value.config.intent_prompts || {}),
+    [key]: value,
+  };
+});
+
+watch(
+  () => formData.value.config.intent_prompts,
+  () => {
+    intentPromptsSyncing.value = true;
+    syncIntentEditorFromSelection();
+    intentPromptsSyncing.value = false;
+  },
+  { deep: true },
+);
+
+const resetCurrentIntentPrompt = () => {
+  const key = selectedIntent.value;
+  if (!key || !formData.value.config.intent_prompts) return;
+  const { [key]: _removed, ...rest } = formData.value.config.intent_prompts;
+  if (Object.keys(rest).length === 0) {
+    delete formData.value.config.intent_prompts;
+  } else {
+    formData.value.config.intent_prompts = rest;
+  }
+  syncIntentEditorFromSelection();
+};
 
 // ============================================================================
 // 智能体类型预设（仅 smart-reasoning 模式下可见）
@@ -1943,10 +2076,10 @@ const isDescriptionSystemGenerated = (desc: string): boolean => {
 // 不要直接把 "vector / keyword / wiki" 这些底层 capability 名回传给用户 —
 // 用户不关心技术实现，只想知道"为什么我这个知识库不能用"。
 const presetKbMismatchKeyMap: Record<string, string> = {
-  'rag-qa':          'ragQa',
-  'wiki-qa':         'wikiQa',
+  'rag-qa': 'ragQa',
+  'wiki-qa': 'wikiQa',
   'hybrid-rag-wiki': 'hybridRagWiki',
-  'data-analysis':   'dataAnalysis',
+  'data-analysis': 'dataAnalysis',
 };
 const presetKbMismatchReason = (preset: AgentTypePreset): string => {
   const subKey = presetKbMismatchKeyMap[preset.id];
@@ -2019,21 +2152,38 @@ const kbSatisfiesPresetFilter = (kb: { capabilities?: KBCapabilities; ragEnabled
   return { ok: true, reason: '' };
 };
 
+// "快速问答 / RAG 模式"对 KB 的隐式要求：必须有 vector 或 keyword 索引。
+// 这里跟 `activeAgentTypePreset` 解耦——quick-answer 没有 agent_type，
+// 所以预设链路恒为 null，但 wiki-only KB 在 RAG 模式下检索结果永远为空，
+// 必须在 UI 上 disable + 提示，避免用户白选。
+const kbSatisfiesQuickAnswerMode = (kb: { capabilities?: KBCapabilities; ragEnabled?: boolean }): { ok: boolean; reason: string } => {
+  if (agentMode.value !== 'quick-answer') return { ok: true, reason: '' };
+  const hasRag = kb.capabilities
+    ? (!!kb.capabilities.vector || !!kb.capabilities.keyword)
+    : !!kb.ragEnabled;
+  if (hasRag) return { ok: true, reason: '' };
+  return { ok: false, reason: t('agentEditor.agentType.kbMismatch.quickAnswer') };
+};
+
 // KB 过滤后的选项（用于"指定知识库"下拉）— 不满足的仍保留但标记 disabled + tooltip
 const filteredKbOptionsForPreset = computed(() => {
   const preset = activeAgentTypePreset.value;
   return kbOptions.value.map(kb => {
-    const { ok, reason } = kbSatisfiesPresetFilter(kb, preset);
+    const presetResult = kbSatisfiesPresetFilter(kb, preset);
+    const modeResult = kbSatisfiesQuickAnswerMode(kb);
+    const ok = presetResult.ok && modeResult.ok;
+    const reason = !presetResult.ok ? presetResult.reason : (!modeResult.ok ? modeResult.reason : '');
     return { ...kb, disabled: !ok, disabledReason: reason };
   });
 });
 const filteredMyKbOptions = computed(() => filteredKbOptionsForPreset.value.filter(kb => !kb.shared));
 const filteredSharedKbOptions = computed(() => filteredKbOptionsForPreset.value.filter(kb => kb.shared));
 
-// 当前选中的 KB 中，有多少个在新预设下会被禁用（用于保存前提示）
+// 当前选中的 KB 中，有多少个在新预设 / 模式下会被禁用（用于保存前提示）。
+// quick-answer 模式下 preset 恒为 null，但 wiki-only KB 仍属"被禁用"，
+// 所以这里不再依赖 preset 是否存在，直接看是否有被 disable 的选中项。
 const incompatibleSelectedKbCount = computed(() => {
-  const preset = activeAgentTypePreset.value;
-  if (!preset || kbSelectionMode.value !== 'selected') return 0;
+  if (kbSelectionMode.value !== 'selected') return 0;
   const selected = new Set(formData.value.config.knowledge_bases || []);
   return filteredKbOptionsForPreset.value.filter(kb => selected.has(kb.value) && kb.disabled).length;
 });
@@ -2149,19 +2299,19 @@ watch(() => props.visible, async (val) => {
     currentSection.value = props.initialSection || 'basic';
     // 先加载依赖数据（包括默认配置）
     await loadDependencies();
-    
+
     if (props.mode === 'edit' && props.agent) {
       // 深度复制对象以避免引用问题
       const agentData = JSON.parse(JSON.stringify(props.agent));
-      
+
       // 确保 config 对象存在
       if (!agentData.config) {
         agentData.config = JSON.parse(JSON.stringify(defaultFormData.config));
       }
-      
+
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
-      
+
       // 确保数组字段存在
       if (!agentData.config.suggested_prompts) agentData.config.suggested_prompts = [];
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
@@ -2210,7 +2360,7 @@ watch(() => props.visible, async (val) => {
           newFormData.config.system_prompt = defaultAgentSystemPrompt.value;
         }
       } else {
-        // 快速问答模式使用 conversation-config 的默认提示词
+        // 快速问答模式：默认提示词来自 prompt-templates 的 default 项
         if (defaultNormalSystemPrompt.value) {
           newFormData.config.system_prompt = defaultNormalSystemPrompt.value;
         }
@@ -2254,6 +2404,7 @@ watch(() => props.visible, async (val) => {
           formData.value.description = getPresetDefaultDescription(preset);
         }
       }
+      applyDefaultChatModelIfEmpty()
     }
   }
 });
@@ -2301,14 +2452,14 @@ const initSkillsSelectionMode = () => {
 const fillBuiltinAgentDefaults = () => {
   const config = formData.value.config;
   const isAgent = config.agent_mode === 'smart-reasoning';
-  
+
   if (isAgent) {
     // Agent 模式：使用 agent-config 的默认提示词
     if (!config.system_prompt && defaultAgentSystemPrompt.value) {
       config.system_prompt = defaultAgentSystemPrompt.value;
     }
   } else {
-    // 普通模式：使用 conversation-config 的默认系统提示词和上下文模板
+    // 普通模式：默认系统提示词、上下文模板等来自 prompt-templates 的 default 项
     if (!config.system_prompt && defaultNormalSystemPrompt.value) {
       config.system_prompt = defaultNormalSystemPrompt.value;
     }
@@ -2316,7 +2467,7 @@ const fillBuiltinAgentDefaults = () => {
       config.context_template = defaultContextTemplate.value;
     }
   }
-  
+
   // 通用默认值
   if (!config.rewrite_prompt_system && defaultRewritePromptSystem.value) {
     config.rewrite_prompt_system = defaultRewritePromptSystem.value;
@@ -2473,18 +2624,17 @@ watch(isAgentMode, (isAgent) => {
 
 // 监听设置弹窗关闭，刷新模型列表
 watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
-  // 从设置页面返回时（弹窗关闭），刷新模型列表
   if (prevVisible && !visible && props.visible) {
     try {
-      const [models, statusRes] = await Promise.all([
-        listModels(),
-        getStorageEngineStatus(),
+      await Promise.all([
+        chatResources.ensureModels(true),
+        editorResources.ensureStorageEngine(true),
       ]);
-      if (models && models.length > 0) {
-        allModels.value = models;
+      if (chatResources.allModels.length > 0) {
+        allModels.value = chatResources.allModels;
       }
-      if (statusRes?.data?.engines) {
-        storageEngineStatus.value = statusRes.data.engines;
+      if (editorResources.storageStatus.length > 0) {
+        storageEngineStatus.value = editorResources.storageStatus;
       }
     } catch (e) {
       console.warn('Failed to refresh data after settings closed', e);
@@ -2492,187 +2642,95 @@ watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
   }
 });
 
-// 加载依赖数据
+const mapKbToOption = (kb: any, shared: boolean, orgName?: string) => {
+  const strategy = kb.indexing_strategy;
+  const caps: KBCapabilities | undefined = kb.capabilities;
+  return {
+    label: kb.name,
+    value: kb.id,
+    type: kb.type || 'document',
+    count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
+    shared,
+    orgName,
+    ragEnabled: caps ? (caps.vector || caps.keyword) : (!strategy || strategy.vector_enabled || strategy.keyword_enabled),
+    wikiEnabled: caps ? caps.wiki : (strategy?.wiki_enabled || false),
+    capabilities: caps,
+  };
+};
+
+const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
+  if (!cfg) return;
+  if (cfg.agent_system_prompt && Array.isArray(cfg.agent_system_prompt)) {
+    agentSystemPromptTemplates.value = cfg.agent_system_prompt;
+    const ragDefault =
+      cfg.agent_system_prompt.find(t => t.mode === 'rag' && t.default) ||
+      cfg.agent_system_prompt.find(t => t.mode === 'rag');
+    if (ragDefault?.content) {
+      defaultAgentSystemPrompt.value = ragDefault.content;
+    }
+  }
+  const pickDefault = (arr?: PromptTemplate[]): PromptTemplate | undefined =>
+    Array.isArray(arr) ? arr.find(t => t.default) : undefined;
+  const sysPrompt = pickDefault(cfg.system_prompt);
+  if (sysPrompt?.content) defaultNormalSystemPrompt.value = sysPrompt.content;
+  const ctxTmpl = pickDefault(cfg.context_template);
+  if (ctxTmpl?.content) defaultContextTemplate.value = ctxTmpl.content;
+  const rewriteTmpl = pickDefault(cfg.rewrite);
+  if (rewriteTmpl?.content) defaultRewritePromptSystem.value = rewriteTmpl.content;
+  if (rewriteTmpl?.user) defaultRewritePromptUser.value = rewriteTmpl.user;
+  const fallbackList = Array.isArray(cfg.fallback) ? cfg.fallback : [];
+  const fixedFallback = fallbackList.find(t => t.default && t.mode !== 'model');
+  if (fixedFallback?.content) defaultFallbackResponse.value = fixedFallback.content;
+  const modelFallback = fallbackList.find(t => t.mode === 'model' && t.default) || fallbackList.find(t => t.mode === 'model');
+  if (modelFallback?.content) defaultFallbackPrompt.value = modelFallback.content;
+  if (Array.isArray(cfg.intent_prompts)) {
+    intentPromptTemplates.value = cfg.intent_prompts;
+  }
+};
+
+// 加载依赖数据（复用租户级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
-    // 加载所有模型列表（ModelSelector 组件会自动按类型过滤）
-    const models = await listModels();
-    if (models && models.length > 0) {
-      allModels.value = models;
+    await Promise.all([
+      chatResources.ensureModels(),
+      chatResources.ensureKnowledgeBases(),
+      chatResources.ensureWebSearchProviders(),
+      editorResources.prefetchAgentEditorDeps(),
+    ]);
+
+    if (chatResources.allModels.length > 0) {
+      allModels.value = chatResources.allModels;
     }
 
-    // 加载知识库列表（我的 + 共享的）
-    const kbRes: any = await listKnowledgeBases();
-    const myKbs: typeof kbOptions.value = [];
-    if (kbRes.data) {
-      kbRes.data.forEach((kb: any) => {
-        const strategy = kb.indexing_strategy;
-        const caps: KBCapabilities | undefined = kb.capabilities;
-        myKbs.push({
-          label: kb.name,
-          value: kb.id,
-          type: kb.type || 'document',
-          count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
-          shared: false,
-          ragEnabled: caps ? (caps.vector || caps.keyword) : (!strategy || strategy.vector_enabled || strategy.keyword_enabled),
-          wikiEnabled: caps ? caps.wiki : (strategy?.wiki_enabled || false),
-          capabilities: caps,
-        });
-      });
-    }
-
-    // 加载共享给我的知识库
-    const sharedKbs: typeof kbOptions.value = [];
-    try {
-      const sharedList = await orgStore.fetchSharedKnowledgeBases();
-      if (sharedList && sharedList.length > 0) {
-        const myKbIds = new Set(myKbs.map(kb => kb.value));
-        sharedList.forEach((shared: any) => {
-          const kb = shared.knowledge_base;
-          if (!kb || myKbIds.has(kb.id)) return;
-          const caps: KBCapabilities | undefined = kb.capabilities;
-          sharedKbs.push({
-            label: kb.name,
-            value: kb.id,
-            type: kb.type || 'document',
-            count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
-            shared: true,
-            orgName: shared.org_name,
-            ragEnabled: caps ? (caps.vector || caps.keyword) : (!kb.indexing_strategy || kb.indexing_strategy.vector_enabled || kb.indexing_strategy.keyword_enabled),
-            wikiEnabled: caps ? caps.wiki : (kb.indexing_strategy?.wiki_enabled || false),
-            capabilities: caps,
-          });
-        });
-      }
-    } catch (e) {
-      console.warn('Failed to load shared knowledge bases', e);
-    }
-
+    const myKbs = chatResources.rawKnowledgeBases.map((kb: any) => mapKbToOption(kb, false));
+    const myKbIds = new Set(myKbs.map(kb => kb.value));
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter((shared: any) => shared.knowledge_base && !myKbIds.has(shared.knowledge_base.id))
+      .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
     kbOptions.value = [...myKbs, ...sharedKbs];
 
-    // 加载 MCP 服务列表（只加载启用的）
-    try {
-      const mcpList = await listMCPServices();
-      if (mcpList && mcpList.length > 0) {
-        mcpOptions.value = mcpList
-          .filter((mcp: MCPService) => mcp.enabled)
-          .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
-      }
-    } catch (e) {
-      console.warn('Failed to load MCP services', e);
-    }
+    mcpOptions.value = editorResources.mcpServices
+      .filter((mcp: MCPService) => mcp.enabled)
+      .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
 
-    // 加载预装 Skills 列表及沙箱可用性（skills_available=false 时前端不展示 Skills 配置）
-    try {
-      const skillsRes = await listSkills();
-      skillsAvailable.value = skillsRes.skills_available !== false;
-      if (skillsRes.data && skillsRes.data.length > 0) {
-        skillOptions.value = skillsRes.data;
-      }
-    } catch (e) {
-      console.warn('Failed to load skills', e);
-      skillsAvailable.value = false;
-    }
+    skillsAvailable.value = editorResources.skillsAvailable;
+    skillOptions.value = editorResources.skills;
 
-    // 加载智能体类型预设（smart-reasoning 模式下的"类型"下拉）
-    try {
-      const presetsRes: any = await getAgentTypePresets();
-      if (presetsRes?.data && Array.isArray(presetsRes.data)) {
-        agentTypePresets.value = presetsRes.data as AgentTypePreset[];
-      }
-    } catch (e) {
-      console.warn('Failed to load agent type presets', e);
-    }
+    agentTypePresets.value = editorResources.agentTypePresets as AgentTypePreset[];
+    applyPromptTemplateDefaults(editorResources.promptTemplates);
 
-    // 加载 Agent 系统提示词模板（供 applyAgentTypePreset 根据 system_prompt_id 回填正文）
-    try {
-      const tmplRes = await getPromptTemplates();
-      const cfg = tmplRes?.data;
-      if (cfg?.agent_system_prompt && Array.isArray(cfg.agent_system_prompt)) {
-        agentSystemPromptTemplates.value = cfg.agent_system_prompt;
-      }
-    } catch (e) {
-      console.warn('Failed to load prompt templates for agent type presets', e);
-    }
+    storageEngineStatus.value = editorResources.storageStatus;
 
-    // 加载存储引擎可用状态（用于图片存储 provider 选择）
-    try {
-      const statusRes = await getStorageEngineStatus();
-      if (statusRes?.data?.engines) {
-        storageEngineStatus.value = statusRes.data.engines;
-      }
-    } catch (e) {
-      console.warn('Failed to load storage engine status', e);
-    }
+    webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
 
-    // 加载网络搜索引擎配置列表
-    try {
-      const wsRes: any = await listWebSearchProviders();
-      if (wsRes?.data && Array.isArray(wsRes.data)) {
-        webSearchProviderList.value = wsRes.data;
-      }
-    } catch (e) {
-      console.warn('Failed to load web search providers', e);
-    }
+    placeholderData.value = editorResources.placeholders as PlaceholderDefinition[];
 
-    // 加载占位符定义（从统一 API）
-    try {
-      const placeholdersRes = await getPlaceholders();
-      if (placeholdersRes.data) {
-        placeholderData.value = placeholdersRes.data;
-      }
-    } catch (e) {
-      console.warn('Failed to load placeholders', e);
-    }
-
-    // 加载 Agent 模式默认提示词（来自 agent-config，用于 smart-reasoning 模式）
-    const agentConfig = await getAgentConfig();
-    if (agentConfig.data?.system_prompt) {
-      defaultAgentSystemPrompt.value = agentConfig.data.system_prompt;
-    }
-
-    // 加载系统默认配置（来自 conversation-config，用于普通模式 quick-answer）
-    const conversationConfig = await getConversationConfig();
-    if (conversationConfig.data?.prompt) {
-      defaultNormalSystemPrompt.value = conversationConfig.data.prompt;
-    }
-    if (conversationConfig.data?.context_template) {
-      defaultContextTemplate.value = conversationConfig.data.context_template;
-    }
-    if (conversationConfig.data?.rewrite_prompt_system) {
-      defaultRewritePromptSystem.value = conversationConfig.data.rewrite_prompt_system;
-    }
-    if (conversationConfig.data?.rewrite_prompt_user) {
-      defaultRewritePromptUser.value = conversationConfig.data.rewrite_prompt_user;
-    }
-    if (conversationConfig.data?.fallback_prompt) {
-      defaultFallbackPrompt.value = conversationConfig.data.fallback_prompt;
-    }
-    if (conversationConfig.data?.fallback_response) {
-      defaultFallbackResponse.value = conversationConfig.data.fallback_response;
-    }
-    // 加载默认检索参数
-    if (conversationConfig.data?.embedding_top_k) {
-      defaultEmbeddingTopK.value = conversationConfig.data.embedding_top_k;
-    }
-    if (conversationConfig.data?.keyword_threshold !== undefined) {
-      defaultKeywordThreshold.value = conversationConfig.data.keyword_threshold;
-    }
-    if (conversationConfig.data?.vector_threshold !== undefined) {
-      defaultVectorThreshold.value = conversationConfig.data.vector_threshold;
-    }
-    if (conversationConfig.data?.rerank_top_k) {
-      defaultRerankTopK.value = conversationConfig.data.rerank_top_k;
-    }
-    if (conversationConfig.data?.rerank_threshold !== undefined) {
-      defaultRerankThreshold.value = conversationConfig.data.rerank_threshold;
-    }
-    if (conversationConfig.data?.max_completion_tokens) {
-      defaultMaxCompletionTokens.value = conversationConfig.data.max_completion_tokens;
-    }
-    if (conversationConfig.data?.temperature !== undefined) {
-      defaultTemperature.value = conversationConfig.data.temperature;
-    }
+    const rc = editorResources.tenantRetrievalConfig as Record<string, number> | null;
+    if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;
+    if (rc?.keyword_threshold !== undefined) defaultKeywordThreshold.value = rc.keyword_threshold;
+    if (rc?.vector_threshold !== undefined) defaultVectorThreshold.value = rc.vector_threshold;
+    if (rc?.rerank_top_k) defaultRerankTopK.value = rc.rerank_top_k;
+    if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
   } catch (e) {
     console.error('Failed to load dependencies', e);
   }
@@ -2686,6 +2744,7 @@ const handleAddModel = (subSection: string) => {
 const handleClose = () => {
   showPlaceholderPopup.value = false;
   showContextPlaceholderPopup.value = false;
+  intentPromptPopup.value.show = false;
   rewriteSystemPopup.value.show = false;
   rewriteUserPopup.value.show = false;
   fallbackPromptPopup.value.show = false;
@@ -2698,7 +2757,7 @@ const filteredPlaceholders = computed(() => {
     return availablePlaceholders.value;
   }
   const prefix = placeholderPrefix.value.toLowerCase();
-  return availablePlaceholders.value.filter(p => 
+  return availablePlaceholders.value.filter(p =>
     p.name.toLowerCase().startsWith(prefix)
   );
 });
@@ -2709,7 +2768,7 @@ const filteredContextPlaceholders = computed(() => {
     return contextTemplatePlaceholders.value;
   }
   const prefix = contextPlaceholderPrefix.value.toLowerCase();
-  return contextTemplatePlaceholders.value.filter(p => 
+  return contextTemplatePlaceholders.value.filter(p =>
     p.name.toLowerCase().startsWith(prefix)
   );
 });
@@ -2720,7 +2779,7 @@ const filteredRewriteSystemPlaceholders = computed(() => {
     return rewriteSystemPlaceholders.value;
   }
   const prefix = rewriteSystemPopup.value.prefix.toLowerCase();
-  return rewriteSystemPlaceholders.value.filter(p => 
+  return rewriteSystemPlaceholders.value.filter(p =>
     p.name.toLowerCase().startsWith(prefix)
   );
 });
@@ -2731,7 +2790,7 @@ const filteredRewriteUserPlaceholders = computed(() => {
     return rewritePlaceholders.value;
   }
   const prefix = rewriteUserPopup.value.prefix.toLowerCase();
-  return rewritePlaceholders.value.filter(p => 
+  return rewritePlaceholders.value.filter(p =>
     p.name.toLowerCase().startsWith(prefix)
   );
 });
@@ -2742,7 +2801,7 @@ const filteredFallbackPlaceholders = computed(() => {
     return fallbackPlaceholders.value;
   }
   const prefix = fallbackPromptPopup.value.prefix.toLowerCase();
-  return fallbackPlaceholders.value.filter(p => 
+  return fallbackPlaceholders.value.filter(p =>
     p.name.toLowerCase().startsWith(prefix)
   );
 });
@@ -2764,19 +2823,21 @@ const getTextareaElement = (): HTMLTextAreaElement | null => {
 const calculateCursorPosition = (textarea: HTMLTextAreaElement) => {
   const cursorPos = textarea.selectionStart;
   const textBeforeCursor = formData.value.config.system_prompt.substring(0, cursorPos);
-  
+
   const style = window.getComputedStyle(textarea);
-  const textareaRect = textarea.getBoundingClientRect();
-  
+  // Placeholder popup is `position: fixed` under the root zoom; normalize the
+  // visual-pixel rect to CSS pixels so the popup actually lands on the caret.
+  const textareaRect = rectToCssPx(textarea.getBoundingClientRect(), getRootZoom());
+
   const lineHeight = parseFloat(style.lineHeight) || 20;
   const paddingTop = parseFloat(style.paddingTop) || 0;
   const paddingLeft = parseFloat(style.paddingLeft) || 0;
-  
+
   // 计算当前行号
   const lines = textBeforeCursor.split('\n');
   const currentLine = lines.length - 1;
   const currentLineText = lines[currentLine];
-  
+
   // 创建临时 span 计算文本宽度
   const span = document.createElement('span');
   span.style.font = style.font;
@@ -2787,12 +2848,12 @@ const calculateCursorPosition = (textarea: HTMLTextAreaElement) => {
   document.body.appendChild(span);
   const textWidth = span.offsetWidth;
   document.body.removeChild(span);
-  
+
   const scrollTop = textarea.scrollTop;
   const top = textareaRect.top + paddingTop + (currentLine * lineHeight) - scrollTop + lineHeight + 4;
   const scrollLeft = textarea.scrollLeft;
   const left = textareaRect.left + paddingLeft + textWidth - scrollLeft;
-  
+
   return { top, left };
 };
 
@@ -2800,10 +2861,10 @@ const calculateCursorPosition = (textarea: HTMLTextAreaElement) => {
 const checkAndShowPlaceholderPopup = () => {
   const textarea = getTextareaElement();
   if (!textarea) return;
-  
+
   const cursorPos = textarea.selectionStart;
   const textBeforeCursor = formData.value.config.system_prompt.substring(0, cursorPos);
-  
+
   // 查找最近的 {{ 位置
   let lastOpenPos = -1;
   for (let i = textBeforeCursor.length - 1; i >= 1; i--) {
@@ -2815,16 +2876,16 @@ const checkAndShowPlaceholderPopup = () => {
       }
     }
   }
-  
+
   if (lastOpenPos === -1) {
     showPlaceholderPopup.value = false;
     placeholderPrefix.value = '';
     return;
   }
-  
+
   const textAfterOpen = textBeforeCursor.substring(lastOpenPos + 2);
   placeholderPrefix.value = textAfterOpen;
-  
+
   const filtered = filteredPlaceholders.value;
   if (filtered.length > 0) {
     nextTick(() => {
@@ -2855,17 +2916,17 @@ const handlePromptInput = () => {
 const insertPlaceholder = (placeholderName: string, fromPopup: boolean = false) => {
   const textarea = getTextareaElement();
   if (!textarea) return;
-  
+
   showPlaceholderPopup.value = false;
   placeholderPrefix.value = '';
   selectedPlaceholderIndex.value = 0;
-  
+
   nextTick(() => {
     const cursorPos = textarea.selectionStart;
     const currentValue = formData.value.config.system_prompt || '';
     const textBeforeCursor = currentValue.substring(0, cursorPos);
     const textAfterCursor = currentValue.substring(cursorPos);
-    
+
     // 只有从下拉列表选择时才查找 {{ 并替换
     if (fromPopup) {
       let lastOpenPos = -1;
@@ -2875,12 +2936,12 @@ const insertPlaceholder = (placeholderName: string, fromPopup: boolean = false) 
           break;
         }
       }
-      
+
       if (lastOpenPos !== -1) {
         const textBeforeOpen = currentValue.substring(0, lastOpenPos);
         const newValue = textBeforeOpen + `{{${placeholderName}}}` + textAfterCursor;
         formData.value.config.system_prompt = newValue;
-        
+
         nextTick(() => {
           const newCursorPos = textBeforeOpen.length + placeholderName.length + 4;
           textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -2889,11 +2950,11 @@ const insertPlaceholder = (placeholderName: string, fromPopup: boolean = false) 
         return;
       }
     }
-    
+
     // 直接在光标位置插入完整占位符
     const newValue = textBeforeCursor + `{{${placeholderName}}}` + textAfterCursor;
     formData.value.config.system_prompt = newValue;
-    
+
     nextTick(() => {
       const newCursorPos = cursorPos + placeholderName.length + 4;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -2919,18 +2980,19 @@ const getContextTemplateTextareaElement = (): HTMLTextAreaElement | null => {
 const calculateContextCursorPosition = (textarea: HTMLTextAreaElement) => {
   const cursorPos = textarea.selectionStart;
   const textBeforeCursor = formData.value.config.context_template.substring(0, cursorPos);
-  
+
   const style = window.getComputedStyle(textarea);
-  const textareaRect = textarea.getBoundingClientRect();
-  
+  // See `calculateCursorPosition` for the zoom rationale.
+  const textareaRect = rectToCssPx(textarea.getBoundingClientRect(), getRootZoom());
+
   const lineHeight = parseFloat(style.lineHeight) || 20;
   const paddingTop = parseFloat(style.paddingTop) || 0;
   const paddingLeft = parseFloat(style.paddingLeft) || 0;
-  
+
   const lines = textBeforeCursor.split('\n');
   const currentLine = lines.length - 1;
   const currentLineText = lines[currentLine];
-  
+
   const span = document.createElement('span');
   span.style.font = style.font;
   span.style.visibility = 'hidden';
@@ -2940,12 +3002,12 @@ const calculateContextCursorPosition = (textarea: HTMLTextAreaElement) => {
   document.body.appendChild(span);
   const textWidth = span.offsetWidth;
   document.body.removeChild(span);
-  
+
   const scrollTop = textarea.scrollTop;
   const top = textareaRect.top + paddingTop + (currentLine * lineHeight) - scrollTop + lineHeight + 4;
   const scrollLeft = textarea.scrollLeft;
   const left = textareaRect.left + paddingLeft + textWidth - scrollLeft;
-  
+
   return { top, left };
 };
 
@@ -2953,10 +3015,10 @@ const calculateContextCursorPosition = (textarea: HTMLTextAreaElement) => {
 const checkAndShowContextPlaceholderPopup = () => {
   const textarea = getContextTemplateTextareaElement();
   if (!textarea) return;
-  
+
   const cursorPos = textarea.selectionStart;
   const textBeforeCursor = formData.value.config.context_template.substring(0, cursorPos);
-  
+
   let lastOpenPos = -1;
   for (let i = textBeforeCursor.length - 1; i >= 1; i--) {
     if (textBeforeCursor[i] === '{' && textBeforeCursor[i - 1] === '{') {
@@ -2967,16 +3029,16 @@ const checkAndShowContextPlaceholderPopup = () => {
       }
     }
   }
-  
+
   if (lastOpenPos === -1) {
     showContextPlaceholderPopup.value = false;
     contextPlaceholderPrefix.value = '';
     return;
   }
-  
+
   const textAfterOpen = textBeforeCursor.substring(lastOpenPos + 2);
   contextPlaceholderPrefix.value = textAfterOpen;
-  
+
   const filtered = filteredContextPlaceholders.value;
   if (filtered.length > 0) {
     nextTick(() => {
@@ -3007,17 +3069,17 @@ const handleContextTemplateInput = () => {
 const insertContextPlaceholder = (placeholderName: string, fromPopup: boolean = false) => {
   const textarea = getContextTemplateTextareaElement();
   if (!textarea) return;
-  
+
   showContextPlaceholderPopup.value = false;
   contextPlaceholderPrefix.value = '';
   selectedContextPlaceholderIndex.value = 0;
-  
+
   nextTick(() => {
     const cursorPos = textarea.selectionStart;
     const currentValue = formData.value.config.context_template || '';
     const textBeforeCursor = currentValue.substring(0, cursorPos);
     const textAfterCursor = currentValue.substring(cursorPos);
-    
+
     // 只有从下拉列表选择时才查找 {{ 并替换
     if (fromPopup) {
       let lastOpenPos = -1;
@@ -3027,12 +3089,12 @@ const insertContextPlaceholder = (placeholderName: string, fromPopup: boolean = 
           break;
         }
       }
-      
+
       if (lastOpenPos !== -1) {
         const textBeforeOpen = currentValue.substring(0, lastOpenPos);
         const newValue = textBeforeOpen + `{{${placeholderName}}}` + textAfterCursor;
         formData.value.config.context_template = newValue;
-        
+
         nextTick(() => {
           const newCursorPos = textBeforeOpen.length + placeholderName.length + 4;
           textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -3041,11 +3103,11 @@ const insertContextPlaceholder = (placeholderName: string, fromPopup: boolean = 
         return;
       }
     }
-    
+
     // 直接在光标位置插入完整占位符
     const newValue = textBeforeCursor + `{{${placeholderName}}}` + textAfterCursor;
     formData.value.config.context_template = newValue;
-    
+
     nextTick(() => {
       const newCursorPos = cursorPos + placeholderName.length + 4;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -3054,12 +3116,34 @@ const insertContextPlaceholder = (placeholderName: string, fromPopup: boolean = 
   });
 };
 
+type GenericPlaceholderType = 'rewriteSystem' | 'rewriteUser' | 'fallback' | 'intent';
+
+const genericPlaceholderFieldKeyMap: Record<Exclude<GenericPlaceholderType, 'intent'>, keyof typeof formData.value.config> = {
+  rewriteSystem: 'rewrite_prompt_system',
+  rewriteUser: 'rewrite_prompt_user',
+  fallback: 'fallback_prompt',
+};
+
+const getGenericPlaceholderFieldValue = (type: GenericPlaceholderType): string => {
+  if (type === 'intent') return intentEditorValue.value || '';
+  return String(formData.value.config[genericPlaceholderFieldKeyMap[type]] || '');
+};
+
+const setGenericPlaceholderFieldValue = (type: GenericPlaceholderType, value: string) => {
+  if (type === 'intent') {
+    intentEditorValue.value = value;
+    return;
+  }
+  (formData.value.config as any)[genericPlaceholderFieldKeyMap[type]] = value;
+};
+
 // 通用获取 textarea 元素
-const getGenericTextareaElement = (type: 'rewriteSystem' | 'rewriteUser' | 'fallback'): HTMLTextAreaElement | null => {
+const getGenericTextareaElement = (type: GenericPlaceholderType): HTMLTextAreaElement | null => {
   const refMap = {
     rewriteSystem: rewriteSystemTextareaRef,
     rewriteUser: rewriteUserTextareaRef,
     fallback: fallbackPromptTextareaRef,
+    intent: intentPromptTextareaRef,
   };
   const ref = refMap[type];
   if (ref.value) {
@@ -3080,13 +3164,14 @@ const calculateGenericCursorPosition = (textarea: HTMLTextAreaElement, fieldValu
   const lines = textBeforeCursor.split('\n');
   const currentLine = lines.length - 1;
   const currentLineText = lines[currentLine];
-  
-  const textareaRect = textarea.getBoundingClientRect();
+
+  // See `calculateCursorPosition` for the zoom rationale.
+  const textareaRect = rectToCssPx(textarea.getBoundingClientRect(), getRootZoom());
   const style = window.getComputedStyle(textarea);
   const lineHeight = parseFloat(style.lineHeight) || 20;
   const paddingTop = parseFloat(style.paddingTop) || 0;
   const paddingLeft = parseFloat(style.paddingLeft) || 0;
-  
+
   const span = document.createElement('span');
   span.style.font = style.font;
   span.style.visibility = 'hidden';
@@ -3096,29 +3181,28 @@ const calculateGenericCursorPosition = (textarea: HTMLTextAreaElement, fieldValu
   document.body.appendChild(span);
   const textWidth = span.offsetWidth;
   document.body.removeChild(span);
-  
+
   const scrollTop = textarea.scrollTop;
   const top = textareaRect.top + paddingTop + (currentLine * lineHeight) - scrollTop + lineHeight + 4;
   const scrollLeft = textarea.scrollLeft;
   const left = textareaRect.left + paddingLeft + textWidth - scrollLeft;
-  
+
   return { top, left };
 };
 
 // 通用检查并显示占位符弹出
 const checkAndShowGenericPlaceholderPopup = (
-  type: 'rewriteSystem' | 'rewriteUser' | 'fallback',
+  type: GenericPlaceholderType,
   popup: typeof rewriteSystemPopup,
-  fieldKey: keyof typeof formData.value.config,
   filteredPlaceholders: PlaceholderDefinition[]
 ) => {
   const textarea = getGenericTextareaElement(type);
   if (!textarea) return;
-  
+
   const cursorPos = textarea.selectionStart;
-  const fieldValue = String(formData.value.config[fieldKey] || '');
+  const fieldValue = getGenericPlaceholderFieldValue(type);
   const textBeforeCursor = fieldValue.substring(0, cursorPos);
-  
+
   let lastOpenPos = -1;
   for (let i = textBeforeCursor.length - 1; i >= 1; i--) {
     if (textBeforeCursor[i] === '{' && textBeforeCursor[i - 1] === '{') {
@@ -3129,16 +3213,16 @@ const checkAndShowGenericPlaceholderPopup = (
       }
     }
   }
-  
+
   if (lastOpenPos === -1) {
     popup.value.show = false;
     popup.value.prefix = '';
     return;
   }
-  
+
   const textAfterOpen = textBeforeCursor.substring(lastOpenPos + 2);
   popup.value.prefix = textAfterOpen;
-  
+
   if (filteredPlaceholders.length > 0) {
     nextTick(() => {
       const position = calculateGenericCursorPosition(textarea, fieldValue);
@@ -3160,7 +3244,7 @@ const handleRewriteSystemInput = () => {
     clearTimeout(rewriteSystemPopup.value.timer);
   }
   rewriteSystemPopup.value.timer = setTimeout(() => {
-    checkAndShowGenericPlaceholderPopup('rewriteSystem', rewriteSystemPopup, 'rewrite_prompt_system', filteredRewriteSystemPlaceholders.value);
+    checkAndShowGenericPlaceholderPopup('rewriteSystem', rewriteSystemPopup, filteredRewriteSystemPlaceholders.value);
   }, 50);
 };
 
@@ -3170,7 +3254,7 @@ const handleRewriteUserInput = () => {
     clearTimeout(rewriteUserPopup.value.timer);
   }
   rewriteUserPopup.value.timer = setTimeout(() => {
-    checkAndShowGenericPlaceholderPopup('rewriteUser', rewriteUserPopup, 'rewrite_prompt_user', filteredRewriteUserPlaceholders.value);
+    checkAndShowGenericPlaceholderPopup('rewriteUser', rewriteUserPopup, filteredRewriteUserPlaceholders.value);
   }, 50);
 };
 
@@ -3180,39 +3264,44 @@ const handleFallbackPromptInput = () => {
     clearTimeout(fallbackPromptPopup.value.timer);
   }
   fallbackPromptPopup.value.timer = setTimeout(() => {
-    checkAndShowGenericPlaceholderPopup('fallback', fallbackPromptPopup, 'fallback_prompt', filteredFallbackPlaceholders.value);
+    checkAndShowGenericPlaceholderPopup('fallback', fallbackPromptPopup, filteredFallbackPlaceholders.value);
+  }, 50);
+};
+
+// 处理意图提示词输入
+const handleIntentPromptInput = () => {
+  if (intentPromptPopup.value.timer) {
+    clearTimeout(intentPromptPopup.value.timer);
+  }
+  intentPromptPopup.value.timer = setTimeout(() => {
+    checkAndShowGenericPlaceholderPopup('intent', intentPromptPopup, filteredIntentPlaceholders.value);
   }, 50);
 };
 
 // 通用插入占位符
-const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallback', placeholderName: string, fromPopup: boolean = false) => {
+const insertGenericPlaceholder = (type: GenericPlaceholderType, placeholderName: string, fromPopup: boolean = false) => {
   const textarea = getGenericTextareaElement(type);
   if (!textarea) return;
-  
+
   const popupMap = {
     rewriteSystem: rewriteSystemPopup,
     rewriteUser: rewriteUserPopup,
     fallback: fallbackPromptPopup,
+    intent: intentPromptPopup,
   };
-  const fieldKeyMap: Record<string, keyof typeof formData.value.config> = {
-    rewriteSystem: 'rewrite_prompt_system',
-    rewriteUser: 'rewrite_prompt_user',
-    fallback: 'fallback_prompt',
-  };
-  
+
   const popup = popupMap[type];
-  const fieldKey = fieldKeyMap[type];
-  
+
   popup.value.show = false;
   popup.value.prefix = '';
   popup.value.selectedIndex = 0;
-  
+
   nextTick(() => {
     const cursorPos = textarea.selectionStart;
-    const currentValue = String(formData.value.config[fieldKey] || '');
+    const currentValue = getGenericPlaceholderFieldValue(type);
     const textBeforeCursor = currentValue.substring(0, cursorPos);
     const textAfterCursor = currentValue.substring(cursorPos);
-    
+
     // 只有从下拉列表选择时才查找 {{ 并替换
     if (fromPopup) {
       let lastOpenPos = -1;
@@ -3222,12 +3311,12 @@ const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallb
           break;
         }
       }
-      
+
       if (lastOpenPos !== -1) {
         const textBeforeOpen = currentValue.substring(0, lastOpenPos);
         const newValue = textBeforeOpen + `{{${placeholderName}}}` + textAfterCursor;
-        (formData.value.config as any)[fieldKey] = newValue;
-        
+        setGenericPlaceholderFieldValue(type, newValue);
+
         nextTick(() => {
           const newCursorPos = textBeforeOpen.length + placeholderName.length + 4;
           textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -3236,11 +3325,11 @@ const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallb
         return;
       }
     }
-    
+
     // 直接在光标位置插入完整占位符
     const newValue = textBeforeCursor + `{{${placeholderName}}}` + textAfterCursor;
-    (formData.value.config as any)[fieldKey] = newValue;
-    
+    setGenericPlaceholderFieldValue(type, newValue);
+
     nextTick(() => {
       const newCursorPos = cursorPos + placeholderName.length + 4;
       textarea.setSelectionRange(newCursorPos, newCursorPos);
@@ -3335,7 +3424,7 @@ const setupTextareaEventListeners = () => {
 
 // 通用设置 textarea 事件监听
 const setupGenericTextareaEventListeners = (
-  type: 'rewriteSystem' | 'rewriteUser' | 'fallback',
+  type: GenericPlaceholderType,
   popup: typeof rewriteSystemPopup,
   filteredPlaceholders: () => PlaceholderDefinition[]
 ) => {
@@ -3381,7 +3470,7 @@ const setupGenericTextareaEventListeners = (
 };
 
 // 处理点击占位符标签
-const handlePlaceholderClick = (type: 'system' | 'context' | 'rewriteSystem' | 'rewriteUser' | 'fallback', placeholderName: string) => {
+const handlePlaceholderClick = (type: 'system' | 'context' | 'rewriteSystem' | 'rewriteUser' | 'fallback' | 'intent', placeholderName: string) => {
   if (type === 'system') {
     insertPlaceholder(placeholderName);
   } else if (type === 'context') {
@@ -3397,6 +3486,7 @@ watch(() => props.visible, (val) => {
     nextTick(() => {
       setupTextareaEventListeners();
       setupContextTemplateEventListeners();
+      setupGenericTextareaEventListeners('intent', intentPromptPopup, () => filteredIntentPlaceholders.value);
       setupGenericTextareaEventListeners('rewriteSystem', rewriteSystemPopup, () => filteredRewriteSystemPlaceholders.value);
       setupGenericTextareaEventListeners('rewriteUser', rewriteUserPopup, () => filteredRewriteUserPlaceholders.value);
       setupGenericTextareaEventListeners('fallback', fallbackPromptPopup, () => filteredFallbackPlaceholders.value);
@@ -3524,22 +3614,24 @@ const handleSave = async () => {
     return;
   }
 
-  // 校验 ReRank 模型（当需要时必填）
-  if (needsRerankModel.value && !formData.value.config.rerank_model_id) {
-    MessagePlugin.error(t('agent.editor.rerankModelRequired'));
-    currentSection.value = 'knowledge';
-    return;
-  }
+  // ReRank 模型（可选）
+  // 运行时若 rerank_model_id 为空会自动跳过 rerank，无需在保存时强制要求。
+  // 仅当用户已选择 rerank 模型时，才校验相关参数。
 
   // 过滤空推荐问题
   if (formData.value.config.suggested_prompts) {
     formData.value.config.suggested_prompts = formData.value.config.suggested_prompts.filter((p: string) => p.trim() !== '');
   }
 
+  if (!formData.value.config.intent_prompts || Object.keys(formData.value.config.intent_prompts).length === 0) {
+    delete formData.value.config.intent_prompts;
+  }
+
   saving.value = true;
   try {
     if (props.mode === 'create') {
       await createAgent(formData.value);
+      markContextualGuideDone('agentCreate')
       MessagePlugin.success(t('agent.messages.created'));
     } else {
       await updateAgent(formData.value.id, formData.value);
@@ -3700,6 +3792,17 @@ const handleSave = async () => {
 .section-header {
   margin-bottom: 32px;
 
+  .section-header-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+
+    h2 {
+      margin: 0;
+    }
+  }
+
   h2 {
     font-size: 20px;
     font-weight: 600;
@@ -3740,7 +3843,7 @@ const handleSave = async () => {
   &.setting-row-vertical {
     flex-direction: column;
     gap: 12px;
-    
+
     .setting-info {
       max-width: 100%;
       padding-right: 0;
@@ -3785,7 +3888,7 @@ const handleSave = async () => {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 4px;
-    
+
     label {
       margin-bottom: 0;
     }
@@ -3809,6 +3912,10 @@ const handleSave = async () => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+
+    .hint {
+      color: var(--td-warning-color, var(--td-text-color-placeholder));
+    }
   }
 }
 
@@ -3850,6 +3957,7 @@ const handleSave = async () => {
   color: var(--td-brand-color);
   margin-top: 4px;
   text-decoration: none;
+
   &:hover {
     text-decoration: underline;
   }
@@ -3864,6 +3972,42 @@ const handleSave = async () => {
 
   .name-input {
     flex: 1;
+  }
+}
+
+.agent-id-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 8px 6px 12px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+
+  .agent-id-value {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: var(--app-font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-id-copy {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
   }
 }
 
@@ -4004,7 +4148,9 @@ const handleSave = async () => {
     background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
     border-color: var(--td-warning-color-light, #fcd7b6);
 
-    .t-icon { color: var(--td-warning-color); }
+    .t-icon {
+      color: var(--td-warning-color);
+    }
   }
 }
 
@@ -4066,17 +4212,36 @@ const handleSave = async () => {
     border: 1px solid var(--td-warning-color-light, #fcd7b6);
     border-radius: 999px;
 
-    .t-icon { font-size: 13px; }
+    .t-icon {
+      font-size: 13px;
+    }
   }
 }
 
 // 不同分组的左侧色条
-.tool-group--base      .tool-group-bar { background: var(--td-gray-color-6, #a0a7ab); }
-.tool-group--rag       .tool-group-bar { background: var(--td-brand-color); }
-.tool-group--wiki_read .tool-group-bar { background: var(--td-success-color, #2ba471); }
-.tool-group--wiki_edit .tool-group-bar { background: var(--td-warning-color, #ed7b2f); }
-.tool-group--wiki_issue .tool-group-bar { background: var(--td-purple-5, #8e56dd); }
-.tool-group--data      .tool-group-bar { background: var(--td-cyan-6, #09a3b7); }
+.tool-group--base .tool-group-bar {
+  background: var(--td-gray-color-6, #a0a7ab);
+}
+
+.tool-group--rag .tool-group-bar {
+  background: var(--td-brand-color);
+}
+
+.tool-group--wiki_read .tool-group-bar {
+  background: var(--td-success-color, #2ba471);
+}
+
+.tool-group--wiki_edit .tool-group-bar {
+  background: var(--td-warning-color, #ed7b2f);
+}
+
+.tool-group--wiki_issue .tool-group-bar {
+  background: var(--td-purple-5, #8e56dd);
+}
+
+.tool-group--data .tool-group-bar {
+  background: var(--td-cyan-6, #09a3b7);
+}
 
 // 统一两列网格；小屏退化单列
 .tool-grid {
@@ -4199,6 +4364,7 @@ const handleSave = async () => {
 }
 
 .tool-card--disabled {
+
   .tool-card-name,
   .tool-card-desc {
     color: var(--td-text-color-placeholder);
@@ -4361,6 +4527,59 @@ const handleSave = async () => {
   width: 100%;
 }
 
+.intent-prompts-editor {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.intent-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.intent-toggle-group :deep(.intent-toggle-btn--active) {
+  background-color: rgba(7, 192, 95, 0.1);
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color);
+  font-weight: 500;
+
+  &:hover,
+  &:focus-visible {
+    background-color: rgba(7, 192, 95, 0.14);
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+  }
+}
+
+.intent-toggle-btn {
+  max-width: 100%;
+}
+
+.intent-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.intent-toggle-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.intent-active-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  line-height: 1.5;
+}
+
 // 系统提示词输入框样式
 .system-prompt-textarea {
   width: 100%;
@@ -4384,12 +4603,14 @@ const handleSave = async () => {
   overflow-x: auto;
   white-space: nowrap;
   padding-bottom: 4px;
-  
+
   // 隐藏滚动条但保持可滚动
   scrollbar-width: thin;
+
   &::-webkit-scrollbar {
     height: 4px;
   }
+
   &::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.1);
     border-radius: 2px;
@@ -4481,22 +4702,24 @@ const handleSave = async () => {
   }
 }
 
-// 内置智能体提示
-.builtin-agent-notice {
-  display: flex;
+.builtin-agent-hint {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--td-warning-color-light);
-  border: 1px solid var(--td-warning-color-focus);
-  border-radius: 8px;
-  margin-bottom: 16px;
-  color: var(--td-warning-color);
-  font-size: 14px;
+  color: var(--td-text-color-placeholder);
+  font-size: 18px;
+  line-height: 1;
+  cursor: help;
+  transition: color 0.2s;
 
-  .t-icon {
-    font-size: 16px;
-    flex-shrink: 0;
+  &:hover,
+  &:focus-visible {
+    color: var(--td-warning-color);
+    outline: none;
+  }
+
+  &:focus-visible {
+    border-radius: 2px;
+    box-shadow: 0 0 0 2px var(--td-warning-color-focus);
   }
 }
 
@@ -4509,12 +4732,12 @@ const handleSave = async () => {
   height: 48px;
   border-radius: 12px;
   flex-shrink: 0;
-  
+
   &.normal {
     background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
     color: var(--td-brand-color-active);
   }
-  
+
   &.agent {
     background: linear-gradient(135deg, rgba(124, 77, 255, 0.15) 0%, rgba(124, 77, 255, 0.08) 100%);
     color: var(--td-brand-color);
@@ -4572,13 +4795,13 @@ const handleSave = async () => {
   height: 24px;
   border-radius: 6px;
   font-size: 14px;
-  
+
   // Document KB
   &.doc-icon {
     background: rgba(16, 185, 129, 0.1);
     color: var(--td-success-color);
   }
-  
+
   // FAQ KB
   &.faq-icon {
     background: rgba(0, 82, 217, 0.1);
@@ -4679,11 +4902,11 @@ const handleSave = async () => {
   font-size: 14px;
   font-weight: 600;
   color: var(--td-brand-color);
-  
+
   .faq-icon {
     font-size: 18px;
   }
-  
+
   .help-icon {
     font-size: 14px;
     color: var(--td-text-color-placeholder);
@@ -4694,12 +4917,12 @@ const handleSave = async () => {
 .faq-strategy-section .setting-row {
   padding: 12px 0;
   border-bottom: 1px solid rgba(0, 82, 217, 0.1);
-  
+
   &:last-child {
     border-bottom: none;
     padding-bottom: 0;
   }
-  
+
   &:first-of-type {
     padding-top: 0;
   }

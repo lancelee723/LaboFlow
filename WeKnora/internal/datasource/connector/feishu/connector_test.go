@@ -67,7 +67,9 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 		if r.Method == http.MethodPost {
 			writeJSON(w, exportTaskCreateResponse{
 				apiResponse: apiResponse{Code: 0},
-				Data:        struct{ Ticket string `json:"ticket"` }{Ticket: "ticket-123"},
+				Data: struct {
+					Ticket string `json:"ticket"`
+				}{Ticket: "ticket-123"},
 			})
 			return
 		}
@@ -139,6 +141,116 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 		if strings.HasSuffix(r.URL.Path, "/download") {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Write([]byte("fake-pdf-binary"))
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	ts := httptest.NewServer(mux)
+	cfg := &Config{
+		AppID:     "test-app-id",
+		AppSecret: "test-app-secret",
+		BaseURL:   ts.URL,
+	}
+	return ts, cfg
+}
+
+func fakeFeishuWithChildFailure(topNodes []wikiNode, failingParentToken string) (*httptest.Server, *Config) {
+	return fakeFeishuHierarchy(topNodes, nil, failingParentToken)
+}
+
+func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, failingParentToken string) (*httptest.Server, *Config) {
+	mux := http.NewServeMux()
+	nodeByToken := make(map[string]wikiNode)
+	for _, node := range topNodes {
+		node.SpaceID = "space1"
+		nodeByToken[node.NodeToken] = node
+	}
+	for parentToken, nodes := range childNodes {
+		for _, node := range nodes {
+			node.SpaceID = "space1"
+			if node.ParentNodeID == "" {
+				node.ParentNodeID = parentToken
+			}
+			nodeByToken[node.NodeToken] = node
+		}
+	}
+
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, tokenResponse{
+			apiResponse:       apiResponse{Code: 0},
+			TenantAccessToken: "fake-token",
+			Expire:            7200,
+		})
+	})
+
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, wikiSpaceListResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Items     []wikiSpace `json:"items"`
+				HasMore   bool        `json:"has_more"`
+				PageToken string      `json:"page_token"`
+			}{
+				Items: []wikiSpace{
+					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
+				},
+			},
+		})
+	})
+
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		parentToken := r.URL.Query().Get("parent_node_token")
+		if parentToken != "" && parentToken == failingParentToken {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":1663,"msg":"internal error"}`))
+			return
+		}
+		nodes := topNodes
+		if parentToken != "" {
+			nodes = childNodes[parentToken]
+			for i := range nodes {
+				if nodes[i].ParentNodeID == "" {
+					nodes[i].ParentNodeID = parentToken
+				}
+				if nodes[i].SpaceID == "" {
+					nodes[i].SpaceID = "space1"
+				}
+			}
+		}
+		writeJSON(w, wikiNodeListResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Items     []wikiNode `json:"items"`
+				HasMore   bool       `json:"has_more"`
+				PageToken string     `json:"page_token"`
+			}{
+				Items: nodes,
+			},
+		})
+	})
+
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/get_node", func(w http.ResponseWriter, r *http.Request) {
+		nodeToken := r.URL.Query().Get("token")
+		node, ok := nodeByToken[nodeToken]
+		if !ok {
+			writeJSON(w, wikiNodeInfoResponse{
+				apiResponse: apiResponse{Code: 1663, Msg: "node not found"},
+			})
+			return
+		}
+		writeJSON(w, wikiNodeInfoResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Node wikiNode `json:"node"`
+			}{Node: node},
+		})
+	})
+
+	mux.HandleFunc("/open-apis/drive/v1/files/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/download") {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("fake-file-content"))
 			return
 		}
 		http.NotFound(w, r)
@@ -353,6 +465,44 @@ func TestConnectorListResources(t *testing.T) {
 	}
 }
 
+func TestConnectorListResources_IncludesWikiNodeTree(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true, ObjEditTime: "100"},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "docx", Title: "Peer", ObjEditTime: "200"},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", ObjEditTime: "300"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	resources, err := NewConnector().ListResources(context.Background(), makeConfig(cfg, nil))
+	if err != nil {
+		t.Fatalf("ListResources() error: %v", err)
+	}
+	if len(resources) != 4 {
+		t.Fatalf("want 4 resources (space + 3 nodes), got %d: %+v", len(resources), resources)
+	}
+
+	byID := make(map[string]types.Resource)
+	for _, resource := range resources {
+		byID[resource.ExternalID] = resource
+	}
+	root := byID["space1:nt-root"]
+	if root.ParentID != "space1" || !root.HasChildren {
+		t.Fatalf("root resource wrong: %+v", root)
+	}
+	child := byID["space1:nt-child"]
+	if child.ParentID != "space1:nt-root" || child.Name != "Child" {
+		t.Fatalf("child resource wrong: %+v", child)
+	}
+	if child.Metadata["space_id"] != "space1" || child.Metadata["node_token"] != "nt-child" {
+		t.Fatalf("child metadata wrong: %+v", child.Metadata)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // FetchAll: test all supported doc types
 // ──────────────────────────────────────────────────────────────────────
@@ -528,6 +678,95 @@ func TestFetchAll_MixedTypes(t *testing.T) {
 	}
 }
 
+func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
+	nodes := []wikiNode{
+		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
+	}
+	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
+	defer ts.Close()
+
+	items, err := NewConnector().FetchAll(context.Background(), makeConfig(cfg, []string{"space1"}), []string{"space1"})
+	if err != nil {
+		t.Fatalf("FetchAll must not abort when one child listing fails: %v", err)
+	}
+
+	if len(items) != 3 {
+		t.Fatalf("want 3 items (2 fetched + 1 failure placeholder), got %d: %+v", len(items), items)
+	}
+
+	var parent, peer, placeholder *types.FetchedItem
+	for i := range items {
+		switch {
+		case items[i].ExternalID == "nt-parent" && len(items[i].Content) > 0:
+			parent = &items[i]
+		case items[i].ExternalID == "nt-peer" && len(items[i].Content) > 0:
+			peer = &items[i]
+		case items[i].Metadata["error"] != "":
+			placeholder = &items[i]
+		}
+	}
+
+	if parent == nil || peer == nil {
+		t.Fatalf("expected both successfully listed nodes to be fetched, parent=%v peer=%v", parent != nil, peer != nil)
+	}
+	if placeholder == nil {
+		t.Fatal("expected a failure placeholder for the child listing error")
+	}
+	if placeholder.ExternalID != "nt-parent" || placeholder.Title != "Parent.pdf" {
+		t.Errorf("placeholder identity wrong: %+v", placeholder)
+	}
+	if placeholder.Metadata["channel"] != types.ChannelFeishu {
+		t.Errorf("placeholder channel = %q", placeholder.Metadata["channel"])
+	}
+	if placeholder.Metadata["node_token"] != "nt-parent" || placeholder.Metadata["space_id"] != "space1" {
+		t.Errorf("placeholder missing traceability metadata: %+v", placeholder.Metadata)
+	}
+	if !strings.Contains(placeholder.Metadata["error"], "list children of nt-parent") {
+		t.Errorf("placeholder error = %q", placeholder.Metadata["error"])
+	}
+}
+
+func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "file", Title: "Root.pdf", NodeEditTime: "100", HasChild: true},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "300"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	resourceID := "space1:nt-root"
+	items, err := NewConnector().FetchAll(context.Background(), makeConfig(cfg, []string{resourceID}), []string{resourceID})
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("want selected root and child only, got %d: %+v", len(items), items)
+	}
+
+	got := make(map[string]types.FetchedItem)
+	for _, item := range items {
+		got[item.ExternalID] = item
+	}
+	if _, ok := got["nt-root"]; !ok {
+		t.Fatal("selected root node was not fetched")
+	}
+	if _, ok := got["nt-child"]; !ok {
+		t.Fatal("child node was not fetched")
+	}
+	if _, ok := got["nt-peer"]; ok {
+		t.Fatal("peer outside selected subtree must not be fetched")
+	}
+	if got["nt-root"].SourceResourceID != resourceID || got["nt-child"].SourceResourceID != resourceID {
+		t.Fatalf("SourceResourceID should preserve selected resource id: %+v", got)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // FetchIncremental tests
 // ──────────────────────────────────────────────────────────────────────
@@ -645,6 +884,86 @@ func TestFetchIncremental_NoResourceIDs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no resource IDs") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestFetchIncremental_ChildNodeListErrorReturnsPartialItemsAndCursor(t *testing.T) {
+	nodes := []wikiNode{
+		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
+	}
+	ts, cfg := fakeFeishuWithChildFailure(nodes, "nt-parent")
+	defer ts.Close()
+
+	items, cursor, err := NewConnector().FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
+	if err != nil {
+		t.Fatalf("FetchIncremental must not abort when one child listing fails: %v", err)
+	}
+	if cursor == nil {
+		t.Fatal("expected cursor to be returned after partial sync")
+	}
+	if len(items) != 3 {
+		t.Fatalf("want 3 items (2 fetched + 1 failure placeholder), got %d: %+v", len(items), items)
+	}
+
+	var placeholder *types.FetchedItem
+	for i := range items {
+		if items[i].Metadata["error"] != "" {
+			placeholder = &items[i]
+			break
+		}
+	}
+	if placeholder == nil {
+		t.Fatal("expected a failure placeholder for the child listing error")
+	}
+	if placeholder.Metadata["node_token"] != "nt-parent" {
+		t.Errorf("placeholder node_token = %q", placeholder.Metadata["node_token"])
+	}
+}
+
+func TestFetchIncremental_ChildNodeListErrorDoesNotDeletePreviouslySeenChildren(t *testing.T) {
+	firstNodes := []wikiNode{
+		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+	}
+	firstChildren := map[string][]wikiNode{
+		"nt-parent": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "150"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(firstNodes, firstChildren, "")
+
+	firstItems, cursor, err := NewConnector().FetchIncremental(context.Background(), makeConfig(cfg, []string{"space1"}), nil)
+	if err != nil {
+		t.Fatalf("first sync error: %v", err)
+	}
+	if len(firstItems) != 2 {
+		t.Fatalf("want 2 first-sync items, got %d", len(firstItems))
+	}
+	ts.Close()
+
+	secondNodes := []wikiNode{
+		{NodeToken: "nt-parent", ObjToken: "obj-parent", ObjType: "file", Title: "Parent.pdf", NodeEditTime: "100", HasChild: true},
+	}
+	ts2, cfg2 := fakeFeishuHierarchy(secondNodes, nil, "nt-parent")
+	defer ts2.Close()
+
+	items, nextCursor, err := NewConnector().FetchIncremental(context.Background(), makeConfig(cfg2, []string{"space1"}), cursor)
+	if err != nil {
+		t.Fatalf("partial second sync error: %v", err)
+	}
+	for _, item := range items {
+		if item.IsDeleted {
+			t.Fatalf("partial child listing must not mark previously seen children as deleted: %+v", item)
+		}
+	}
+
+	cursorBytes, _ := json.Marshal(nextCursor.ConnectorCursor)
+	var restored feishuCursor
+	if err := json.Unmarshal(cursorBytes, &restored); err != nil {
+		t.Fatalf("restore cursor: %v", err)
+	}
+	if restored.SpaceNodeTimes["space1"]["nt-child"] != "150" {
+		t.Fatalf("partial sync should preserve previous child cursor entry, got %+v", restored.SpaceNodeTimes["space1"])
 	}
 }
 

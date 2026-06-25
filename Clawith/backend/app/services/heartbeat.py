@@ -13,9 +13,14 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from loguru import logger
-from sqlalchemy import select, update
+
+from app.core.logging_config import new_trace_id
+from sqlalchemy import select, update, or_
+from app.services.storage import agent_storage_key, get_storage_backend
 
 from app.services.llm.finish import FINISH_PROTOCOL_REMINDER, find_finish_call, parse_tool_arguments
+
+_HEARTBEAT_SEMAPHORE = asyncio.Semaphore(10)
 
 # Default heartbeat instruction used when HEARTBEAT.md doesn't exist
 DEFAULT_HEARTBEAT_INSTRUCTION = """[Heartbeat Check]
@@ -134,8 +139,10 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
     during long-running LLM calls:
       Phase 1: Read agent, model, context, notifications → commit
       Phase 2: LLM tool loop (no DB connection held)
-      Phase 3: Write token usage + last_heartbeat_at → commit
+      Phase 3: Write token usage → commit
     """
+    new_trace_id()
+    await _HEARTBEAT_SEMAPHORE.acquire()
     try:
         from app.database import async_session
         from app.models.agent import Agent
@@ -184,15 +191,12 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
             model_request_timeout = getattr(model, 'request_timeout', None)
 
             # Read HEARTBEAT.md if it exists, otherwise use default
-            from pathlib import Path
-            from app.config import get_settings
-            settings = get_settings()
-
-            ws_root = Path(settings.AGENT_DATA_DIR) / str(agent_id)
-            hb_file = ws_root / "HEARTBEAT.md"
-            if hb_file.exists():
+            storage = get_storage_backend()
+            hb_key = agent_storage_key(agent_id, "HEARTBEAT.md")
+            if await storage.exists(hb_key):
                 try:
-                    custom = hb_file.read_text(encoding="utf-8", errors="replace").strip()
+                    custom = await storage.read_text(hb_key, encoding="utf-8", errors="replace")
+                    custom = custom.strip()
                     if custom:
                         # Prepend privacy rules to custom heartbeat
                         heartbeat_instruction = custom + """
@@ -291,6 +295,7 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
         plaza_posts_made = 0       # hard limit: 1 new post per heartbeat
         plaza_comments_made = 0    # hard limit: 2 comments per heartbeat
         _hb_accumulated_usage = None
+        _hb_unsaved_usage = None
 
         # Token tracking helpers
         from app.services.token_tracker import (
@@ -300,6 +305,7 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
             estimate_token_usage_from_chars,
         )
         _hb_accumulated_usage = TokenUsage()
+        _hb_unsaved_usage = TokenUsage()
 
         # Convert messages to LLMMessage format
         llm_messages = [
@@ -308,6 +314,21 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
         ]
 
         for round_i in range(20):  # More rounds for search + write + plaza
+            # Check token usage limit mid-loop (every 3 rounds)
+            if round_i > 0 and round_i % 3 == 0:
+                if agent_id and _hb_unsaved_usage.total_tokens > 0:
+                    async with async_session() as db:
+                        await record_token_usage(agent_id, _hb_unsaved_usage)
+                        await db.commit()
+                    _hb_unsaved_usage = TokenUsage()
+                    from app.services.llm.caller import _get_agent_config
+                    _, _token_limit_msg = await _get_agent_config(agent_id)
+                    if _token_limit_msg:
+                        logger.warning(f"[Heartbeat] Token limit exceeded mid-loop: {_token_limit_msg}")
+                        await client.close()
+                        reply = _token_limit_msg
+                        break
+
             try:
                 response = await client.complete(
                     messages=llm_messages,
@@ -326,11 +347,11 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
 
             # Track tokens for this round
             usage = extract_token_usage(response.usage)
-            if usage:
-                _hb_accumulated_usage.add(usage)
-            else:
+            if not usage:
                 round_chars = sum(len(m.content or '') for m in llm_messages) + len(response.content or '')
-                _hb_accumulated_usage.add(estimate_token_usage_from_chars(round_chars))
+                usage = estimate_token_usage_from_chars(round_chars)
+            _hb_accumulated_usage.add(usage)
+            _hb_unsaved_usage.add(usage)
 
             if response.tool_calls:
                 # Add assistant message with tool calls
@@ -419,16 +440,8 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
         # ── Phase 3: Write results back to DB (short transaction) ──
         async with async_session() as db:
             # Record accumulated heartbeat token usage
-            if _hb_accumulated_usage and _hb_accumulated_usage.total_tokens > 0:
-                await record_token_usage(agent_id, _hb_accumulated_usage)
-
-            # Update last_heartbeat_at
-            # Using an update statement is safer to avoid state drift if the object was updated elsewhere
-            await db.execute(
-                update(Agent)
-                .where(Agent.id == agent_id)
-                .values(last_heartbeat_at=datetime.now(timezone.utc))
-            )
+            if _hb_unsaved_usage and _hb_unsaved_usage.total_tokens > 0:
+                await record_token_usage(agent_id, _hb_unsaved_usage)
             await db.commit()
 
         # Log activity if not empty
@@ -445,6 +458,8 @@ async def _execute_heartbeat(agent_id: uuid.UUID):
 
     except Exception as e:
         logger.exception(f"Heartbeat error for agent {agent_id}: {e}")
+    finally:
+        _HEARTBEAT_SEMAPHORE.release()
 
 
 async def _heartbeat_tick():
@@ -455,6 +470,7 @@ async def _heartbeat_tick():
     from app.services.timezone_utils import get_agent_timezone_sync
     from app.models.tenant import Tenant
 
+    new_trace_id()
     now = datetime.now(timezone.utc)
 
     try:
@@ -498,14 +514,41 @@ async def _heartbeat_tick():
                 if agent.last_heartbeat_at and (now - agent.last_heartbeat_at) < interval:
                     continue
 
-                # Fire heartbeat
+                # Atomically claim this heartbeat slot before scheduling work.
+                claim_result = await db.execute(
+                    update(Agent)
+                    .where(
+                        Agent.id == agent.id,
+                        Agent.heartbeat_enabled == True,
+                        Agent.status.in_(["running", "idle"]),
+                        or_(
+                            Agent.last_heartbeat_at.is_(None),
+                            Agent.last_heartbeat_at <= now - interval,
+                        ),
+                    )
+                    .values(last_heartbeat_at=now)
+                )
+                if (claim_result.rowcount or 0) != 1:
+                    continue
+
+                await db.commit()
+
+                # Fire heartbeat only after the DB claim has been committed.
                 logger.info(f"💓 Triggering heartbeat for {agent.name}")
-                await write_audit_log("heartbeat_fire", {"agent_name": agent.name}, agent_id=agent.id)
+                try:
+                    await write_audit_log("heartbeat_fire", {"agent_name": agent.name}, agent_id=agent.id)
+                except Exception as e:
+                    logger.warning(f"Failed to write heartbeat_fire audit log for {agent.name}: {e}")
                 asyncio.create_task(_execute_heartbeat(agent.id))
                 triggered += 1
 
+            await db.commit()
+
             if triggered:
-                await write_audit_log("heartbeat_tick", {"eligible_agents": len(agents), "triggered": triggered})
+                try:
+                    await write_audit_log("heartbeat_tick", {"eligible_agents": len(agents), "triggered": triggered})
+                except Exception as e:
+                    logger.warning(f"Failed to write heartbeat_tick audit log: {e}")
 
     except Exception as e:
         logger.exception(f"Heartbeat tick error: {e}")
@@ -565,6 +608,7 @@ async def run_agent_oneshot(
 
     Returns the final reply string (for logging purposes).
     """
+    new_trace_id()
     try:
         from app.database import async_session
         from app.models.agent import Agent
@@ -660,8 +704,25 @@ async def run_agent_oneshot(
 
         reply = ""
         accumulated_usage = TokenUsage()
+        unsaved_usage = TokenUsage()
 
         for round_i in range(max_rounds):
+            # Check token usage limit mid-loop (every 3 rounds)
+            if round_i > 0 and round_i % 3 == 0:
+                if agent_id and unsaved_usage.total_tokens > 0:
+                    try:
+                        await record_token_usage(agent_id, unsaved_usage)
+                    except Exception as e:
+                        logger.warning(f"[Oneshot] Failed to record token usage mid-loop: {e}")
+                    unsaved_usage = TokenUsage()
+                    from app.services.llm.caller import _get_agent_config
+                    _, _token_limit_msg = await _get_agent_config(agent_id)
+                    if _token_limit_msg:
+                        logger.warning(f"[Oneshot] Token limit exceeded mid-loop: {_token_limit_msg}")
+                        await client.close()
+                        reply = _token_limit_msg
+                        break
+
             try:
                 response = await client.complete(
                     messages=llm_messages,
@@ -686,11 +747,11 @@ async def run_agent_oneshot(
 
             # Track token usage
             usage = extract_token_usage(response.usage)
-            if usage:
-                accumulated_usage.add(usage)
-            else:
+            if not usage:
                 round_chars = sum(len(m.content or "") for m in llm_messages) + len(response.content or "")
-                accumulated_usage.add(estimate_token_usage_from_chars(round_chars))
+                usage = estimate_token_usage_from_chars(round_chars)
+            accumulated_usage.add(usage)
+            unsaved_usage.add(usage)
 
             if response.tool_calls:
                 llm_messages.append(LLMMessage(
@@ -742,9 +803,9 @@ async def run_agent_oneshot(
         await client.close()
 
         # ── Phase 3: Record token usage (best-effort) ───────────────────────────
-        if accumulated_usage.total_tokens > 0:
+        if unsaved_usage.total_tokens > 0:
             try:
-                await record_token_usage(agent_id, accumulated_usage)
+                await record_token_usage(agent_id, unsaved_usage)
             except Exception as e:
                 logger.warning(f"[Oneshot] Failed to record token usage: {e}")
 

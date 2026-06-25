@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+apps/webui/dist/
+apps/webui/.vite/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Dev artifacts
+.dev/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

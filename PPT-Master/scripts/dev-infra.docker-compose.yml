@@ -1,0 +1,32 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pptmaster-dev-postgres
+    ports:
+      - "5992:5432"
+    environment:
+      POSTGRES_USER: pptmaster
+      POSTGRES_PASSWORD: pptmaster_dev
+      POSTGRES_DB: pptmaster
+    volumes:
+      - pptmaster-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pptmaster"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  converter:
+    image: gotenberg/gotenberg:8
+    container_name: pptmaster-dev-converter
+    ports:
+      - "5993:3000"
+    command:
+      - gotenberg
+      - --api-port=3000
+      - --api-timeout=300s
+
+volumes:
+  pptmaster-dev-pgdata:

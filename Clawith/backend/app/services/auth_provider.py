@@ -19,6 +19,7 @@ from app.core.security import create_access_token, hash_password
 from app.models.identity import IdentityProvider
 from app.models.user import User, Identity
 from app.services.google_workspace_oauth import GOOGLE_HTTP_PROXY
+from app.services.identity_provider_lookup import get_preferred_identity_provider
 from loguru import logger
 
 
@@ -137,7 +138,7 @@ class BaseAuthProvider(ABC):
             # Update user info and ensure identity is loaded
             if not user.identity_id:
                  from app.services.registration_service import registration_service
-                 identity = await registration_service.find_or_create_identity(db, email=user_info.email, phone=user_info.mobile)
+                 identity = await registration_service.find_or_create_identity(email=user_info.email, phone=user_info.mobile)
                  user.identity_id = identity.id
             
             await self._update_existing_user(db, user, user_info)
@@ -158,7 +159,7 @@ class BaseAuthProvider(ABC):
 
         # SSO users should also appear as Web members for tenant-side user management.
         from app.services.registration_service import registration_service
-        await registration_service.ensure_web_org_member(db, user)
+        await registration_service.ensure_web_org_member(user)
 
         return user, is_new
 
@@ -167,12 +168,11 @@ class BaseAuthProvider(ABC):
         if self.provider:
             return self.provider
 
-        query = select(IdentityProvider).where(IdentityProvider.provider_type == self.provider_type)
-        if tenant_id:
-            query = query.where(IdentityProvider.tenant_id == tenant_id)
-            
-        result = await db.execute(query)
-        provider = result.scalar_one_or_none()
+        provider = await get_preferred_identity_provider(
+            db,
+            self.provider_type,
+            tenant_id,
+        )
 
         if not provider:
             provider = IdentityProvider(
@@ -219,7 +219,6 @@ class BaseAuthProvider(ABC):
         effective_id = user_info.provider_user_id or user_info.provider_union_id or "unknown"
         
         identity = await registration_service.find_or_create_identity(
-            db,
             email=user_info.email,
             phone=user_info.mobile,
             username=user_info.email.split("@")[0] if user_info.email else None,
@@ -801,7 +800,7 @@ class GoogleAuthProvider(BaseAuthProvider):
         return f"{self.GOOGLE_AUTHORIZE_URL}?{urlencode(params)}"
 
     async def exchange_code_for_token(self, code: str, redirect_uri: str | None = None) -> dict:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, proxy=GOOGLE_HTTP_PROXY) as client:
             resp = await client.post(
                 self.GOOGLE_TOKEN_URL,
                 data={
@@ -819,7 +818,7 @@ class GoogleAuthProvider(BaseAuthProvider):
             return data
 
     async def get_user_info(self, access_token: str) -> ExternalUserInfo:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, proxy=GOOGLE_HTTP_PROXY) as client:
             resp = await client.get(
                 self.GOOGLE_USER_INFO_URL,
                 headers={"Authorization": f"Bearer {access_token}"},

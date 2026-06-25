@@ -176,20 +176,26 @@ type ToolResult struct {
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {
-	ID         string                 `json:"id"`                   // Function call ID from LLM
-	Name       string                 `json:"name"`                 // Tool name
-	Args       map[string]interface{} `json:"args"`                 // Tool arguments
-	Result     *ToolResult            `json:"result"`               // Execution result (contains Output)
-	Reflection string                 `json:"reflection,omitempty"` // Agent's reflection on this tool call result (if enabled)
-	Duration   int64                  `json:"duration"`             // Execution time in milliseconds
+	ID               string                 `json:"id"`                          // Function call ID from LLM
+	Name             string                 `json:"name"`                        // Tool name
+	Args             map[string]interface{} `json:"args"`                        // Tool arguments
+	Result           *ToolResult            `json:"result"`                      // Execution result (contains Output)
+	Reflection       string                 `json:"reflection,omitempty"`        // Agent's reflection on this tool call result (if enabled)
+	Duration         int64                  `json:"duration"`                    // Execution time in milliseconds
+	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
 }
 
 // AgentStep represents one iteration of the ReAct loop
 type AgentStep struct {
-	Iteration int        `json:"iteration"`  // Iteration number (0-indexed)
-	Thought   string     `json:"thought"`    // LLM's reasoning/thinking (Think phase)
-	ToolCalls []ToolCall `json:"tool_calls"` // Tools called in this step (Act phase)
-	Timestamp time.Time  `json:"timestamp"`  // When this step occurred
+	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
+	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// ReasoningContent stores the OpenAI-protocol reasoning_content emitted by the
+	// model in this round. Persisted on AgentStep so cross-turn replay can put it
+	// back on the assistant message — required by MiMo / DeepSeek V3.2+ thinking
+	// mode, ignored by providers that don't recognize the field.
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls"` // Tools called in this step (Act phase)
+	Timestamp        time.Time  `json:"timestamp"`  // When this step occurred
 }
 
 // GetObservations returns observations from all tool calls in this step

@@ -38,23 +38,16 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'tag-change', item: KnowledgeItem, value: string): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
 }>();
 
 const { t } = useI18n();
-const UNTAGGED_TAG_VALUE = '__untagged__';
-const isTreeMode = computed(() => props.mode === 'tree');
 
 const tagMap = computed(() => {
   const map: Record<string, Tag> = {};
   for (const tag of props.tagList) map[String(tag.id)] = tag;
   return map;
 });
-const tagDropdownOptions = computed(() => [
-  { content: t('knowledgeBase.untagged'), value: UNTAGGED_TAG_VALUE },
-  ...props.tagList.map((tag) => ({ content: tag.name, value: String(tag.id) })),
-]);
 const getTagName = (tagId?: string | number) => {
   if (!tagId && tagId !== 0) return '';
   return tagMap.value[String(tagId)]?.name || '';
@@ -97,12 +90,30 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
   if (item.parse_status === 'pending' || item.parse_status === 'processing') {
     return { label: t('knowledgeBase.statusProcessing'), theme: 'primary', icon: 'loading', spin: true };
   }
+  // finalizing = primary parse done, enrichment subtasks still running.
+  // While in this phase, prefer the specific "summary generating" copy
+  // when summary is what's actually outstanding (preserves the old UX
+  // where this label was tied to completed+summary_pending). Otherwise
+  // fall back to the generic "finalizing" label — covers question gen
+  // and graph extract, which the user historically had no visibility on.
+  if (item.parse_status === 'finalizing') {
+    if (item.summary_status === 'pending' || item.summary_status === 'processing') {
+      return { label: t('knowledgeBase.generatingSummary'), theme: 'primary', icon: 'loading', spin: true };
+    }
+    return { label: t('knowledgeBase.statusFinalizing'), theme: 'primary', icon: 'loading', spin: true };
+  }
   if (item.parse_status === 'failed') {
     return { label: t('knowledgeBase.statusFailed'), theme: 'danger', icon: 'close-circle' };
+  }
+  if (item.parse_status === 'cancelled') {
+    return { label: t('knowledgeBase.statusCancelled'), theme: 'warning', icon: 'close-circle' };
   }
   if (item.parse_status === 'draft') {
     return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
   }
+  // Legacy completed+summary_pending path: kept as a defensive fallback
+  // for rows that bypassed finalizing (no enrichment configured, or
+  // upgraded mid-flight from a pre-finalizing build).
   if (
     item.parse_status === 'completed' &&
     (item.summary_status === 'pending' || item.summary_status === 'processing')
@@ -161,15 +172,22 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem) => {
+// Cancellable parse statuses mirror the backend CancelKnowledgeParse
+// gate: pending / processing / finalizing all surface the stop entry,
+// while completed / failed / cancelled / deleting hide it.
+const CANCELABLE_PARSE_STATUSES = new Set(['pending', 'processing', 'finalizing']);
+const canCancelParse = (item: KnowledgeItem) =>
+  CANCELABLE_PARSE_STATUSES.has(String(item.parse_status ?? ''));
+
+const isParseInFlight = (item: KnowledgeItem) => canCancelParse(item);
+
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
   moreOpen.value = null;
   item.isMore = false;
   emit('action', action, item);
 };
 
-const handleTagChange = (item: KnowledgeItem, value: string) => {
-  emit('tag-change', item, value);
-};
+const isTreeMode = computed(() => props.mode === 'tree');
 
 interface TreeFolderNode {
   key: string;
@@ -403,7 +421,7 @@ const treeRows = computed<TreeRow[]>(() => {
                 size="small"
                 :checked="selectedIds.has(row.item.id)"
                 :title="row.item.file_name"
-                @change="(c: boolean) => onRowCheckboxChange(row.item, c)"
+                @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(row.item, c, ctx)"
               />
             </div>
 
@@ -424,21 +442,11 @@ const treeRows = computed<TreeRow[]>(() => {
               </div>
             </div>
 
-            <div class="cell cell-tag" @click.stop>
-              <t-dropdown
-                v-if="canEdit && (tagList.length > 0 || row.item.tag_id != null)"
-                :options="tagDropdownOptions"
-                trigger="click"
-                @click="(data: any) => handleTagChange(row.item, String(data.value ?? ''))"
-              >
-                <t-tag size="small" variant="light-outline" class="row-tag row-tag-trigger">
-                  {{ getTagName(row.item.tag_id) || t('knowledgeBase.untagged') }}
-                </t-tag>
-              </t-dropdown>
-              <t-tag v-else-if="getTagName(row.item.tag_id)" size="small" variant="light-outline" class="row-tag">
+            <div class="cell cell-tag">
+              <t-tag v-if="getTagName(row.item.tag_id)" size="small" variant="light-outline" class="row-tag">
                 {{ getTagName(row.item.tag_id) }}
               </t-tag>
-              <span v-else class="row-muted">{{ t('knowledgeBase.untagged') }}</span>
+              <span v-else class="row-muted">--</span>
             </div>
 
             <div class="cell cell-source">
@@ -495,18 +503,59 @@ const treeRows = computed<TreeRow[]>(() => {
                       <t-icon class="icon" name="edit" />
                       <span>{{ t('knowledgeBase.editDocument') }}</span>
                     </div>
-                    <div class="row-menu-item" @click.stop="handleAction('reparse', row.item)">
+                    <div
+                      v-if="isParseInFlight(row.item)"
+                      class="row-menu-item"
+                      @click.stop="handleAction('reparse', row.item)"
+                    >
                       <t-icon class="icon" name="refresh" />
                       <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                     </div>
+                    <t-popconfirm
+                      v-else
+                      theme="warning"
+                      :content="t('knowledgeBase.rebuildConfirm', { fileName: row.item.file_name || '' })"
+                      :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="handleAction('reparse', row.item)"
+                    >
+                      <div class="row-menu-item" @click.stop>
+                        <t-icon class="icon" name="refresh" />
+                        <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                      </div>
+                    </t-popconfirm>
+                    <t-popconfirm
+                      v-if="canCancelParse(row.item)"
+                      theme="warning"
+                      :content="t('knowledgeBase.cancelParseConfirmBody', { title: row.item.file_name || row.item.id })"
+                      :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="handleAction('cancel-parse', row.item)"
+                    >
+                      <div class="row-menu-item danger" @click.stop>
+                        <t-icon class="icon" name="close-circle" />
+                        <span>{{ t('knowledgeBase.cancelParse') }}</span>
+                      </div>
+                    </t-popconfirm>
                     <div class="row-menu-item" @click.stop="handleAction('move', row.item)">
                       <t-icon class="icon" name="swap" />
                       <span>{{ t('knowledgeBase.moveDocument') }}</span>
                     </div>
-                    <div class="row-menu-item danger" @click.stop="handleAction('delete', row.item)">
-                      <t-icon class="icon" name="delete" />
-                      <span>{{ t('knowledgeBase.deleteDocument') }}</span>
-                    </div>
+                    <t-popconfirm
+                      theme="warning"
+                      :content="t('knowledgeBase.confirmDeleteDocument', { fileName: row.item.file_name || '' })"
+                      :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+                      :cancel-btn="{ content: t('common.cancel') }"
+                      placement="left"
+                      @confirm="handleAction('delete', row.item)"
+                    >
+                      <div class="row-menu-item danger" @click.stop>
+                        <t-icon class="icon" name="delete" />
+                        <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                      </div>
+                    </t-popconfirm>
                   </div>
                 </template>
               </t-popup>
@@ -516,127 +565,159 @@ const treeRows = computed<TreeRow[]>(() => {
       </template>
 
       <template v-else>
-        <div
-          v-for="item in items"
-          :key="item.id"
-          class="doc-list-row"
-          :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }"
-          role="row"
-          @click="emit('open', item)"
-        >
-          <div class="cell cell-check" @click.stop>
-            <t-checkbox
-              class="doc-list-check"
+      <div
+        v-for="item in items"
+        :key="item.id"
+        class="doc-list-row"
+        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }"
+        :data-select-id="item.id"
+        role="row"
+        @click="emit('open', item)"
+      >
+        <div class="cell cell-check" @click.stop>
+          <t-checkbox
+            class="doc-list-check"
+            size="small"
+            :checked="selectedIds.has(item.id)"
+            :title="item.file_name"
+            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)"
+          />
+        </div>
+
+        <div class="cell cell-name">
+          <span class="row-file-icon-wrap">
+            <t-icon :name="getFileIcon(item)" />
+          </span>
+          <div class="row-file-text">
+            <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+            <span
+              v-if="item.description"
+              class="row-file-desc"
+              :title="item.description"
+            >{{ item.description }}</span>
+          </div>
+        </div>
+
+
+        <div class="cell cell-tag">
+          <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
+            {{ getTagName(item.tag_id) }}
+          </t-tag>
+          <span v-else class="row-muted">--</span>
+        </div>
+
+        <div class="cell cell-source">
+          <t-icon class="row-source-icon" :name="getSourceInfo(item).icon" />
+          <span class="row-source-label">{{ getSourceInfo(item).label }}</span>
+        </div>
+
+        <div class="cell cell-size">
+          <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
+        </div>
+
+        <div class="cell cell-status">
+          <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
+            <t-tag
+              v-if="statusByRow.get(item.id)!.label !== '--'"
               size="small"
-              :checked="selectedIds.has(item.id)"
-              :title="item.file_name"
-              @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)"
-            />
-          </div>
-
-          <div class="cell cell-name">
-            <span class="row-file-icon-wrap">
-              <t-icon :name="getFileIcon(item)" />
-            </span>
-            <div class="row-file-text">
-              <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
-              <span
-                v-if="item.description"
-                class="row-file-desc"
-                :title="item.description"
-              >{{ item.description }}</span>
-            </div>
-          </div>
-
-
-          <div class="cell cell-tag" @click.stop>
-            <t-dropdown
-              v-if="canEdit && (tagList.length > 0 || item.tag_id != null)"
-              :options="tagDropdownOptions"
-              trigger="click"
-              @click="(data: any) => handleTagChange(item, String(data.value ?? ''))"
+              :theme="statusByRow.get(item.id)!.theme"
+              variant="light-outline"
+              class="row-status-tag"
             >
-              <t-tag size="small" variant="light-outline" class="row-tag row-tag-trigger">
-                {{ getTagName(item.tag_id) || t('knowledgeBase.untagged') }}
-              </t-tag>
-            </t-dropdown>
-            <t-tag v-else-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
-              {{ getTagName(item.tag_id) }}
+              <template v-if="statusByRow.get(item.id)!.icon" #icon>
+                <t-icon
+                  :name="statusByRow.get(item.id)!.icon!"
+                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }"
+                />
+              </template>
+              {{ statusByRow.get(item.id)!.label }}
             </t-tag>
-            <span v-else class="row-muted">{{ t('knowledgeBase.untagged') }}</span>
-          </div>
+            <span v-else class="row-muted">--</span>
+          </template>
+        </div>
 
-          <div class="cell cell-source">
-            <t-icon class="row-source-icon" :name="getSourceInfo(item).icon" />
-            <span class="row-source-label">{{ getSourceInfo(item).label }}</span>
-          </div>
+        <div class="cell cell-time">
+          <span class="row-mono">{{ formatTime(item.updated_at) }}</span>
+        </div>
 
-          <div class="cell cell-size">
-            <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
-          </div>
-
-          <div class="cell cell-status">
-            <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
-              <t-tag
-                v-if="statusByRow.get(item.id)!.label !== '--'"
-                size="small"
-                :theme="statusByRow.get(item.id)!.theme"
-                variant="light-outline"
-                class="row-status-tag"
-              >
-                <template v-if="statusByRow.get(item.id)!.icon" #icon>
-                  <t-icon
-                    :name="statusByRow.get(item.id)!.icon!"
-                    :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }"
-                  />
-                </template>
-                {{ statusByRow.get(item.id)!.label }}
-              </t-tag>
-              <span v-else class="row-muted">--</span>
-            </template>
-          </div>
-
-          <div class="cell cell-time">
-            <span class="row-mono">{{ formatTime(item.updated_at) }}</span>
-          </div>
-
-          <div class="cell cell-actions" v-if="canEdit" @click.stop>
-            <t-popup
-              placement="bottom-right"
-              trigger="click"
-              destroy-on-close
-              :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)"
-            >
-              <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button" :aria-label="t('knowledgeBase.columnActions')">
-                <t-icon name="more" size="16px" />
-              </button>
-              <template #content>
-                <div class="row-menu">
-                  <div
-                    v-if="item.type === 'manual'"
-                    class="row-menu-item"
-                    @click.stop="handleAction('edit', item)"
-                  >
-                    <t-icon class="icon" name="edit" />
-                    <span>{{ t('knowledgeBase.editDocument') }}</span>
-                  </div>
-                  <div class="row-menu-item" @click.stop="handleAction('reparse', item)">
+        <div class="cell cell-actions" v-if="canEdit" @click.stop>
+          <t-popup
+            placement="bottom-right"
+            trigger="click"
+            destroy-on-close
+            :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)"
+          >
+            <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button" :aria-label="t('knowledgeBase.columnActions')">
+              <t-icon name="more" size="16px" />
+            </button>
+            <template #content>
+              <div class="row-menu">
+                <div
+                  v-if="item.type === 'manual'"
+                  class="row-menu-item"
+                  @click.stop="handleAction('edit', item)"
+                >
+                  <t-icon class="icon" name="edit" />
+                  <span>{{ t('knowledgeBase.editDocument') }}</span>
+                </div>
+                <div
+                  v-if="isParseInFlight(item)"
+                  class="row-menu-item"
+                  @click.stop="handleAction('reparse', item)"
+                >
+                  <t-icon class="icon" name="refresh" />
+                  <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                </div>
+                <t-popconfirm
+                  v-else
+                  theme="warning"
+                  :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || '' })"
+                  :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+                  :cancel-btn="{ content: t('common.cancel') }"
+                  placement="left"
+                  @confirm="handleAction('reparse', item)"
+                >
+                  <div class="row-menu-item" @click.stop>
                     <t-icon class="icon" name="refresh" />
                     <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                   </div>
-                  <div class="row-menu-item" @click.stop="handleAction('move', item)">
-                    <t-icon class="icon" name="swap" />
-                    <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                </t-popconfirm>
+                <t-popconfirm
+                  v-if="canCancelParse(item)"
+                  theme="warning"
+                  :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.id })"
+                  :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('common.cancel') }"
+                  placement="left"
+                  @confirm="handleAction('cancel-parse', item)"
+                >
+                  <div class="row-menu-item danger" @click.stop>
+                    <t-icon class="icon" name="close-circle" />
+                    <span>{{ t('knowledgeBase.cancelParse') }}</span>
                   </div>
-                  <div class="row-menu-item danger" @click.stop="handleAction('delete', item)">
+                </t-popconfirm>
+                <div class="row-menu-item" @click.stop="handleAction('move', item)">
+                  <t-icon class="icon" name="swap" />
+                  <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                </div>
+                <t-popconfirm
+                  theme="warning"
+                  :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
+                  :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('common.cancel') }"
+                  placement="left"
+                  @confirm="handleAction('delete', item)"
+                >
+                  <div class="row-menu-item danger" @click.stop>
                     <t-icon class="icon" name="delete" />
                     <span>{{ t('knowledgeBase.deleteDocument') }}</span>
                   </div>
-                </div>
-              </template>
-            </t-popup>
-          </div>
+                </t-popconfirm>
+              </div>
+            </template>
+          </t-popup>
         </div>
+      </div>
       </template>
     </div>
   </div>
@@ -754,6 +835,58 @@ const treeRows = computed<TreeRow[]>(() => {
   }
 }
 
+.tree-cell {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.tree-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.tree-item-wrap {
+  gap: 8px;
+}
+
+.tree-toggle-btn {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.tree-folder-icon {
+  background: color-mix(in srgb, var(--td-warning-color-1) 60%, var(--td-bg-color-secondarycontainer));
+  color: var(--td-warning-color-6);
+}
+
+.tree-leaf-spacer {
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.tree-folder-count {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
 .cell {
   display: flex;
   align-items: center;
@@ -771,11 +904,6 @@ const treeRows = computed<TreeRow[]>(() => {
 .cell-name {
   gap: 10px;
   font-family: var(--app-font-family);
-}
-
-.tree-cell {
-  padding-top: 8px;
-  padding-bottom: 8px;
 }
 
 .cell-size,
@@ -853,53 +981,6 @@ const treeRows = computed<TreeRow[]>(() => {
   color: var(--td-text-color-placeholder);
 }
 
-.tree-name-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-}
-
-.tree-item-wrap {
-  gap: 8px;
-}
-
-.tree-toggle-btn {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    color: var(--td-text-color-primary);
-  }
-}
-
-.tree-folder-icon {
-  background: color-mix(in srgb, var(--td-warning-color-1) 60%, var(--td-bg-color-secondarycontainer));
-  color: var(--td-warning-color-6);
-}
-
-.tree-leaf-spacer {
-  width: 20px;
-  flex-shrink: 0;
-}
-
-.tree-folder-count {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-
 .cell-source {
   gap: 6px;
   min-width: 0;
@@ -928,10 +1009,6 @@ const treeRows = computed<TreeRow[]>(() => {
     max-width: 120px;
     display: inline-block;
   }
-}
-
-.row-tag-trigger {
-  cursor: pointer;
 }
 
 .row-muted {

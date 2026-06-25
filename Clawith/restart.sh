@@ -109,6 +109,52 @@ wait_for_port() {
     return 1
 }
 
+# Run a command detached from this shell session so Vite survives stdin close in
+# agent-managed terminals.
+start_detached() {
+    local cwd=$1 log_file=$2 pid_file=$3
+    shift 3
+    python3 - "$cwd" "$log_file" "$pid_file" "$@" <<'PY'
+import os
+import sys
+
+cwd, log_file, pid_file, *cmd = sys.argv[1:]
+if not cmd:
+    raise SystemExit("missing command")
+
+first_pid = os.fork()
+if first_pid:
+    os._exit(0)
+
+os.setsid()
+
+second_pid = os.fork()
+if second_pid:
+    os._exit(0)
+
+os.chdir(cwd)
+os.umask(0o022)
+
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+os.makedirs(os.path.dirname(pid_file), exist_ok=True)
+
+fd_in = os.open(os.devnull, os.O_RDONLY)
+fd_out = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+os.dup2(fd_in, 0)
+os.dup2(fd_out, 1)
+os.dup2(fd_out, 2)
+if fd_in > 2:
+    os.close(fd_in)
+if fd_out > 2:
+    os.close(fd_out)
+
+with open(pid_file, "w", encoding="utf-8") as f:
+    f.write(str(os.getpid()))
+
+os.execvpe(cmd[0], cmd, os.environ.copy())
+PY
+}
+
 # ═══════════════════════════════════════════════════════
 # 添加 PostgreSQL 到 PATH
 # ═══════════════════════════════════════════════════════
@@ -199,9 +245,8 @@ start_backend() {
 start_frontend() {
     echo -e "${YELLOW}🚀 Starting frontend...${NC}"
     cd "$FRONTEND_DIR"
-    nohup node_modules/.bin/vite --host 0.0.0.0 --port $FRONTEND_PORT \
-        > "$FRONTEND_LOG" 2>&1 &
-    echo $! > "$FRONTEND_PID"
+    start_detached "$FRONTEND_DIR" "$FRONTEND_LOG" "$FRONTEND_PID" \
+        env CI=true BACKEND_PORT=$BACKEND_PORT node_modules/.bin/vite --host 0.0.0.0 --port $FRONTEND_PORT --strictPort
     wait_for_port $FRONTEND_PORT "Frontend" 8
 }
 

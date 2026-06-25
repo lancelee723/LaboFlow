@@ -11,6 +11,10 @@
 !Clawith/**
 !WeKnora/
 !WeKnora/**
+!PPT-Master/
+!PPT-Master/**
+!Pro Slides/
+!Pro Slides/**
 # Only track ragflow docker config + build files, NOT the full 5.1GB source
 !ragflow/
 ragflow/*
@@ -92,6 +96,7 @@ build/
 # Docker
 **/.dockerignore
 !ragflow/.dockerignore
+!PPT-Master/.dockerignore
 docker-compose.override.yml
 
 # Data & Storage
@@ -119,3 +124,8 @@ docker-compose.override.yml
 *.tgz
 *.lock
 *.log
+
+# ── PPT-Master sub-allowlist (overrides earlier Python/lockfile patterns) ──
+!PPT-Master/apps/webui/src/lib/
+!PPT-Master/apps/webui/src/lib/**
+!PPT-Master/apps/worker/uv.lock

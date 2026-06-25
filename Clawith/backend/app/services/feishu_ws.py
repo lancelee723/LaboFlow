@@ -28,6 +28,11 @@ else:
     _PROXY_PATCH_AVAILABLE = False
 
 
+_ACTIVE_PROBE_INTERVAL_SECONDS = 15.0
+_ACTIVE_PROBE_TIMEOUT_SECONDS = 5.0
+_ACTIVE_PROBE_FAILURE_THRESHOLD = 2
+
+
 def _make_no_proxy_connect(orig_connect):
     """Return a drop-in replacement for websockets.connect that forces proxy=None.
 
@@ -203,8 +208,7 @@ class FeishuWSManager:
             # Import here to avoid circular dependencies
             from app.api.feishu import process_feishu_event
 
-            async with async_session() as db:
-                await process_feishu_event(agent_id, body_dict, db)
+            await process_feishu_event(agent_id, body_dict)
 
         except Exception as e:
             logger.exception(f"[Feishu WS] Error processing event for {agent_id}: {e}")
@@ -220,6 +224,16 @@ class FeishuWSManager:
         if not _HAS_LARK:
             logger.warning("[Feishu WS] lark-oapi not installed, cannot start client")
             return
+
+        # Monkeypatch lark-oapi global event loop to use the current running event loop.
+        # This is critical because lark-oapi initializes 'loop = asyncio.get_event_loop()'
+        # at module import time, which refers to a dead loop in FastAPI/Uvicorn processes.
+        try:
+            import lark_oapi.ws.client as lark_ws_client
+            lark_ws_client.loop = asyncio.get_running_loop()
+            logger.debug("[Feishu WS] Patched lark_oapi.ws.client.loop with running loop")
+        except Exception as e:
+            logger.warning(f"[Feishu WS] Failed to patch lark-oapi event loop: {e}")
         if not app_id or not app_secret:
             logger.warning(f"[Feishu WS] Missing app_id or app_secret for {agent_id}, skipping")
             return
@@ -257,6 +271,36 @@ class FeishuWSManager:
             if _PROXY_PATCH_AVAILABLE
             else None
         )
+        ping_task: asyncio.Task | None = None
+
+        def _ensure_ping_loop() -> None:
+            nonlocal ping_task
+            if ping_task and not ping_task.done():
+                return
+            ping_task = asyncio.create_task(
+                client._ping_loop(),
+                name=f"feishu-ws-ping-{str(agent_id)[:8]}",
+            )
+
+        def _is_connection_unhealthy(conn) -> bool:
+            return conn is None or bool(getattr(conn, "closed", False))
+
+        async def _run_active_probe(conn) -> tuple[bool, str | None]:
+            ping = getattr(conn, "ping", None)
+            if not callable(ping):
+                return False, "websocket ping() is unavailable"
+
+            try:
+                pong_waiter = await ping()
+                await asyncio.wait_for(
+                    pong_waiter,
+                    timeout=_ACTIVE_PROBE_TIMEOUT_SECONDS,
+                )
+                return True, None
+            except asyncio.TimeoutError:
+                return False, "pong timeout"
+            except Exception as e:
+                return False, str(e)
 
         async def _do_full_connect():
             """Perform a single clean connect + start receive/ping loops.
@@ -269,7 +313,7 @@ class FeishuWSManager:
                     await client._connect()
             else:
                 await client._connect()
-            asyncio.create_task(client._ping_loop())
+            _ensure_ping_loop()
 
         async def _run_async_client():
             try:
@@ -281,34 +325,112 @@ class FeishuWSManager:
             except Exception as e:
                 logger.exception(f"[Feishu WS] Initial connect failed for agent {agent_id}: {e}")
 
-            # Health-watch: only log status changes for diagnostics.
-            # SDK handles reconnect internally via _receive_message_loop → _reconnect.
-            # We do NOT call _connect() or _ping_loop() again to avoid creating
-            # duplicate connections that cause "kicked by new connection".
+            # Health-watch: poll frequently and proactively reconnect when the
+            # SDK stays disconnected for too long, reducing the window where
+            # incoming Feishu events are permanently missed.
             _last_conn_id = getattr(client, "_conn_id", None)
             _was_disconnected = False
+            _disconnected_since: float | None = None
+            _reconnect_backoff = 1.0
+            _next_reconnect_at = 0.0
+            _active_probe_failures = 0
+            _next_active_probe_at = asyncio.get_running_loop().time() + _ACTIVE_PROBE_INTERVAL_SECONDS
             while True:
                 try:
-                    await asyncio.sleep(30)  # Check every 30 seconds
+                    await asyncio.sleep(5)
 
+                    now = asyncio.get_running_loop().time()
                     conn = client._conn
                     curr_conn_id = getattr(client, "_conn_id", None)
+                    connection_unhealthy = _is_connection_unhealthy(conn)
+                    force_manual_reconnect = False
 
-                    if conn is None:
-                        if not _was_disconnected:
+                    if not connection_unhealthy and now >= _next_active_probe_at:
+                        _next_active_probe_at = now + _ACTIVE_PROBE_INTERVAL_SECONDS
+                        probe_ok, probe_error = await _run_active_probe(conn)
+                        if probe_ok:
+                            if _active_probe_failures:
+                                logger.info(
+                                    f"[Feishu WS] Active probe recovered for agent {agent_id} "
+                                    f"(conn_id={curr_conn_id})"
+                                )
+                            _active_probe_failures = 0
+                        else:
+                            _active_probe_failures += 1
+                            suffix = f": {probe_error}" if probe_error else ""
                             logger.warning(
-                                f"[Feishu WS] Connection lost for agent {agent_id} "
-                                f"(last conn_id={_last_conn_id}), "
-                                "waiting for SDK auto-reconnect..."
+                                f"[Feishu WS] Active probe timed out for agent {agent_id} "
+                                f"(conn_id={curr_conn_id}, failure={_active_probe_failures}/"
+                                f"{_ACTIVE_PROBE_FAILURE_THRESHOLD}){suffix}"
                             )
-                            _was_disconnected = True
-                    elif hasattr(conn, 'closed') and conn.closed:
+                            if _active_probe_failures >= _ACTIVE_PROBE_FAILURE_THRESHOLD:
+                                force_manual_reconnect = True
+                    elif connection_unhealthy:
+                        _active_probe_failures = 0
+
+                    if connection_unhealthy or force_manual_reconnect:
+                        if _disconnected_since is None:
+                            _disconnected_since = now
                         if not _was_disconnected:
-                            logger.warning(
-                                f"[Feishu WS] WebSocket closed for agent {agent_id}, "
-                                "waiting for SDK auto-reconnect..."
-                            )
+                            if force_manual_reconnect and not connection_unhealthy:
+                                logger.warning(
+                                    f"[Feishu WS] Active probe failure threshold reached for "
+                                    f"agent {agent_id} (conn_id={curr_conn_id}), preparing "
+                                    "manual reconnect..."
+                                )
+                            else:
+                                logger.warning(
+                                    f"[Feishu WS] Connection lost for agent {agent_id} "
+                                    f"(last conn_id={_last_conn_id}), "
+                                    "waiting for SDK auto-reconnect..."
+                                )
                             _was_disconnected = True
+                        disconnected_for = now - _disconnected_since
+                        if now >= _next_reconnect_at and (
+                            force_manual_reconnect or disconnected_for >= 15
+                        ):
+                            if force_manual_reconnect and not connection_unhealthy:
+                                logger.warning(
+                                    f"[Feishu WS] Active probe timed out for agent {agent_id} "
+                                    f"(conn_id={curr_conn_id}); forcing manual reconnect "
+                                    f"(backoff={int(_reconnect_backoff)}s)"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[Feishu WS] Connection still unhealthy for agent {agent_id} "
+                                    f"after {int(disconnected_for)}s, forcing reconnect "
+                                    f"(backoff={int(_reconnect_backoff)}s)"
+                                )
+                            _next_active_probe_at = now + _ACTIVE_PROBE_INTERVAL_SECONDS
+                            _active_probe_failures = 0
+                            _disconnected_since = now
+
+                            try:
+                                try:
+                                    await client._disconnect()
+                                except Exception:
+                                    pass
+                                await _do_full_connect()
+                                curr_conn_id = getattr(client, "_conn_id", None)
+                                _last_conn_id = curr_conn_id or _last_conn_id
+                                _was_disconnected = False
+                                _disconnected_since = None
+                                _reconnect_backoff = 1.0
+                                _next_reconnect_at = 0.0
+                                _next_active_probe_at = (
+                                    asyncio.get_running_loop().time()
+                                    + _ACTIVE_PROBE_INTERVAL_SECONDS
+                                )
+                                logger.info(
+                                    f"[Feishu WS] Manual reconnect succeeded for agent {agent_id} "
+                                    f"(conn_id={curr_conn_id})"
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"[Feishu WS] Manual reconnect failed for agent {agent_id}: {e}"
+                                )
+                                _next_reconnect_at = now + _reconnect_backoff
+                                _reconnect_backoff = min(_reconnect_backoff * 2, 60)
                     else:
                         if _was_disconnected:
                             logger.info(
@@ -316,6 +438,9 @@ class FeishuWSManager:
                                 f"(new conn_id={curr_conn_id})"
                             )
                             _was_disconnected = False
+                        _disconnected_since = None
+                        _reconnect_backoff = 1.0
+                        _next_reconnect_at = 0.0
                         if curr_conn_id != _last_conn_id and curr_conn_id:
                             logger.info(
                                 f"[Feishu WS] Connection ID changed for agent {agent_id}: "
@@ -324,6 +449,12 @@ class FeishuWSManager:
                             _last_conn_id = curr_conn_id
                 except asyncio.CancelledError:
                     logger.info(f"[Feishu WS] Task cancelled for agent {agent_id}")
+                    if ping_task and not ping_task.done():
+                        ping_task.cancel()
+                        try:
+                            await ping_task
+                        except (Exception, asyncio.CancelledError):
+                            pass
                     try:
                         await client._disconnect()
                     except Exception:
@@ -377,11 +508,17 @@ class FeishuWSManager:
                     logger.warning(f"[Feishu WS] Skipping agent {config.agent_id}: missing credentials")
 
     def status(self) -> dict:
-        """Return status of all active WS tasks."""
-        return {
-            str(aid): not self._tasks[aid].done()
-            for aid in self._tasks
-        }
+        """Return live connection status for all managed Feishu WS clients."""
+        status: dict[str, bool] = {}
+        for aid, task in self._tasks.items():
+            client = self._clients.get(aid)
+            conn = getattr(client, "_conn", None) if client else None
+            status[str(aid)] = (
+                not task.done()
+                and conn is not None
+                and not bool(getattr(conn, "closed", False))
+            )
+        return status
 
 
 feishu_ws_manager = FeishuWSManager()

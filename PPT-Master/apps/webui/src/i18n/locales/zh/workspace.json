@@ -1,0 +1,40 @@
+{
+  "image_panel": {
+    "title": "图片获取",
+    "progress": "{{done}} / {{total}} 完成",
+    "table": {
+      "page": "页码",
+      "filename": "文件名",
+      "method": "方式",
+      "status": "状态"
+    },
+    "method": {
+      "ai": "AI",
+      "web": "网络",
+      "user": "用户",
+      "formula": "公式",
+      "placeholder": "占位符"
+    },
+    "status": {
+      "pending": "等待中",
+      "generating": "生成中...",
+      "searching": "搜索中...",
+      "generated": "已生成",
+      "sourced": "已获取",
+      "existing": "已存在",
+      "placeholder": "占位符",
+      "failed": "失败",
+      "needs_manual": "需手动"
+    },
+    "actions": {
+      "copy_prompt": "复制 Prompt",
+      "retry": "重试",
+      "view_prompt": "查看 Prompt",
+      "view_thumbnail": "查看图片"
+    },
+    "advanced": {
+      "title": "Manifest 详情",
+      "summary": "AI 已生成 {{generated}} / 失败 {{failed}} / 占位符 {{placeholder}}，Web 已获取 {{sourced}}"
+    }
+  }
+}

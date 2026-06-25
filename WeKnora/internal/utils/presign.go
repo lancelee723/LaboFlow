@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,13 +22,14 @@ const (
 )
 
 // getPresignKey returns the HMAC key derived from SYSTEM_AES_KEY.
+// Routes through GetAESKey() so the bytes used to sign presigned URLs
+// are exactly the bytes used for AES-GCM elsewhere — operators rotating
+// between 32-byte ASCII and 64-char hex formats (e.g. moving from a
+// hand-written .env to docker-entrypoint.sh's auto-provisioned key) won't
+// silently desync presign verification from the rest of the crypto stack.
 // Returns nil if the key is not configured or invalid.
 func getPresignKey() []byte {
-	key := os.Getenv("SYSTEM_AES_KEY")
-	if len(key) < 16 {
-		return nil
-	}
-	return []byte(key)
+	return GetAESKey()
 }
 
 // signPayload computes HMAC-SHA256 over the canonical payload string.
@@ -93,6 +93,20 @@ func VerifyFileURLSig(filePath string, tenantID uint64, expiresStr, sig string) 
 	// Verify signature.
 	expected := signPayload(key, filePath, tenantID, expires)
 	return hmac.Equal([]byte(expected), []byte(sig))
+}
+
+// ValidateStoragePathTenant ensures the tenant segment embedded in a provider://
+// storage path matches the authenticated caller's tenant. Cross-tenant access
+// must use /api/v1/files/presigned with an HMAC bound to the resource owner.
+func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
+	pathTenant := ParseTenantIDFromStoragePath(filePath)
+	if pathTenant == 0 {
+		return fmt.Errorf("storage path has no tenant segment")
+	}
+	if pathTenant != tenantID {
+		return fmt.Errorf("storage path tenant mismatch")
+	}
+	return nil
 }
 
 // ParseTenantIDFromStoragePath extracts the tenant ID from a provider:// storage path.

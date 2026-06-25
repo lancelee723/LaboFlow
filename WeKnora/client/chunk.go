@@ -75,19 +75,24 @@ type UpdateChunkRequest struct {
 //   - knowledgeID: Knowledge ID
 //   - page: Page number, starts from 1
 //   - pageSize: Number of items per page
+//   - chunkTypes: Optional chunk type filter (e.g. "text", "image_caption", "image_ocr").
+//     When empty, the server defaults to text chunks only.
 //
 // Returns:
 //   - []Chunk: List of chunks
 //   - int64: Total count
 //   - error: Error information
 func (c *Client) ListKnowledgeChunks(ctx context.Context,
-	knowledgeID string, page int, pageSize int,
+	knowledgeID string, page int, pageSize int, chunkTypes ...string,
 ) ([]Chunk, int64, error) {
 	path := fmt.Sprintf("/api/v1/chunks/%s", knowledgeID)
 
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
+	for _, ct := range chunkTypes {
+		queryParams.Add("chunk_type", ct)
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
 	if err != nil {
@@ -156,7 +161,7 @@ func (c *Client) DeleteChunk(ctx context.Context, knowledgeID string, chunkID st
 
 // GetChunkByIDOnly retrieves a chunk by its ID without requiring knowledge ID
 func (c *Client) GetChunkByIDOnly(ctx context.Context, chunkID string) (*Chunk, error) {
-	path := fmt.Sprintf("/api/v1/chunks/get-by-id/%s", chunkID)
+	path := fmt.Sprintf("/api/v1/chunks/by-id/%s", chunkID)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
 	if err != nil {
 		return nil, err

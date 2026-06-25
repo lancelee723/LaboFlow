@@ -1,0 +1,103 @@
+version: '3.9'
+
+services:
+  pptmaster-nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${PPTMASTER_PORT:-3009}:80"
+    volumes:
+      - ./nginx-standalone.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      pptmaster-webui:
+        condition: service_started
+      pptmaster-worker:
+        condition: service_started
+    networks: [pptmaster]
+
+  pptmaster-webui:
+    image: ${REGISTRY:-}pptmaster-webui:${TAG:-1.0}
+    restart: unless-stopped
+    networks: [pptmaster]
+
+  pptmaster-worker:
+    image: ${REGISTRY:-}pptmaster-worker:${TAG:-1.0}
+    restart: unless-stopped
+    environment:
+      DEPLOYMENT_MODE: standalone
+      DATABASE_URL: postgresql+asyncpg://pptmaster:${POSTGRES_PASSWORD}@pptmaster-postgres:5432/pptmaster
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      JWT_EXP_MINUTES: 1440
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY}
+      PPTMASTER_CONVERTER_URL: http://pptmaster-converter:3000
+      STORAGE_BACKEND: volume
+      STORAGE_ROOT: /data
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3009}
+      PATH_PREFIX: ""
+    volumes:
+      - pptmaster-data:/data
+      - pptmaster-fonts:/usr/share/fonts/custom:ro
+    depends_on:
+      pptmaster-postgres:
+        condition: service_healthy
+      pptmaster-converter:
+        condition: service_started
+      pptmaster-init:
+        condition: service_completed_successfully
+    networks: [pptmaster]
+
+  pptmaster-converter:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-port=3000
+      - --api-timeout=300s
+      - --libreoffice-restart-after=10
+    volumes:
+      - pptmaster-fonts:/usr/share/fonts/custom:ro
+    networks: [pptmaster]
+
+  pptmaster-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pptmaster
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: pptmaster
+    volumes:
+      - pptmaster-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pptmaster"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [pptmaster]
+
+  pptmaster-init:
+    image: ${REGISTRY:-}pptmaster-worker:${TAG:-1.0}
+    restart: "no"
+    command: ["python", "-m", "pptmaster.bootstrap"]
+    environment:
+      DEPLOYMENT_MODE: standalone
+      DATABASE_URL: postgresql+asyncpg://pptmaster:${POSTGRES_PASSWORD}@pptmaster-postgres:5432/pptmaster
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-123456}
+    volumes:
+      - pptmaster-data:/data
+      - pptmaster-fonts:/usr/share/fonts/custom
+    depends_on:
+      pptmaster-postgres:
+        condition: service_healthy
+    networks: [pptmaster]
+
+volumes:
+  pptmaster-postgres-data:
+  pptmaster-data:
+  pptmaster-fonts:
+
+networks:
+  pptmaster:
+    driver: bridge

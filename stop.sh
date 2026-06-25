@@ -22,6 +22,8 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 : "${WEKNORA_FRONTEND_PORT:=8800}"
 : "${WEKNORA_APP_PORT:=8080}"
 : "${AIPPT_PORT:=5173}"
+: "${PPTMASTER_WEBUI_PORT:=5990}"
+: "${PPTMASTER_WORKER_PORT:=5991}"
 
 detect_compose() {
     if docker compose version &>/dev/null; then
@@ -64,8 +66,15 @@ if [ -n "$COMPOSE" ]; then
     echo -e "  ${GREEN}✓${NC} WeKnora Docker infrastructure stopped"
 fi
 
+# Stop PPT-Master docker dependencies (postgres + converter)
+for c in laboflow-pptmaster-postgres laboflow-pptmaster-converter; do
+    if docker ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
+        docker rm -f "$c" >/dev/null 2>&1 && echo -e "  ${GREEN}✓${NC} $c removed"
+    fi
+done
+
 # Final sweep by port — catches orphaned processes
-for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $WEKNORA_FRONTEND_PORT $WEKNORA_APP_PORT $AIPPT_PORT; do
+for port in $NGINX_PORT $CLAWITH_FRONTEND_PORT $CLAWITH_BACKEND_PORT $WEKNORA_FRONTEND_PORT $WEKNORA_APP_PORT $AIPPT_PORT $PPTMASTER_WEBUI_PORT $PPTMASTER_WORKER_PORT; do
     if command -v lsof &>/dev/null; then
         pids=$(lsof -ti:$port 2>/dev/null || true)
         if [ -n "$pids" ]; then

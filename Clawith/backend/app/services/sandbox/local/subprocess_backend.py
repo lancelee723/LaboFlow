@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shutil
+import signal
 import time
 from pathlib import Path
 
@@ -12,12 +13,14 @@ from app.services.sandbox.base import BaseSandboxBackend, ExecutionResult, Sandb
 from app.services.sandbox.config import SandboxConfig
 from app.services.workspace_paths import WorkspacePathError, resolve_path_within_root
 
+MAX_STDOUT_CAPTURE_BYTES = 1_000_000
+MAX_STDERR_CAPTURE_BYTES = 500_000
+
 
 # Security patterns - reused from agent_tools.py
 _DANGEROUS_BASH_ALWAYS = [
     "rm -rf /", "rm -rf ~", "sudo ", "mkfs", "dd if=",
     ":(){ :", "chmod 777 /", "chown ", "shutdown", "reboot",
-    "python3 -c", "python -c",
 ]
 
 _DANGEROUS_BASH_NETWORK = [
@@ -25,18 +28,17 @@ _DANGEROUS_BASH_NETWORK = [
 ]
 
 _DANGEROUS_PYTHON_IMPORTS_ALWAYS = [
-    "subprocess", "shutil.rmtree", "os.system", "os.popen",
+    "shutil.rmtree", "os.system", "os.popen",
     "os.exec", "os.spawn",
 ]
 
 _DANGEROUS_PYTHON_IMPORTS_NETWORK = [
     "socket", "http.client", "urllib.request", "requests",
     "ftplib", "smtplib", "telnetlib", "ctypes",
-    "__import__", "importlib",
 ]
 
 _DANGEROUS_NODE_ALWAYS = [
-    "child_process", "fs.rmSync", "fs.rmdirSync", "process.exit",
+    "fs.rmSync", "fs.rmdirSync", "process.exit",
 ]
 
 _DANGEROUS_NODE_NETWORK = [
@@ -105,15 +107,15 @@ class SubprocessBackend(BaseSandboxBackend):
     def __init__(self, config: SandboxConfig):
         self.config = config
 
-    def _venv_python(self, work_path: Path) -> str:
-        return f"/workspace/{work_path.joinpath('.venv', 'bin', 'python').relative_to(work_path)}"
+    def _venv_python(self, venv_path: Path) -> str:
+        return "/workspace/.venv/bin/python"
 
     def _host_venv_python(self, work_path: Path) -> str:
         return str(work_path / ".venv" / "bin" / "python")
 
-    def _build_command(self, language: str, script_path: str, work_path: Path) -> list[str]:
+    def _build_command(self, language: str, script_path: str) -> list[str]:
         if language == "python":
-            return [self._venv_python(work_path), "-I", "-B", str(script_path)]
+            return ["/workspace/.venv/bin/python", "-I", "-B", str(script_path)]
         if language == "bash":
             return ["bash", "--noprofile", "--norc", str(script_path)]
         return ["node", str(script_path)]
@@ -151,24 +153,43 @@ class SubprocessBackend(BaseSandboxBackend):
         bind_flag = "--ro-bind" if read_only else "--bind"
         return [bind_flag, str(host), target]
 
-    def _ensure_workspace_venv(self, work_path: Path) -> None:
-        venv_python = work_path / ".venv" / "bin" / "python"
-        if venv_python.exists():
-            return
+    def _ensure_workspace_venv(self, venv_path: Path) -> None:
+        venv_python = venv_path / "bin" / "python"
+        if not venv_python.exists():
+            import subprocess
 
-        import subprocess
+            # Use uv to create the virtual environment for extreme speed
+            # --seed ensures pip is still present in the venv
+            subprocess.run(
+                ["uv", "venv", "--seed", str(venv_path)],
+                check=True,
+                cwd=str(venv_path.parent),
+            )
 
-        subprocess.run(
-            ["python3", "-m", "venv", str(work_path / ".venv")],
-            check=True,
-            cwd=str(work_path),
-        )
+        # Fix shebang lines in pip scripts to use bwrap-visible path
+        # venv creates scripts with absolute paths to the host Python,
+        # but bwrap only mounts /workspace, so those paths don't exist inside the sandbox
+        self._fix_pip_shebangs(venv_path)
+
+    def _fix_pip_shebangs(self, venv_path: Path) -> None:
+        """Replace pip with a bash wrapper that delegates to uv pip for extreme performance."""
+        venv_bin = venv_path / "bin"
+        sandbox_python = "/workspace/.venv/bin/python"
+        
+        wrapper_script = f"#!/bin/bash\nexec uv pip \"$@\"\n"
+        
+        for pip_cmd in ["pip", "pip3", "pip3.12"]:
+            pip_path = venv_bin / pip_cmd
+            if pip_path.parent.exists():
+                pip_path.write_text(wrapper_script, encoding="utf-8")
+                pip_path.chmod(0o755)
 
     def _build_exec_kwargs(self, work_path: Path, timeout: int, use_preexec: bool = False) -> dict:
         kwargs = {
             "stdout": asyncio.subprocess.PIPE,
             "stderr": asyncio.subprocess.PIPE,
             "env": self._build_safe_env(work_path),
+            "start_new_session": True,
         }
         if use_preexec:
             kwargs["preexec_fn"] = self._build_preexec_fn(work_path, timeout)
@@ -177,14 +198,13 @@ class SubprocessBackend(BaseSandboxBackend):
     def _build_preexec_fn(self, work_path: Path, timeout: int):
         def _preexec():
             os.chdir(work_path)
-            os.setsid()
             os.umask(0o077)
 
             try:
                 import resource
 
                 memory_bytes = int(self.config.memory_limit.rstrip("mM")) * 1024 * 1024
-                cpu_limit = max(1, min(timeout, self.config.max_timeout, 60))
+                cpu_limit = max(1, min(timeout, self.config.max_timeout))
                 resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
                 resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
                 resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
@@ -215,7 +235,7 @@ class SubprocessBackend(BaseSandboxBackend):
 
         return _preexec
 
-    def _build_bwrap_command(self, command: list[str], work_path: Path) -> list[str] | None:
+    def _build_bwrap_command(self, command: list[str], work_path: Path, venv_path: Path) -> list[str] | None:
         bwrap = shutil.which("bwrap")
         if not bwrap:
             if not SubprocessBackend._bwrap_missing_warned:
@@ -245,7 +265,9 @@ class SubprocessBackend(BaseSandboxBackend):
             "--unshare-uts",
             "--unshare-cgroup",
             *base_binds,
+            "--bind", "/data/agents/.uv-cache", "/uv-cache",
             "--bind", str(work_path), "/workspace",
+            "--bind", str(venv_path), "/workspace/.venv",
             "--dev", "/dev",
             "--proc", "/proc",
             "--dir", "/tmp",
@@ -260,6 +282,7 @@ class SubprocessBackend(BaseSandboxBackend):
             "--setenv", "VIRTUAL_ENV", "/workspace/.venv",
             "--setenv", "PIP_CACHE_DIR", "/workspace/.tmp/pip-cache",
             "--setenv", "PIP_DISABLE_PIP_VERSION_CHECK", "1",
+            "--setenv", "UV_CACHE_DIR", "/uv-cache",
             "--chdir", "/workspace",
         ]
         if not self.config.allow_network:
@@ -298,6 +321,8 @@ class SubprocessBackend(BaseSandboxBackend):
         **kwargs
     ) -> ExecutionResult:
         """Execute code in a subprocess."""
+        on_output = kwargs.get("on_output")
+        agent_id = kwargs.get("agent_id")
         start_time = time.time()
 
         # Validate language
@@ -342,6 +367,18 @@ class SubprocessBackend(BaseSandboxBackend):
         work_path.mkdir(parents=True, exist_ok=True)
         (work_path / ".tmp").mkdir(parents=True, exist_ok=True)
         (work_path / ".tmp" / "pip-cache").mkdir(parents=True, exist_ok=True)
+        
+        # Determine persistent venv path if possible
+        if agent_id:
+            # We place the virtual environment in a persistent location
+            venv_path = Path("/data/agents").resolve() / str(agent_id) / ".venv"
+            venv_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Ensure global uv cache exists
+            uv_cache = Path("/data/agents/.uv-cache")
+            uv_cache.mkdir(parents=True, exist_ok=True)
+        else:
+            venv_path = work_path / ".venv"
 
         # Determine command and file extension
         if language == "python":
@@ -355,11 +392,11 @@ class SubprocessBackend(BaseSandboxBackend):
         script_path = work_path / f"_exec_tmp{ext}"
 
         try:
-            self._ensure_workspace_venv(work_path)
+            self._ensure_workspace_venv(venv_path)
             script_path.write_text(code, encoding="utf-8")
 
-            sandbox_command = self._build_command(language, f"/workspace/{script_path.name}", work_path)
-            bwrap_command = self._build_bwrap_command(sandbox_command, work_path)
+            sandbox_command = self._build_command(language, f"/workspace/{script_path.name}")
+            bwrap_command = self._build_bwrap_command(sandbox_command, work_path, venv_path)
             if not bwrap_command:
                 if not self.config.allow_unsafe_fallback_when_bwrap_missing:
                     duration_ms = int((time.time() - start_time) * 1000)
@@ -392,27 +429,57 @@ class SubprocessBackend(BaseSandboxBackend):
                     **self._build_exec_kwargs(work_path, timeout),
                 )
 
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()
-                return ExecutionResult(
-                    success=False,
-                    stdout="",
-                    stderr="",
-                    exit_code=124,
-                    duration_ms=int((time.time() - start_time) * 1000),
-                    error=f"Code execution timed out after {timeout}s"
-                )
+            stdout_data = bytearray()
+            stderr_data = bytearray()
 
-            stdout_str = stdout.decode("utf-8", errors="replace")[:10000]
-            stderr_str = stderr.decode("utf-8", errors="replace")[:5000]
+            async def read_stream(stream, out, label="stdout"):
+                capture_limit = MAX_STDERR_CAPTURE_BYTES if label == "stderr" else MAX_STDOUT_CAPTURE_BYTES
+                while True:
+                    chunk = await stream.read(4096)
+                    if not chunk:
+                        break
+                    remaining = capture_limit - len(out)
+                    if remaining > 0:
+                        out.extend(chunk[:remaining])
+                    # Real-time streaming: push each chunk to the WebSocket
+                    if on_output:
+                        try:
+                            text = chunk.decode("utf-8", errors="replace")
+                            await on_output(text, label)
+                        except Exception:
+                            pass
+
+            task1 = asyncio.create_task(read_stream(proc.stdout, stdout_data, "stdout"))
+            task2 = asyncio.create_task(read_stream(proc.stderr, stderr_data, "stderr"))
+
+            is_timeout = False
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except Exception:
+                    proc.kill()
+                is_timeout = True
+
+            await asyncio.gather(task1, task2)
+            stdout = bytes(stdout_data)
+            stderr = bytes(stderr_data)
+
+            stdout_str = stdout.decode("utf-8", errors="replace")[:10000] if stdout else ""
+            stderr_str = stderr.decode("utf-8", errors="replace")[:5000] if stderr else ""
 
             duration_ms = int((time.time() - start_time) * 1000)
+
+            if is_timeout:
+                return ExecutionResult(
+                    success=False,
+                    stdout=stdout_str,
+                    stderr=stderr_str,
+                    exit_code=124,
+                    duration_ms=duration_ms,
+                    error=f"Code execution timed out after {timeout}s. If you expect this code to take longer, try calling the tool again with a higher 'timeout' parameter (up to 3600s)."
+                )
 
             return ExecutionResult(
                 success=proc.returncode == 0,

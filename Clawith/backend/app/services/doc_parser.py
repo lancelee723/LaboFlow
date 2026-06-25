@@ -4,7 +4,7 @@ Public API:
     doc_read(path, page_range="", max_chars=50000) -> dict
     doc_extract_tables(path, page_range="") -> dict
 
-All paths are absolute file paths (returned by playwright_browser_download
+All paths are absolute file paths (returned by webbrowser_download
 as `file_id`, or provided directly for uploaded files).
 """
 

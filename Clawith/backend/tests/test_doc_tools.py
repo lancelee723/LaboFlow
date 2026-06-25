@@ -82,3 +82,85 @@ class TestDocExtractTables:
     def test_unsupported_format(self):
         with pytest.raises(DocParseError):
             doc_extract_tables(str(FIX / "sample.md"))
+
+
+# ── workspace-relative path resolution (doc_read/doc_extract_tables dispatcher) ──
+import json
+from uuid import uuid4
+
+from app.services import agent_tools
+from app.services.storage_runtime import facade as storage_facade
+from app.services.storage_runtime.local import LocalStorageBackend
+
+
+@pytest.fixture
+def isolated_local_storage(tmp_path, monkeypatch):
+    """Force the global storage backend and WORKSPACE_ROOT to a clean tmp directory."""
+    backend = LocalStorageBackend(str(tmp_path))
+    monkeypatch.setattr(storage_facade, "_storage_backend", backend)
+    monkeypatch.setattr(agent_tools, "WORKSPACE_ROOT", tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def no_tenant(monkeypatch):
+    async def _none(_agent_id):
+        return None
+    monkeypatch.setattr(agent_tools, "_get_agent_tenant_id", _none)
+
+
+def _seed_uploaded_xlsx(root, agent_id):
+    upload_dir = root / str(agent_id) / "workspace" / "uploads"
+    upload_dir.mkdir(parents=True)
+    target = upload_dir / "sample.xlsx"
+    target.write_bytes((FIX / "sample.xlsx").read_bytes())
+    return target
+
+
+class TestResolveDocPath:
+    async def test_absolute_path_passthrough(self, isolated_local_storage, no_tenant):
+        absolute = str(FIX / "sample.xlsx")
+        resolved = await agent_tools._resolve_doc_path(uuid4(), absolute)
+        assert resolved == absolute
+
+    async def test_workspace_relative_resolves_to_local(self, isolated_local_storage, no_tenant):
+        agent_id = uuid4()
+        target = _seed_uploaded_xlsx(isolated_local_storage, agent_id)
+
+        resolved = await agent_tools._resolve_doc_path(agent_id, "workspace/uploads/sample.xlsx")
+        assert Path(resolved).is_absolute()
+        assert Path(resolved).read_bytes() == target.read_bytes()
+
+    async def test_missing_relative_path_passes_through(self, isolated_local_storage, no_tenant):
+        original = "workspace/uploads/does-not-exist.xlsx"
+        resolved = await agent_tools._resolve_doc_path(uuid4(), original)
+        assert resolved == original
+
+
+class TestDocReadToolWithWorkspacePath:
+    async def test_doc_read_via_workspace_path(self, isolated_local_storage, no_tenant):
+        agent_id = uuid4()
+        _seed_uploaded_xlsx(isolated_local_storage, agent_id)
+
+        out = await agent_tools._doc_read_tool(
+            agent_id, {"file_id_or_path": "workspace/uploads/sample.xlsx"}
+        )
+        assert "❌" not in out
+        assert "Sheet1" in out
+
+    async def test_doc_extract_tables_via_workspace_path(self, isolated_local_storage, no_tenant):
+        agent_id = uuid4()
+        _seed_uploaded_xlsx(isolated_local_storage, agent_id)
+
+        out = await agent_tools._doc_extract_tables_tool(
+            agent_id, {"file_id_or_path": "workspace/uploads/sample.xlsx"}
+        )
+        assert "❌" not in out
+        data = json.loads(out)
+        assert data["count"] == 2
+
+    async def test_doc_read_missing_workspace_path_reports_not_found(self, isolated_local_storage, no_tenant):
+        out = await agent_tools._doc_read_tool(
+            uuid4(), {"file_id_or_path": "workspace/uploads/missing.xlsx"}
+        )
+        assert "file not found" in out

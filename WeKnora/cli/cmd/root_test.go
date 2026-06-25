@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -27,12 +28,18 @@ func TestRoot_Help(t *testing.T) {
 func TestVersion_JSON(t *testing.T) {
 	var out bytes.Buffer
 	root := NewRootCmd(cmdutil.New())
-	root.SetArgs([]string{"version", "--json"})
+	root.SetArgs([]string{"version", "--format", "json"})
 	root.SetOut(&out)
 	require.NoError(t, root.Execute())
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "got: %q", got)
-	assert.Contains(t, got, "version")
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.NotNil(t, env.Data, "envelope.data must be present")
+	assert.Contains(t, got, `"version":`)
 }
 
 // Smoke test for cmdutil.ExitCode wiring; full coverage lives in
@@ -50,18 +57,23 @@ func TestExecute_ExitCodeSurface(t *testing.T) {
 // provides them).
 func TestMapCobraError_PinnedPrefixes(t *testing.T) {
 	t.Run("unknown command", func(t *testing.T) {
+		// With installUnknownSubcommandGuard in place, unknown root-level
+		// subcommands now return a typed *cmdutil.Error (CodeInputUnknownSubcommand)
+		// rather than cobra's legacy "unknown command" text. The cobraFlagErrorPrefixes
+		// fallback remains for any path that bypasses the guard.
 		root := NewRootCmd(cmdutil.New())
 		root.SetArgs([]string{"bogus"})
 		root.SetErr(&bytes.Buffer{})
 		root.SetOut(&bytes.Buffer{})
 		err := root.Execute()
 		require.Error(t, err)
-		assert.True(t, strings.HasPrefix(err.Error(), "unknown command "),
-			"cobra unknown-command prefix changed; update cobraFlagErrorPrefixes. got: %q", err.Error())
+		typed := cmdutil.AsError(err)
+		require.NotNil(t, typed, "expected typed *cmdutil.Error; got %T: %v", err, err)
+		assert.Equal(t, cmdutil.CodeInputUnknownSubcommand, typed.Code)
 	})
 
 	t.Run("required flag(s)", func(t *testing.T) {
-		// Self-contained probe — the pin must hold even before resource commands
+		// Self-contained probe - the pin must hold even before resource commands
 		// register their own required flags. RunE is required: without it cobra
 		// treats the command as a parent and skips ValidateRequiredFlags.
 		probe := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return nil }}
@@ -75,7 +87,7 @@ func TestMapCobraError_PinnedPrefixes(t *testing.T) {
 			"cobra required-flag prefix changed; update cobraFlagErrorPrefixes. got: %q", err.Error())
 	})
 
-	t.Run("accepts N arg(s) — ExactArgs", func(t *testing.T) {
+	t.Run("accepts N arg(s) - ExactArgs", func(t *testing.T) {
 		probe := &cobra.Command{
 			Use:  "probe",
 			Args: cobra.ExactArgs(1),
@@ -109,21 +121,33 @@ func TestMapCobraError(t *testing.T) {
 		var fe *cmdutil.FlagError
 		assert.True(t, errors.As(err, &fe))
 	})
+	t.Run("pflag invalid argument wraps as FlagError", func(t *testing.T) {
+		// pflag emits: `invalid argument "foo" for "--limit" flag`
+		err := MapCobraError(errors.New(`invalid argument "foo" for "--limit" flag: strconv.ParseInt: parsing "foo": invalid syntax`))
+		var fe *cmdutil.FlagError
+		assert.True(t, errors.As(err, &fe), "pflag-shaped invalid argument should become FlagError")
+	})
+	t.Run("domain invalid argument does not wrap", func(t *testing.T) {
+		// Domain code writing fmt.Errorf("invalid argument: ...") must NOT become FlagError.
+		err := MapCobraError(errors.New("invalid argument: kb id cannot be empty"))
+		var fe *cmdutil.FlagError
+		assert.False(t, errors.As(err, &fe), "domain-shaped invalid argument must not become FlagError")
+	})
 }
 
-// TestRoot_ContextFlagPropagation guards the cobra → Factory wiring of the
-// global --context flag. Without this, a future refactor that disconnects
-// PersistentPreRun from f.ContextOverride would only fail e2e — the
-// per-package TestFactory_ContextOverride only proves the Factory side.
-func TestRoot_ContextFlagPropagation(t *testing.T) {
+// TestRoot_ProfileFlagPropagation guards the cobra → Factory wiring of the
+// global --profile flag. Without this, a future refactor that disconnects
+// PersistentPreRun from f.ProfileOverride would only fail e2e - the
+// per-package TestFactory_ProfileOverride only proves the Factory side.
+func TestRoot_ProfileFlagPropagation(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"no flag", []string{"version"}, ""},
-		{"global before subcmd", []string{"--context", "staging", "version"}, "staging"},
-		{"--context=value form", []string{"--context=prod", "version"}, "prod"},
+		{"global before subcmd", []string{"--profile", "staging", "version"}, "staging"},
+		{"--profile=value form", []string{"--profile=prod", "version"}, "prod"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,40 +157,35 @@ func TestRoot_ContextFlagPropagation(t *testing.T) {
 			root.SetOut(&bytes.Buffer{})
 			root.SetErr(&bytes.Buffer{})
 			require.NoError(t, root.Execute())
-			assert.Equal(t, tc.want, f.ContextOverride)
+			assert.Equal(t, tc.want, f.ProfileOverride)
 		})
 	}
 }
 
-func TestArgsRequestJSON(t *testing.T) {
+// resolveFormatEarly must default to the JSON envelope when no --format/env is
+// given, so cobra-side errors (unknown flag, arg-count) — which fire before
+// PersistentPreRunE runs ResolveDefault — emit a machine-readable envelope on
+// stderr, not bare prose. Regression for the success-path-defaults-to-json /
+// error-path-defaults-to-prose asymmetry.
+func TestResolveFormatEarly_DefaultsToEnvelope(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		want bool
+		want bool // true ⇒ expect JSON envelope
 	}{
-		{"empty", nil, false},
-		{"--json bare", []string{"version", "--json"}, true},
-		{"--json=true", []string{"version", "--json=true"}, true},
-		{"--json=1", []string{"version", "--json=1"}, true},
-		{"--json=TRUE", []string{"version", "--json=TRUE"}, true},
-		{"--json=false", []string{"version", "--json=false"}, false},
-		{"unrelated", []string{"bogus", "--kb", "x"}, false},
+		{"no format flag (default)", []string{"kb", "view"}, true},
+		{"explicit --format json", []string{"kb", "view", "--format", "json"}, true},
+		{"explicit --format text", []string{"kb", "view", "--format", "text"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, argsRequestJSON(tc.args))
+			resolveFormatEarly(tc.args)
+			err := MapCobraError(errors.New("accepts 1 arg(s), received 0"))
+			var buf bytes.Buffer
+			cmdutil.PrintError(&buf, err)
+			isEnvelope := strings.HasPrefix(strings.TrimSpace(buf.String()), "{")
+			assert.Equal(t, tc.want, isEnvelope,
+				"args=%v: got %q", tc.args, buf.String())
 		})
 	}
-}
-
-func TestWantsJSONOutput(t *testing.T) {
-	// Build a minimal *cobra.Command with the json flag directly so we test
-	// the helper without going through cobra's parse pipeline. WantsJSONOutput
-	// reads cmd.Flags() which on a fresh command equals LocalFlags().
-	c := &cobra.Command{Use: "x"}
-	c.Flags().Bool("json", false, "")
-	assert.False(t, WantsJSONOutput(c), "default: --json unset")
-
-	require.NoError(t, c.Flags().Set("json", "true"))
-	assert.True(t, WantsJSONOutput(c), "--json=true honored")
 }

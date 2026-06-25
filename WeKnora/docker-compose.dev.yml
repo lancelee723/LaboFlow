@@ -35,6 +35,52 @@ services:
     networks:
       - WeKnora-network-dev
 
+  # See docker-compose.yml searxng-init for rationale (avoid in-place rewrite of
+  # the repo-tracked settings.yml by the searxng entrypoint).
+  searxng-init:
+    image: busybox:1.36
+    container_name: WeKnora-searxng-init-dev
+    command: ["sh", "-c", "cp /template/settings.yml /etc/searxng/settings.yml && chmod 0644 /etc/searxng/settings.yml"]
+    volumes:
+      - ./docker/searxng/settings.yml:/template/settings.yml:ro
+      - searxng_config_dev:/etc/searxng
+    restart: "no"
+    networks:
+      - WeKnora-network-dev
+    profiles:
+      - searxng
+      - full
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: WeKnora-searxng-dev
+    # Local dev: bind to loopback by default; the host-side WeKnora process
+    # reaches it at http://127.0.0.1:${SEARXNG_PORT}.
+    ports:
+      - "${SEARXNG_BIND:-127.0.0.1}:${SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - searxng_config_dev:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+      - INSTANCE_NAME=weknora-searxng-dev
+      # See docker-compose.yml for rationale on the default secret.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-weknora-default-searxng-secret-rotate-before-exposing-publicly}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+    depends_on:
+      searxng-init:
+        condition: service_completed_successfully
+    networks:
+      - WeKnora-network-dev
+    profiles:
+      - searxng
+      - full
+
   minio:
     image: minio/minio:latest
     container_name: WeKnora-minio-dev
@@ -72,6 +118,61 @@ services:
     profiles:
       - qdrant
       - full
+
+  # OpenSearch k-NN (Phase 3 driver). Single-node dev profile with the
+  # security plugin disabled → plain HTTP on :9200, no auth/TLS. The image
+  # bundles the opensearch-knn plugin. For production use a secured,
+  # multi-node cluster. See docs/dev/opensearch-integration-test.md.
+  opensearch:
+    image: opensearchproject/opensearch:3.3.2
+    container_name: WeKnora-opensearch-dev
+    environment:
+      - discovery.type=single-node
+      # dev only: plain HTTP on :9200, no TLS/auth. The entrypoint script
+      # honours DISABLE_SECURITY_PLUGIN (env var) to skip both the demo
+      # install and the OPENSEARCH_INITIAL_ADMIN_PASSWORD requirement.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch_data_dev:/usr/share/opensearch/data
+    networks:
+      - WeKnora-network-dev
+    restart: unless-stopped
+    profiles:
+      - opensearch
+      - full
+      # Also a member of opensearch-ui so the Dashboards depends_on resolves
+      # when only that profile is active (`--profile opensearch-ui up`).
+      - opensearch-ui
+
+  # Optional UI for visual index/mapping/query inspection. Decoupled from the
+  # "opensearch" / "full" profiles so the heavy Dashboards container is never
+  # forced up alongside the cluster — the driver e2e is fully curl-verifiable
+  # against :9200. Start it on demand with `--profile opensearch-ui up -d`
+  # (depends_on pulls the cluster in automatically).
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.3.0
+    container_name: WeKnora-opensearch-dashboards-dev
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "${OPENSEARCH_DASHBOARDS_PORT:-5601}:5601"
+    networks:
+      - WeKnora-network-dev
+    depends_on:
+      - opensearch
+    restart: unless-stopped
+    profiles:
+      - opensearch-ui
 
   milvus:
     image: milvusdb/milvus:v2.6.11
@@ -147,12 +248,23 @@ services:
       - docreader-tmp-dev:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
-      - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+      - DOCREADER_ODL_MAX_WORKERS=${DOCREADER_ODL_MAX_WORKERS:-1}
+      - DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID:-off}
+      - DOCREADER_ODL_HYBRID_URL=${DOCREADER_ODL_HYBRID_URL:-http://odl-hybrid:5002}
+      - DOCREADER_ODL_HYBRID_MODE=${DOCREADER_ODL_HYBRID_MODE:-auto}
+      - DOCREADER_ODL_HYBRID_FALLBACK=${DOCREADER_ODL_HYBRID_FALLBACK:-false}
+      - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
       - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-90}
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
@@ -165,30 +277,26 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: WeKnora-jaeger-dev
+  # OpenDataLoader hybrid backend (optional). Enable profile "odl-hybrid" and set
+  # DOCREADER_ODL_HYBRID=docling-fast on docreader. Default --no-ocr (no EasyOCR).
+  # Local build only — not published to Docker Hub.
+  odl-hybrid:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.odl-hybrid
+    image: weknora-odl-hybrid:local
+    container_name: WeKnora-odl-hybrid
+    profiles:
+      - odl-hybrid
     ports:
-      - "6831:6831/udp"
-      - "6832:6832/udp"
-      - "5778:5778"
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
-      - "14250:14250"
-      - "14268:14268"
-      - "9411:9411"
+      - "${ODL_HYBRID_PORT:-5002}:5002"
     environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-    volumes:
-      - jaeger_data_dev:/var/lib/jaeger
+      # Default --no-ocr (digital PDFs). Scanned PDFs: use builtin OCR / MinerU, or
+      # ODL_HYBRID_EXTRA_ARGS="--force-ocr" (needs EasyOCR + libGL in image).
+      - ODL_HYBRID_EXTRA_ARGS=${ODL_HYBRID_EXTRA_ARGS:---no-ocr}
     networks:
       - WeKnora-network-dev
     restart: unless-stopped
-    profiles:
-      - jaeger
-      - full
 
   dex:
     image: dexidp/dex:latest
@@ -414,10 +522,11 @@ volumes:
   redis_data_dev:
   minio_data_dev:
   neo4j-data-dev:
-  jaeger_data_dev:
   qdrant_data_dev:
+  opensearch_data_dev:
   milvus_data_dev:
   docreader-tmp-dev:
   langfuse_clickhouse_data_dev:
   langfuse_clickhouse_logs_dev:
   langfuse_minio_data_dev:
+  searxng_config_dev:

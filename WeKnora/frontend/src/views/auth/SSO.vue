@@ -13,36 +13,13 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { post } from '@/utils/request'
+import { loginWithSSOToken, userInfoFromApi } from '@/api/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const loading = ref(true)
 const error = ref('')
-
-interface SSOLoginResponse {
-  success: boolean
-  message?: string
-  user?: {
-    id: string
-    username: string
-    email: string
-    avatar?: string
-    tenant_id: number
-    can_access_all_tenants?: boolean
-    is_active: boolean
-    created_at: string
-    updated_at: string
-  }
-  tenant?: {
-    id: number
-    name: string
-    api_key: string
-  }
-  token?: string
-  refresh_token?: string
-}
 
 onMounted(async () => {
   try {
@@ -55,44 +32,38 @@ onMounted(async () => {
       return
     }
 
-    const response = await post('/api/v1/auth/sso/clawith', { token }) as SSOLoginResponse
+    const response = await loginWithSSOToken(token)
 
-    if (!response.success) {
+    if (!response.success || !response.token) {
       error.value = response.message || 'SSO authentication failed'
       loading.value = false
       return
     }
 
-    // Store auth data (tenant may be missing if SYSTEM_AES_KEY is not configured)
-    if (response.user && response.token) {
-      authStore.setUser({
-        id: response.user.id || '',
-        username: response.user.username || '',
-        email: response.user.email || '',
-        avatar: response.user.avatar,
-        tenant_id: String(response.user.tenant_id || response.tenant?.id || ''),
-        can_access_all_tenants: response.user.can_access_all_tenants || false,
-        created_at: response.user.created_at || new Date().toISOString(),
-        updated_at: response.user.updated_at || new Date().toISOString()
-      })
-      authStore.setToken(response.token)
-      if (response.refresh_token) {
-        authStore.setRefreshToken(response.refresh_token)
-      }
-      if (response.tenant) {
-        authStore.setTenant({
-          id: String(response.tenant.id) || '',
-          name: response.tenant.name || '',
-          api_key: response.tenant.api_key || '',
-          owner_id: response.user.id || '',
-          created_at: response.tenant.created_at || new Date().toISOString(),
-          updated_at: response.tenant.updated_at || new Date().toISOString()
-        })
-      }
+    authStore.setToken(response.token)
+    if (response.refresh_token) {
+      authStore.setRefreshToken(response.refresh_token)
     }
 
-    // Redirect to main page
-    router.push('/platform/knowledge-bases')
+    const tenant = (response as any).tenant ?? (response as any).active_tenant
+    if (response.user) {
+      authStore.setUser(userInfoFromApi(response.user as any, tenant?.id))
+    }
+    if (tenant) {
+      authStore.setTenant({
+        id: String(tenant.id) || '',
+        name: tenant.name || '',
+        api_key: tenant.api_key || '',
+        owner_id: tenant.owner_id || response.user?.id || '',
+        created_at: tenant.created_at || new Date().toISOString(),
+        updated_at: tenant.updated_at || new Date().toISOString()
+      })
+    }
+    if (Array.isArray((response as any).memberships)) {
+      authStore.setMemberships((response as any).memberships)
+    }
+
+    router.replace('/platform/knowledge-bases')
   } catch (err: any) {
     error.value = err.message || 'SSO authentication failed'
     loading.value = false

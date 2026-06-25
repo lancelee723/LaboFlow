@@ -1,0 +1,173 @@
+version: '3.9'
+
+# =============================================================================
+# PPT-Master WebUI — Production single-host deployment
+#
+# Usage:
+#   cp .env.production.example .env.production  # fill in secrets
+#   docker compose -f production.docker-compose.yml up -d
+#
+# Secrets: sourced from .env.production (NOT committed)
+# TLS certs: mounted from /opt/pptmaster/certs/ on the host
+#   /opt/pptmaster/certs/fullchain.pem
+#   /opt/pptmaster/certs/privkey.pem
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pptmaster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-pptmaster}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pptmaster}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [pptmaster]
+
+  # ---------------------------------------------------------------------------
+  # Document converter (Gotenberg / LibreOffice)
+  # ---------------------------------------------------------------------------
+  converter:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-port=3000
+      - --api-timeout=300s
+      - --libreoffice-restart-after=10
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [pptmaster]
+
+  # ---------------------------------------------------------------------------
+  # Bootstrap (one-shot init: alembic migrate + admin user creation)
+  # ---------------------------------------------------------------------------
+  init:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: "no"
+    command: >
+      bash -c "
+        alembic upgrade head &&
+        python -m pptmaster.bootstrap
+      "
+    env_file: .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY}
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
+      DEPLOYMENT_MODE: standalone
+    volumes:
+      - project_storage:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [pptmaster]
+
+  # ---------------------------------------------------------------------------
+  # Worker (FastAPI / uvicorn)
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      JWT_EXP_MINUTES: ${JWT_EXP_MINUTES:-1440}
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY}
+      DEPLOYMENT_MODE: standalone
+      STORAGE_BACKEND: volume
+      STORAGE_ROOT: /data
+      PPTMASTER_CONVERTER_URL: http://converter:3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      PPTMASTER_SCRIPTS_DIR: ${PPTMASTER_SCRIPTS_DIR:-/opt/pptmaster-skill/scripts}
+      PPTMASTER_TEMPLATES_DIR: ${PPTMASTER_TEMPLATES_DIR:-/opt/pptmaster-skill/templates}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+    volumes:
+      - project_storage:/data
+      - worker_logs:/var/log/pptmaster
+    depends_on:
+      postgres:
+        condition: service_healthy
+      converter:
+        condition: service_started
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSk http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [pptmaster]
+
+  # ---------------------------------------------------------------------------
+  # WebUI (Vite build served by nginx)
+  # ---------------------------------------------------------------------------
+  webui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.webui
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [pptmaster]
+
+  # ---------------------------------------------------------------------------
+  # Nginx — TLS termination + reverse proxy
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx-production.conf:/etc/nginx/nginx.conf:ro
+      - /opt/pptmaster/certs:/etc/nginx/certs:ro
+    depends_on:
+      worker:
+        condition: service_healthy
+      webui:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks: [pptmaster]
+
+volumes:
+  pg_data:
+  project_storage:
+  worker_logs:
+
+networks:
+  pptmaster:
+    driver: bridge
