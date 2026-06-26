@@ -13,7 +13,7 @@ set -o pipefail
 # 示例: crpi-xxxxx.cn-guangzhou.personal.cr.aliyuncs.com/laboflow
 REGISTRY="crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow"
 
-# 默认镜像 tag（可在菜单里覆盖）
+# 默认镜像 tag 示例（仅作输入提示；每次构建必须显式输入符合 SemVer X.Y.Z 的版本号）
 DEFAULT_TAG="1.0.0"
 
 # Linux apt 源地址（仅影响 Dockerfile 内 Debian/apt 源，不影响 Docker 镜像源）
@@ -405,6 +405,40 @@ filter_redundant_images() {
   done
 }
 
+# 严格 SemVer 三段式校验（X.Y.Z）
+validate_semver() {
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+# Git 短 SHA（非 git 环境返回空）
+git_short_sha() {
+  ( cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null ) || true
+}
+
+# 工作目录是否含未提交修改（仅检查已跟踪文件）
+git_is_dirty() {
+  ( cd "$REPO_ROOT" && ! git diff-index --quiet HEAD -- 2>/dev/null )
+}
+
+# 循环提示输入合法 SemVer tag；结果写入全局 TAG_INPUT
+# 用户输入 0 时返回 1（取消）；输入合法版本号时返回 0
+prompt_semver_tag() {
+  TAG_INPUT=""
+  while :; do
+    prompt "镜像 tag（X.Y.Z 格式，例 ${DEFAULT_TAG}；输入 0 返回）："
+    read -r TAG_INPUT
+    [[ "$TAG_INPUT" == "0" ]] && return 1
+    if [[ -z "$TAG_INPUT" ]]; then
+      err "tag 不能为空"
+      continue
+    fi
+    if validate_semver "$TAG_INPUT"; then
+      return 0
+    fi
+    err "tag 必须符合 SemVer 三段式 (X.Y.Z)，例如 1.2.3"
+  done
+}
+
 # ============================================================
 # 构建 / 推送核心
 # ============================================================
@@ -427,11 +461,28 @@ build_image() {
   if [[ -n "$REGISTRY" ]]; then
     registry_prefix="${REGISTRY%/}/"
   fi
-  local full_tag="${registry_prefix}docker-${name}:${tag}"
-  local minor_tag="${registry_prefix}docker-${name}:${tag%.*}"
-  local latest_tag="${registry_prefix}docker-${name}:latest"
+  # SemVer 三段式 → 四档浮动 + 一档 git SHA 追溯
+  #   X.Y.Z       完整版本（不可变）
+  #   X.Y         minor 浮动（compose 默认 ${TAG:-1.0} 消费此 tag）
+  #   X           major 浮动
+  #   latest      整体最新
+  #   X.Y.Z-<sha> commit 级追溯（dirty 工作区追加 -dirty 后缀）
+  local base="${registry_prefix}docker-${name}"
+  local full_tag="${base}:${tag}"
+  local minor_tag="${base}:${tag%.*}"
+  local major_tag="${base}:${tag%%.*}"
+  local latest_tag="${base}:latest"
+
+  local sha sha_tag=""
+  sha=$(git_short_sha)
+  if [[ -n "$sha" ]]; then
+    local sha_suffix="$sha"
+    git_is_dirty && sha_suffix="${sha}-dirty"
+    sha_tag="${base}:${tag}-${sha_suffix}"
+  fi
 
   info "构建 ${BOLD}${name}${RESET} → ${full_tag}  [${platforms}]"
+  info "  附加 tag: ${minor_tag##*:}, ${major_tag##*:}, latest${sha_tag:+, ${sha_tag##*:}}"
 
   local args=(buildx build
     --platform "$platforms"
@@ -443,8 +494,9 @@ build_image() {
     --build-arg "DOCKER_MIRROR=$DOCKER_MIRROR"
     --build-arg "GOPROXY_ARG=$GOPROXY"
     -f "$df"
-    -t "$full_tag" -t "$minor_tag" -t "$latest_tag"
+    -t "$full_tag" -t "$minor_tag" -t "$major_tag" -t "$latest_tag"
   )
+  [[ -n "$sha_tag" ]] && args+=( -t "$sha_tag" )
   if [[ "$push_flag" == "push" ]]; then
     args+=(--push)
   else
@@ -549,15 +601,25 @@ action_build() {
   done
 
   print_header
-  prompt "镜像 tag（默认 ${DEFAULT_TAG}）："
-  read -r tag
-  tag="${tag:-$DEFAULT_TAG}"
+  echo "${BOLD}${CYAN}>> 打包本地镜像 / 输入版本号${RESET}"
+  echo
+  prompt_semver_tag || return 0
+  local tag="$TAG_INPUT"
 
   ensure_buildx || { pause_return; return 1; }
 
+  local sha
+  sha=$(git_short_sha)
   echo
   info "目标平台: $platforms"
   info "Tag:      $tag"
+  if [[ -n "$sha" ]]; then
+    if git_is_dirty; then
+      warn "Git: ${sha} (工作区有未提交修改，SHA tag 将带 -dirty 后缀)"
+    else
+      info "Git:      ${sha}"
+    fi
+  fi
   info "镜像列表: ${SELECTED_IMAGES[*]}"
   echo
   prompt "确认开始构建？(y/N):"
@@ -644,16 +706,24 @@ action_push() {
     [[ $rc -eq 0 ]] && break
   done
 
-  prompt "镜像 tag（默认 ${DEFAULT_TAG}）："
-  read -r tag
-  tag="${tag:-$DEFAULT_TAG}"
+  prompt_semver_tag || return 0
+  local tag="$TAG_INPUT"
 
   ensure_buildx || { pause_return; return 1; }
 
+  local sha
+  sha=$(git_short_sha)
   echo
   info "仓库: $REGISTRY"
   info "平台: $platforms"
   info "Tag:  $tag"
+  if [[ -n "$sha" ]]; then
+    if git_is_dirty; then
+      warn "Git: ${sha} (工作区有未提交修改 — 不建议作为正式发布版本推送)"
+    else
+      info "Git:  ${sha}"
+    fi
+  fi
   info "镜像: ${SELECTED_IMAGES[*]}"
   info "模式: 重新构建并直接推送"
   echo

@@ -36,7 +36,7 @@ services:
       - laboflow
 
   clawith-backend:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-backend:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-backend:${TAG:-latest}
     privileged: true
     restart: unless-stopped
     cap_add:
@@ -75,7 +75,7 @@ services:
           - backend
 
   clawith-frontend:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-frontend:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-clawith-frontend:${TAG:-latest}
     restart: unless-stopped
     depends_on:
       - clawith-backend
@@ -85,7 +85,7 @@ services:
   pro-slides:
     build:
       context: "./Pro Slides"
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pro-slides:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pro-slides:${TAG:-latest}
     ports:
       - "7456"
     environment:
@@ -135,7 +135,7 @@ services:
 
   # ── PPT-Master one-shot init (alembic + bootstrap admin) ──
   pptmaster-init:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-latest}
     restart: "no"
     command: >
       sh -c "alembic upgrade head && python -m pptmaster.bootstrap"
@@ -155,7 +155,7 @@ services:
 
   # ── PPT-Master worker (FastAPI + LangGraph + skill bundle) ──
   pptmaster-worker:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-worker:${TAG:-latest}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${PPTMASTER_POSTGRES_USER:-pptmaster}:${PPTMASTER_POSTGRES_PASSWORD:-pptmaster}@pptmaster-postgres:5432/${PPTMASTER_POSTGRES_DB:-pptmaster}
@@ -190,7 +190,7 @@ services:
 
   # ── PPT-Master webui (nginx static SPA) ──
   pptmaster-webui:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-webui:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-pptmaster-webui:${TAG:-latest}
     restart: unless-stopped
     depends_on:
       - pptmaster-worker
@@ -211,7 +211,7 @@ services:
       dockerfile: docker/Dockerfile.app
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-app:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-app:${TAG:-latest}
     environment:
       # SSO: must match Clawith's JWT_SECRET_KEY
       JWT_SECRET: ${JWT_SECRET_KEY:-change-me-jwt-secret}
@@ -223,7 +223,7 @@ services:
 
   # One-shot migration: runs on every deploy, idempotent (no-op when up-to-date)
   weknora-migrate:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-app:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-app:${TAG:-latest}
     container_name: WeKnora-migrate
     entrypoint: ["sh", "-c"]
     command:
@@ -247,7 +247,7 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-docreader:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-docreader:${TAG:-latest}
 
   # Override WeKnora's frontend with LaboFlow custom build (/kb/ base path).
   # Same service name as the included WeKnora/docker-compose.yml so it takes
@@ -256,7 +256,7 @@ services:
     build:
       context: ./WeKnora/frontend
       dockerfile: Dockerfile.laboflow
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-frontend:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-weknora-frontend:${TAG:-latest}
     container_name: WeKnora-frontend
     ports:
       - "${WEKNORA_FRONTEND_PORT:-8800}:80"
@@ -286,7 +286,7 @@ services:
       - full
 
   nginx:
-    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-nginx:${TAG:-1.0}
+    image: ${REGISTRY:-crpi-oxztsn6qggvtnlnf.cn-guangzhou.personal.cr.aliyuncs.com/laboflow}/docker-nginx:${TAG:-latest}
     restart: unless-stopped
     ports:
       - "${NGINX_PORT:-3008}:80"
