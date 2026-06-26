@@ -8,6 +8,7 @@ correct LangChain ChatModel class from the protocol.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -19,6 +20,25 @@ from pptmaster.db.models import LLMConfig
 from pptmaster.db.session import get_async_session_factory
 
 logger = logging.getLogger(__name__)
+
+
+# Plumbs the active session_id into get_chat_model() without modifying every
+# call site across agent code. Set by _run_pipeline / _run_pipeline_resume at
+# the top of the pipeline run; ContextVar values inherit into spawned asyncio
+# tasks automatically.
+_active_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "pptmaster_active_session_id", default=None,
+)
+
+
+def set_active_session(session_id: str | None) -> contextvars.Token:
+    """Attach a session_id to the current async context. Returns a token the
+    caller passes to reset_active_session() in a finally block."""
+    return _active_session_id.set(session_id)
+
+
+def reset_active_session(token: contextvars.Token) -> None:
+    _active_session_id.reset(token)
 
 
 async def record_token_usage(
@@ -170,15 +190,30 @@ async def get_chat_model(role: str) -> BaseChatModel:
     """Return a ChatModel instance by querying the DB llm_configs table.
 
     Priority:
-      1. Config with matching role_preference (e.g. strategist)
-      2. Config with is_default = True
-      3. First available config
-      4. Environment variable fallback (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+      1. Active session's llm_config_id (set per-run from the project setup UI)
+      2. Config with matching role_preference (e.g. strategist)
+      3. Config with is_default = True
+      4. First available config
+      5. Environment variable fallback (ANTHROPIC_API_KEY / OPENAI_API_KEY)
     """
     settings = get_settings()
+    active_session_id = _active_session_id.get()
 
     async with get_async_session_factory()() as db:
         from sqlalchemy import select
+
+        # Priority 1: session-scoped override
+        if active_session_id:
+            from pptmaster.db.models import Session as DBSession
+            sess_row = (await db.execute(
+                select(DBSession).where(DBSession.id == active_session_id)
+            )).scalar_one_or_none()
+            if sess_row and sess_row.llm_config_id:
+                cfg = (await db.execute(
+                    select(LLMConfig).where(LLMConfig.id == sess_row.llm_config_id)
+                )).scalar_one_or_none()
+                if cfg:
+                    return build_chat_model_from_config(cfg)
 
         rows = (await db.execute(
             select(LLMConfig)
@@ -245,7 +280,10 @@ def build_chat_model_from_config(config: LLMConfig) -> BaseChatModel:
             api_key=api_key,
             base_url=base_url,
             temperature=0.0,
-            max_tokens=4096,
+            # 16K covers a full Chinese-language SVG slide (~12K chars × ~1.3
+            # tokens/char). 4096 was empirically too small — slides 1+ got cut
+            # off mid-element and rendered as broken-image icons.
+            max_tokens=16384,
         )
 
     # -- Gemini (Google) -----------------------------------------------------
@@ -270,5 +308,5 @@ def build_chat_model_from_config(config: LLMConfig) -> BaseChatModel:
         api_key=api_key or "not-needed",
         base_url=base_url,
         temperature=0.0,
-        max_tokens=4096,
+        max_tokens=16384,
     )

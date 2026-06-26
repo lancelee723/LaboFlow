@@ -72,6 +72,33 @@ async def list_llm_configs(auth: AuthContext = Depends(require_admin)):
         ]
 
 
+class AvailableLLMConfig(BaseModel):
+    id: str
+    provider: str
+    model: str
+    display_name: str | None
+    is_default: bool
+
+
+@router.get("/llm/available", response_model=list[AvailableLLMConfig])
+async def list_available_llm_configs(auth: AuthContext = Depends(get_auth_context)):
+    """Non-admin readable list — populates the project-setup model picker.
+    Excludes endpoint and API key material; safe to expose to all users."""
+    async with open_db_session() as session:
+        result = await session.execute(select(LLMConfig))
+        configs = result.scalars().all()
+        return [
+            AvailableLLMConfig(
+                id=c.id,
+                provider=c.provider,
+                model=c.model,
+                display_name=c.display_name,
+                is_default=c.is_default,
+            )
+            for c in configs
+        ]
+
+
 @router.put("/llm", response_model=LLMConfigResponse, status_code=status.HTTP_201_CREATED)
 async def create_llm_config(
     request: LLMConfigRequest,
@@ -80,6 +107,13 @@ async def create_llm_config(
     from uuid import uuid4
 
     async with open_db_session() as session:
+        if request.is_default:
+            existing = (await session.execute(
+                select(LLMConfig).where(LLMConfig.is_default == True)
+            )).scalars().all()
+            for e in existing:
+                e.is_default = False
+
         config = LLMConfig(
             id=str(uuid4()),
             created_by=auth.user_id,
@@ -158,8 +192,15 @@ async def update_llm_config(
             config.endpoint = request.endpoint
         if request.role_preference is not None:
             config.role_preference = request.role_preference
-        if request.is_default is not None:
-            config.is_default = request.is_default
+        if request.is_default is True and not config.is_default:
+            others = (await session.execute(
+                select(LLMConfig).where(LLMConfig.is_default == True, LLMConfig.id != config_id)
+            )).scalars().all()
+            for e in others:
+                e.is_default = False
+            config.is_default = True
+        elif request.is_default is False:
+            config.is_default = False
         if request.display_name is not None:
             config.display_name = request.display_name
 

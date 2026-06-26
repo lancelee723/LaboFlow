@@ -368,8 +368,13 @@ if [ "$PPT_MASTER_ENABLED" = true ]; then
         ok "Reusing existing PPT-Master postgres: $PPTMASTER_PG_CONTAINER on :$PPTMASTER_POSTGRES_PORT"
     else
         log "Starting PPT-Master postgres on :$PPTMASTER_POSTGRES_PORT (docker) ..."
+        # Named volume `laboflow-pptmaster-pgdata` survives `docker rm -f` of
+        # the container, so admin-configured rows (llm_configs, image_backend_
+        # configs, etc.) persist across `./dev.sh` reruns. Without this, the
+        # pre-flight cleanup wipes every per-user setting on each restart.
         docker run -d --name laboflow-pptmaster-postgres \
             -p "$PPTMASTER_POSTGRES_PORT:5432" \
+            -v laboflow-pptmaster-pgdata:/var/lib/postgresql/data \
             -e POSTGRES_USER="$PPTMASTER_POSTGRES_USER" \
             -e POSTGRES_PASSWORD="$PPTMASTER_POSTGRES_PASSWORD" \
             -e POSTGRES_DB="$PPTMASTER_POSTGRES_DB" \

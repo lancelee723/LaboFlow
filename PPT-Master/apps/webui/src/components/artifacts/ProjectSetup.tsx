@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Upload, FileText, Link2, Trash2, Play } from "lucide-react"
@@ -16,11 +16,19 @@ interface SourceArtifact {
   created_at: string
 }
 
+interface AvailableLLMConfig {
+  id: string
+  provider: string
+  model: string
+  display_name: string | null
+  is_default: boolean
+}
+
 const ACCEPT_TYPES = ".pdf,.docx,.xlsx,.xlsm,.pptx,.md,.txt"
 
 interface ProjectSetupProps {
   projectId: string
-  onSubmit: (userBrief: string) => void
+  onSubmit: (userBrief: string, llmConfigId: string | null) => void
   isStarting?: boolean
 }
 
@@ -33,11 +41,25 @@ export function ProjectSetup({ projectId, onSubmit, isStarting }: ProjectSetupPr
   const [isDragging, setIsDragging] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [selectedLlmId, setSelectedLlmId] = useState<string>("")
 
   const { data: sources } = useQuery({
     queryKey: ["sources", projectId],
     queryFn: () => apiFetch<SourceArtifact[]>(`/api/projects/${projectId}/sources`),
   })
+
+  const { data: llmConfigs } = useQuery({
+    queryKey: ["llm-configs-available"],
+    queryFn: () => apiFetch<AvailableLLMConfig[]>("/api/settings/llm/available"),
+  })
+
+  // Default to the system default; otherwise leave blank (= "use system default"
+  // routing, which still falls back to role_preference / is_default on backend).
+  useEffect(() => {
+    if (!llmConfigs || selectedLlmId) return
+    const def = llmConfigs.find((c) => c.is_default)
+    if (def) setSelectedLlmId(def.id)
+  }, [llmConfigs, selectedLlmId])
 
   const handleFiles = async (files: FileList) => {
     setBusy(true)
@@ -104,6 +126,28 @@ export function ProjectSetup({ projectId, onSubmit, isStarting }: ProjectSetupPr
           value={brief}
           onChange={e => setBrief(e.target.value)}
         />
+      </div>
+
+      <div>
+        <label className="text-sm font-medium">{t("projectSetup_llmLabel")}</label>
+        {llmConfigs && llmConfigs.length === 0 ? (
+          <p className="mt-2 text-xs text-muted-foreground">{t("projectSetup_llmNone")}</p>
+        ) : (
+          <select
+            className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={selectedLlmId}
+            onChange={(e) => setSelectedLlmId(e.target.value)}
+            disabled={!llmConfigs || llmConfigs.length === 0}
+          >
+            <option value="">{t("projectSetup_llmUseDefault")}</option>
+            {(llmConfigs ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {(c.display_name || `${c.provider}/${c.model}`) +
+                  (c.is_default ? ` · ${t("projectSetup_llmDefaultBadge")}` : "")}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div>
@@ -174,7 +218,11 @@ export function ProjectSetup({ projectId, onSubmit, isStarting }: ProjectSetupPr
       </div>
 
       <div className="flex justify-end">
-        <Button size="lg" onClick={() => onSubmit(brief.trim())} disabled={isStarting}>
+        <Button
+          size="lg"
+          onClick={() => onSubmit(brief.trim(), selectedLlmId || null)}
+          disabled={isStarting}
+        >
           <Play className="mr-2 h-5 w-5" />
           {isStarting ? t("projectSetup_starting") : brief.trim() ? t("projectSetup_submitPipeline") : t("projectSetup_submitDefaults")}
         </Button>

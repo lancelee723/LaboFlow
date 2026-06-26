@@ -19,6 +19,7 @@ from pptmaster.agent.state import PPTMasterState
 from pptmaster.auth.middleware import AuthContext, get_auth_context, require_creator
 from pptmaster.db.models import Artifact, ChatMessage, Project, Session
 from pptmaster.db.session import open_db_session
+from pptmaster.llm.provider import reset_active_session, set_active_session
 from pptmaster.ws.manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class StartPipelineRequest(BaseModel):
     project_id: str
     source_files: list[str] = []
     user_brief: str = ""
+    llm_config_id: str | None = None
 
 
 class ResumeRequest(BaseModel):
@@ -128,6 +130,7 @@ async def start_pipeline(
             thread_id=thread_id,
             current_step=1,
             is_interrupted=False,
+            llm_config_id=request.llm_config_id,
         )
         session.add(db_session)
 
@@ -209,6 +212,9 @@ async def _run_pipeline(
     config: dict,
 ) -> None:
     """Run the LangGraph pipeline in the background, streaming events via WS."""
+    # Plumb session_id into get_chat_model via ContextVar so user-chosen
+    # llm_config_id (set on the Session row) wins over role/default routing.
+    _llm_ctx_token = set_active_session(session_id)
     try:
         async with compiled_coordinator() as graph:
             last_step = 0
@@ -316,6 +322,8 @@ async def _run_pipeline(
                 if proj:
                     proj.status = "failed"
                 await session.commit()
+    finally:
+        reset_active_session(_llm_ctx_token)
 
 
 async def _run_pipeline_resume(
@@ -325,6 +333,9 @@ async def _run_pipeline_resume(
     config: dict,
 ) -> None:
     """Resume a paused pipeline after user input."""
+    # Same ContextVar plumbing as _run_pipeline so the session's llm_config_id
+    # continues to override role/default routing across resumes.
+    _llm_ctx_token = set_active_session(session_id)
     try:
         async with compiled_coordinator() as graph:
             command = Command(resume=user_response)
@@ -404,3 +415,5 @@ async def _run_pipeline_resume(
                 if proj:
                     proj.status = "failed"
                 await session.commit()
+    finally:
+        reset_active_session(_llm_ctx_token)

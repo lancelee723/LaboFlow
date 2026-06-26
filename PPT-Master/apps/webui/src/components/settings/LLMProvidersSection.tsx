@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, Trash2, Loader2, FlaskConical, Pencil } from "lucide-react"
+import { Plus, Trash2, Loader2, FlaskConical, Pencil, Star } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import { Button } from "@/components/ui/button"
@@ -58,6 +58,8 @@ export function LLMProvidersSection() {
   const [testStates, setTestStates] = useState<
     Record<string, { status: "running" | "ok" | "err"; message?: string; latency?: number }>
   >({})
+  const [defaultBusyId, setDefaultBusyId] = useState<string | null>(null)
+  const [defaultJustSetId, setDefaultJustSetId] = useState<string | null>(null)
 
   type TestState = { status: "idle" | "running" | "ok" | "err"; message?: string; latency?: number }
   const [formTestState, setFormTestState] = useState<TestState>({ status: "idle" })
@@ -107,6 +109,24 @@ export function LLMProvidersSection() {
       queryClient.invalidateQueries({ queryKey: ["llm-configs"] })
     } catch (err) {
       alert(err instanceof Error ? err.message : t("llm_providers.errors.delete_failed"))
+    }
+  }
+
+  const handleSetDefault = async (configId: string) => {
+    setDefaultBusyId(configId)
+    try {
+      await apiFetch(`/api/settings/llm/${configId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_default: true }),
+      })
+      queryClient.invalidateQueries({ queryKey: ["llm-configs"] })
+      queryClient.invalidateQueries({ queryKey: ["llm-configs-available"] })
+      setDefaultJustSetId(configId)
+      setTimeout(() => setDefaultJustSetId(null), 2500)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : t("llm_providers.errors.save_failed"))
+    } finally {
+      setDefaultBusyId(null)
     }
   }
 
@@ -275,6 +295,27 @@ export function LLMProvidersSection() {
                       >
                         ✗ {testStates[cfg.id]?.message}
                       </span>
+                    )}
+                    {defaultJustSetId === cfg.id && (
+                      <span className="text-xs text-green-600">
+                        {t("llm_providers.actions.set_default_done")}
+                      </span>
+                    )}
+                    {!cfg.is_default && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => handleSetDefault(cfg.id)}
+                        disabled={defaultBusyId === cfg.id}
+                        title={t("llm_providers.actions.set_default_title")}
+                      >
+                        {defaultBusyId === cfg.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Star className="h-4 w-4" />
+                        )}
+                      </Button>
                     )}
                     <Button
                       variant="ghost"

@@ -790,8 +790,15 @@ Use it to produce a content-rich, accurate SVG slide. Specific source content fo
                 if svg_start != -1 and svg_end != -1:
                     svg_content = text[svg_start:svg_end + 6]
                     break
-                else:
-                    svg_content = text
+                # Truncated output (no closing tag) — don't accept; let the
+                # loop retry. Keep the partial text only as a last-resort
+                # fallback so the placeholder branch below has something to
+                # log even after both attempts fail.
+                svg_content = text
+                logger.warning(
+                    f"Page {idx} SVG attempt {attempt+1}: missing </svg> "
+                    f"(len={len(text)}), retrying"
+                )
             except Exception as e:
                 logger.warning(f"Page {idx} SVG attempt {attempt+1} failed: {e}")
                 if attempt == 1:
@@ -800,7 +807,10 @@ Use it to produce a content-rich, accurate SVG slide. Specific source content fo
         logger.info("perf_llm_done", extra={"page": page_label, "elapsed_s": round(t_llm_done - t_llm_start, 3)})
 
         # ── SVG validation (extract + structural check) ───────────────────────
-        svg_valid = bool(svg_content and "<svg" in svg_content)
+        # Require BOTH opening and closing tags so truncated LLM output falls
+        # through to the placeholder branch instead of writing a malformed
+        # file that renders as a broken-image icon in the FE workspace.
+        svg_valid = bool(svg_content and "<svg" in svg_content and "</svg>" in svg_content)
         t_validation_done = time.monotonic()
         logger.info("perf_validation_done", extra={"page": page_label, "elapsed_s": round(t_validation_done - t_llm_done, 3), "valid": svg_valid})
 

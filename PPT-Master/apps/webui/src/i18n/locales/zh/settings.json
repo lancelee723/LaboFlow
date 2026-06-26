@@ -39,7 +39,10 @@
       "save": "保存",
       "saving": "保存中...",
       "save_changes": "保存修改",
-      "cancel": "取消"
+      "cancel": "取消",
+      "set_default": "设为默认",
+      "set_default_title": "将此模型设为系统默认，所有生成任务都会使用它",
+      "set_default_done": "默认已更新"
     },
     "test_state": {
       "running": "测试中…",

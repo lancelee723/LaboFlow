@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useParams, useNavigate } from "react-router-dom"
 import { Loader2, Square, Monitor } from "lucide-react"
 import { apiFetch, resumeSession } from "@/lib/api"
+import { randomUUID } from "@/lib/uuid"
 import { ArtifactWorkspace, type ArtifactContent, type ArtifactEntry } from "@/components/artifacts/ArtifactWorkspace"
 import { ImageAcquisitionPanel } from "@/components/workspace/ImageAcquisitionPanel"
 import { ProjectSetup } from "@/components/artifacts/ProjectSetup"
@@ -125,6 +126,10 @@ export function ProjectEditorPage() {
   // once the refetch lands. Without this the user stays on whichever SVG
   // they last clicked and has to manually open the Exports group.
   const pendingExportSelectRef = useRef<string | null>(null)
+  // Detects the running→completed transition as a safety net when the export
+  // artifact_updated WS event is dropped at the tail of step 7 (race against
+  // connection teardown or session-end cleanup).
+  const prevIsRunningRef = useRef(false)
 
   // Clear stale pipeline state when entering the editor for any project.
   // Without this, a leftover activeGate or pipelineStep from a previous
@@ -243,10 +248,38 @@ export function ProjectEditorPage() {
       }
     }
 
-    if (!selectedArtifactPath || !artifacts.some((artifact) => artifact.path === selectedArtifactPath)) {
+    if (!selectedArtifactPath) {
+      // Default to the export for completed projects so re-entry lands on
+      // the download view instead of outline.json/the first auxiliary file.
+      if (project?.status === "completed") {
+        const exportArtifact = artifacts.find((a) => a.kind === "export")
+        if (exportArtifact) {
+          setSelectedArtifactPath(exportArtifact.path)
+          return
+        }
+      }
+      setSelectedArtifactPath(artifacts[0].path)
+      return
+    }
+
+    if (!artifacts.some((artifact) => artifact.path === selectedArtifactPath)) {
       setSelectedArtifactPath(artifacts[0].path)
     }
-  }, [artifacts, selectedArtifactPath])
+  }, [artifacts, selectedArtifactPath, project?.status])
+
+  // Safety net: when the pipeline transitions from running → not running with
+  // post-processing done (pipelineStep >= 6), force-queue export selection and
+  // refresh artifacts. Covers the case where the artifact_updated WS event for
+  // the export was lost mid-flight at the tail of step 7.
+  useEffect(() => {
+    const wasRunning = prevIsRunningRef.current
+    prevIsRunningRef.current = isRunning
+    if (!id) return
+    if (wasRunning && !isRunning && pipelineStep >= 6) {
+      pendingExportSelectRef.current = "exports/output.pptx"
+      queryClient.invalidateQueries({ queryKey: ["project-artifacts", id] })
+    }
+  }, [isRunning, pipelineStep, id, queryClient])
 
   // Restore session on mount — survives navigation away from editor
   useEffect(() => {
@@ -314,7 +347,7 @@ export function ProjectEditorPage() {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             role: "assistant",
             content: event.content as string,
             agent: event.agent as string,
@@ -325,7 +358,7 @@ export function ProjectEditorPage() {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             role: "system",
             content: `Running ${event.tool}...`,
             agent: event.agent as string,
@@ -397,7 +430,7 @@ export function ProjectEditorPage() {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             role: "assistant",
             content: event.prompt as string,
             agent: "strategist",
@@ -416,7 +449,7 @@ export function ProjectEditorPage() {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             role: "system",
             content: `Error: ${event.error}`,
           },
@@ -447,7 +480,7 @@ export function ProjectEditorPage() {
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant",
+        { id: randomUUID(), role: "assistant",
           content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
       ])
     }
@@ -462,7 +495,7 @@ export function ProjectEditorPage() {
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant",
+        { id: randomUUID(), role: "assistant",
           content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
       ])
     }
@@ -528,7 +561,7 @@ export function ProjectEditorPage() {
     lastUserMessageRef.current = userMsg
     setChatInput("")
     setLastError(null)
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content: userMsg }])
+    setMessages((prev) => [...prev, { id: randomUUID(), role: "user", content: userMsg }])
     setThinking("")
 
     if (sessionId) {
@@ -537,14 +570,14 @@ export function ProjectEditorPage() {
       } catch (err) {
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
         ])
         setLastError(err instanceof Error ? err.message : "Unknown")
       }
     } else {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: `Please start the pipeline first by clicking the Start button.` },
+        { id: randomUUID(), role: "assistant", content: `Please start the pipeline first by clicking the Start button.` },
       ])
     }
   }
@@ -568,7 +601,7 @@ export function ProjectEditorPage() {
     navigator.clipboard.writeText(report).catch(() => {})
   }
 
-  const handleStartFromPanel = useCallback(async (userBrief: string) => {
+  const handleStartFromPanel = useCallback(async (userBrief: string, llmConfigId: string | null) => {
     if (!id) return
     setPipelineStep(1)
     setSvgProgress(null)
@@ -577,12 +610,17 @@ export function ProjectEditorPage() {
     const brief = userBrief || ""
     setMessages((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), role: "user", content: brief || "Start pipeline" },
+      { id: randomUUID(), role: "user", content: brief || "Start pipeline" },
     ])
     try {
       const sess = await apiFetch<{ session_id: string }>("/api/orchestrate/start", {
         method: "POST",
-        body: JSON.stringify({ project_id: id, source_files: [], user_brief: brief }),
+        body: JSON.stringify({
+          project_id: id,
+          source_files: [],
+          user_brief: brief,
+          llm_config_id: llmConfigId,
+        }),
       })
       setSessionId(sess.session_id)
       try { sessionStorage.setItem(`session-${id}`, sess.session_id) } catch { /* quota exceeded */ }
@@ -590,7 +628,7 @@ export function ProjectEditorPage() {
       setIsRunning(false)
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+        { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
       ])
     }
   }, [id])
@@ -606,7 +644,7 @@ export function ProjectEditorPage() {
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+        { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
       ])
     }
   }, [sessionId])
@@ -623,7 +661,7 @@ export function ProjectEditorPage() {
       if (msg.includes("not waiting")) return
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: `Error: ${msg}` },
+        { id: randomUUID(), role: "assistant", content: `Error: ${msg}` },
       ])
     }
   }, [sessionId])
@@ -767,7 +805,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -795,7 +833,7 @@ export function ProjectEditorPage() {
                         setMessages((prev) => [
                           ...prev,
                           {
-                            id: crypto.randomUUID(),
+                            id: randomUUID(),
                             role: "assistant",
                             content: `Error: ${err instanceof Error ? err.message : "Unknown"}`,
                           },
@@ -821,7 +859,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -839,7 +877,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -858,7 +896,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -878,7 +916,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -900,7 +938,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -919,7 +957,7 @@ export function ProjectEditorPage() {
                       } catch (err) {
                         setMessages((prev) => [
                           ...prev,
-                          { id: crypto.randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
+                          { id: randomUUID(), role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Unknown"}` },
                         ])
                       }
                     }}
@@ -950,7 +988,7 @@ export function ProjectEditorPage() {
                         setMessages((prev) => [
                           ...prev,
                           {
-                            id: crypto.randomUUID(),
+                            id: randomUUID(),
                             role: "assistant",
                             content: `Error: ${err instanceof Error ? err.message : "Unknown"}`,
                           },
@@ -988,7 +1026,7 @@ export function ProjectEditorPage() {
                   setShowRecoveryOverlay(true)
                   setMessages((prev) => [
                     ...prev,
-                    { id: crypto.randomUUID(), role: "system",
+                    { id: randomUUID(), role: "system",
                       content: `Resume failed: ${err instanceof Error ? err.message : "Unknown"}` },
                   ])
                 }
@@ -1018,7 +1056,7 @@ export function ProjectEditorPage() {
                   setIsRunning(false)
                   setMessages((prev) => [
                     ...prev,
-                    { id: crypto.randomUUID(), role: "system",
+                    { id: randomUUID(), role: "system",
                       content: `Restart failed: ${err instanceof Error ? err.message : "Unknown"}` },
                   ])
                 }

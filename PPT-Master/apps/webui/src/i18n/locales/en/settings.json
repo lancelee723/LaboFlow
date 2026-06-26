@@ -39,7 +39,10 @@
       "save": "Save",
       "saving": "Saving...",
       "save_changes": "Save Changes",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "set_default": "Set as default",
+      "set_default_title": "Make this the system default model for all generations",
+      "set_default_done": "Default updated"
     },
     "test_state": {
       "running": "Testing…",

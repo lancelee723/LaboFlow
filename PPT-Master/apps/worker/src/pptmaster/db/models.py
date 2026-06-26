@@ -92,6 +92,9 @@ class Session(Base):
     interrupt_prompt: Mapped[Optional[dict]] = mapped_column(JSONB)
     status_locked: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     abort_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    llm_config_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("pptmaster.llm_configs.id", ondelete="SET NULL"), nullable=True,
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
