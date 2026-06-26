@@ -58,6 +58,25 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection):
+    # Pre-step: ensure alembic_version.version_num is wide enough.
+    #
+    # Alembic's default schema for this table uses VARCHAR(32), which
+    # silently truncates / 5xx-fails when a revision id exceeds 32 chars.
+    # We've already shipped at least one merge revision longer than 32
+    # ("merge_heads_user_onboarding_bridge" = 34), so any fresh DB hits a
+    # StringDataRightTruncationError on first upgrade. Both branches
+    # below are idempotent: CREATE IF NOT EXISTS does nothing when the
+    # table is already present; the ALTER widens the column on legacy
+    # DBs that were originally provisioned at width 32 and is a no-op on
+    # DBs already at 255.
+    connection.exec_driver_sql(
+        "CREATE TABLE IF NOT EXISTS alembic_version ("
+        "version_num VARCHAR(255) NOT NULL, "
+        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+    )
+    connection.exec_driver_sql(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"
+    )
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()
