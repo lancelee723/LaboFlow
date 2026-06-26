@@ -265,6 +265,20 @@ type AuthConfig struct {
 	//                            users only enter through the invitation
 	//                            flow added in PR 3.
 	RegistrationMode string `yaml:"registration_mode" json:"registration_mode"`
+
+	// AutoJoinOrgID, when set, enrols every freshly-minted tenant into
+	// this organization on first sign-in. Applies to every provisioning
+	// path that lands a new user/tenant pair:
+	//   - POST /auth/register      (Register)
+	//   - OIDC first login         (provisionOIDCUser -> Register)
+	//   - Clawith JWT-bridge SSO   (LoginWithSSO, new-user branch)
+	// Empty disables the feature. The join is best-effort: a missing org
+	// or a transient repo error WARN-logs but never blocks the login.
+	//
+	// AutoJoinRole is the role granted in that org; defaults to "viewer".
+	// Must be one of "viewer" / "editor" / "admin".
+	AutoJoinOrgID string `yaml:"auto_join_org_id" json:"auto_join_org_id"`
+	AutoJoinRole  string `yaml:"auto_join_role"   json:"auto_join_role"`
 }
 
 // AuthRegistrationMode constants used by handlers and middleware.
@@ -615,6 +629,13 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
 				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
+		if strings.TrimSpace(cfg.Auth.AutoJoinOrgID) != "" {
+			role := strings.TrimSpace(cfg.Auth.AutoJoinRole)
+			if role != "" && role != "viewer" && role != "editor" && role != "admin" {
+				errs = append(errs, fmt.Sprintf(
+					"auth.auto_join_role must be viewer/editor/admin, got %q", role))
+			}
+		}
 	}
 
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
@@ -812,6 +833,13 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 
 	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
 		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
+	}
+
+	if value := strings.TrimSpace(os.Getenv("AUTH_AUTO_JOIN_ORG_ID")); value != "" {
+		cfg.Auth.AutoJoinOrgID = value
+	}
+	if value := strings.TrimSpace(os.Getenv("AUTH_AUTO_JOIN_ROLE")); value != "" {
+		cfg.Auth.AutoJoinRole = value
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {

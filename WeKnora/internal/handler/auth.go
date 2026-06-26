@@ -275,7 +275,15 @@ func (h *AuthHandler) SSOClawithLogin(c *gin.Context) {
 		return
 	}
 	username := strings.Split(email, "@")[0]
-	response, err := h.userService.LoginWithSSO(ctx, email, username)
+	// Enterprise-aware SSO: Clawith ≥ <date> embeds the upstream
+	// tenant_id (and best-effort name) as JWT claims so WeKnora can
+	// route users from the same Clawith Enterprise into the same org.
+	// Both claims are optional — when absent the service falls back to
+	// the legacy AUTH_AUTO_JOIN_ORG_ID static org, preserving the
+	// behaviour of older Clawith builds during the rollout window.
+	clawithTenantID, _ := claims["clawith_tenant_id"].(string)
+	clawithTenantName, _ := claims["clawith_tenant_name"].(string)
+	response, err := h.userService.LoginWithSSO(ctx, email, username, clawithTenantID, clawithTenantName)
 	if err != nil {
 		logger.Errorf(ctx, "SSO: login failed: %v", err)
 		appErr := errors.NewInternalServerError("SSO login failed").WithDetails(err.Error())

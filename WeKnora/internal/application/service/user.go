@@ -61,22 +61,29 @@ type userService struct {
 	tokenRepo     interfaces.AuthTokenRepository
 	tenantService interfaces.TenantService
 	memberService interfaces.TenantMemberService
+	orgService    interfaces.OrganizationService
 	config        *config.Config
 }
 
-// NewUserService creates a new user service instance
+// NewUserService creates a new user service instance.
+//
+// orgService is used by the OIDC auto-join hook (provisionOIDCUser). It
+// is wired through the DI container; tests that build a userService
+// directly can pass nil — the auto-join code defends against that.
 func NewUserService(
 	configInfo *config.Config,
 	userRepo interfaces.UserRepository,
 	tokenRepo interfaces.AuthTokenRepository,
 	tenantService interfaces.TenantService,
 	memberService interfaces.TenantMemberService,
+	orgService interfaces.OrganizationService,
 ) interfaces.UserService {
 	return &userService{
 		userRepo:      userRepo,
 		tokenRepo:     tokenRepo,
 		tenantService: tenantService,
 		memberService: memberService,
+		orgService:    orgService,
 		config:        configInfo,
 	}
 }
@@ -244,7 +251,7 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 // part of the dependency graph), this falls back to a single synthesized
 // LoginWithSSO authenticates or creates a user from SSO claims and returns tokens.
 // If the user does not exist, a new user and tenant are provisioned automatically.
-func (s *userService) LoginWithSSO(ctx context.Context, email, username string) (*types.LoginResponse, error) {
+func (s *userService) LoginWithSSO(ctx context.Context, email, username, clawithTenantID, clawithTenantName string) (*types.LoginResponse, error) {
 	logger.Infof(ctx, "Start SSO login, email: %s", secutils.SanitizeForLog(email))
 	if email == "" {
 		return &types.LoginResponse{Success: false, Message: "Email is required for SSO login"}, nil
@@ -280,6 +287,19 @@ func (s *userService) LoginWithSSO(ctx context.Context, email, username string) 
 			return &types.LoginResponse{Success: false, Message: "Failed to create user"}, nil
 		}
 		logger.Infof(ctx, "SSO: user created successfully, id: %s", user.ID)
+
+		// Enterprise-aware routing first: if the SSO JWT carried a
+		// Clawith tenant_id (the "Enterprise" identifier on the upstream
+		// side), find-or-create the matching WeKnora org and enrol the
+		// new tenant. This makes "users from the same Clawith Enterprise
+		// land in the same WeKnora space" work end-to-end. The static
+		// AUTH_AUTO_JOIN_ORG_ID fallback below covers two cases:
+		//   - old Clawith versions that don't send the new claim
+		//   - non-Clawith SSO paths (future direct OIDC etc.)
+		joined := s.tryAutoJoinEnterpriseOrg(ctx, user, clawithTenantID, clawithTenantName)
+		if !joined {
+			s.tryAutoJoinDefaultOrg(ctx, user, "clawith-sso-fallback")
+		}
 	} else if !user.IsActive {
 		logger.Warn(ctx, "SSO: user account is disabled")
 		return &types.LoginResponse{Success: false, Message: "Account is disabled"}, nil
@@ -1225,7 +1245,129 @@ func (s *userService) provisionOIDCUser(ctx context.Context, info *types.OIDCUse
 	if err != nil {
 		return nil, fmt.Errorf("failed to auto-provision OIDC user: %w", err)
 	}
+
+	// Best-effort: enrol the freshly-minted tenant into the configured
+	// shared org so SSO users land somewhere they can immediately share
+	// KBs/agents from. Failures are logged-and-swallowed — a misconfigured
+	// org id must not block a successful login.
+	s.tryAutoJoinDefaultOrg(ctx, user, "oidc")
 	return user, nil
+}
+
+// tryAutoJoinEnterpriseOrg resolves the WeKnora organization that
+// corresponds to the caller's upstream Clawith Enterprise (passed as a
+// JWT claim) and enrols the user's tenant into it. Returns true when
+// the user is now a member of an org — caller skips the fallback path
+// in that case. False means "no Enterprise claim or claim couldn't be
+// resolved"; the caller may fall back to the static AUTH_AUTO_JOIN_ORG_ID.
+//
+// First user of a new Enterprise creates the org via
+// FindOrCreateByExternalID and is enrolled there as Admin by that call;
+// subsequent users hit the existing org and join with AUTH_AUTO_JOIN_ROLE
+// (default viewer). The two paths share the same role/error plumbing in
+// addTenantToOrgBestEffort.
+func (s *userService) tryAutoJoinEnterpriseOrg(ctx context.Context, user *types.User, clawithTenantID, clawithTenantName string) bool {
+	clawithTenantID = strings.TrimSpace(clawithTenantID)
+	if clawithTenantID == "" {
+		return false
+	}
+	if s.orgService == nil {
+		logger.Warnf(ctx,
+			"[auth.autojoin/enterprise] orgService is nil; skipping for user %s clawith_tenant_id=%s",
+			user.ID, clawithTenantID)
+		return false
+	}
+
+	org, created, err := s.orgService.FindOrCreateByExternalID(
+		ctx, clawithTenantID, clawithTenantName, user.ID, user.TenantID,
+	)
+	if err != nil {
+		// External-ID resolution failed (DB blip, validation). We
+		// return false so the caller falls back to AUTH_AUTO_JOIN_ORG_ID;
+		// a chronic failure here will surface in the WARN below AND in
+		// the fallback path's logs, so monitoring catches it twice.
+		logger.Warnf(ctx,
+			"[auth.autojoin/enterprise] resolve failed for clawith_tenant_id=%s user=%s: %v",
+			clawithTenantID, user.ID, err)
+		return false
+	}
+
+	if created {
+		// The caller's tenant just became this org's owner (enrolled as
+		// Admin inside FindOrCreateByExternalID). Nothing left to do —
+		// returning true tells the caller to skip the static fallback.
+		logger.Infof(ctx,
+			"[auth.autojoin/enterprise] created org %s for clawith_tenant_id=%s; tenant %d is now owner",
+			org.ID, clawithTenantID, user.TenantID)
+		return true
+	}
+
+	// Existing org — enrol the new tenant as a regular member.
+	s.addTenantToOrgBestEffort(ctx, user, org.ID, "enterprise")
+	return true
+}
+
+// tryAutoJoinDefaultOrg enrols the user's tenant into Auth.AutoJoinOrgID
+// (static config) when the feature is enabled. Called as a fallback by
+// LoginWithSSO when no Clawith Enterprise claim is present (e.g. old
+// Clawith versions) and as the only path for non-Clawith logins like
+// direct OIDC. The `source` tag flows into the log line so an operator
+// can tell which gate fired.
+func (s *userService) tryAutoJoinDefaultOrg(ctx context.Context, user *types.User, source string) {
+	if s.config == nil || s.config.Auth == nil {
+		return
+	}
+	orgID := strings.TrimSpace(s.config.Auth.AutoJoinOrgID)
+	if orgID == "" {
+		return
+	}
+	if s.orgService == nil {
+		logger.Warnf(ctx,
+			"[auth.autojoin/%s] AutoJoinOrgID=%q is set but orgService is nil; skipping for user %s",
+			source, orgID, user.ID)
+		return
+	}
+	s.addTenantToOrgBestEffort(ctx, user, orgID, source)
+}
+
+// addTenantToOrgBestEffort is the shared join+log plumbing. Idempotent
+// (ErrOrgMemberAlreadyExists is success), all-errors-swallowed, role
+// driven by AUTH_AUTO_JOIN_ROLE with viewer as the safe default.
+//
+// This runs AFTER a successful user creation so any failure here must
+// not roll back the user. Everything funnels to a WARN so a chronically
+// failing config shows up in monitoring without 5xx-ing logins.
+func (s *userService) addTenantToOrgBestEffort(ctx context.Context, user *types.User, orgID, source string) {
+	roleStr := ""
+	if s.config != nil && s.config.Auth != nil {
+		roleStr = strings.TrimSpace(s.config.Auth.AutoJoinRole)
+	}
+	if roleStr == "" {
+		roleStr = string(types.OrgRoleViewer)
+	}
+	role := types.OrgMemberRole(roleStr)
+	if !role.IsValid() {
+		logger.Warnf(ctx,
+			"[auth.autojoin/%s] AutoJoinRole=%q is invalid; skipping for user %s tenant %d",
+			source, roleStr, user.ID, user.TenantID)
+		return
+	}
+
+	err := s.orgService.AddTenantMember(ctx, orgID, user.TenantID, user.ID, role)
+	switch {
+	case err == nil:
+		logger.Infof(ctx,
+			"[auth.autojoin/%s] joined tenant %d (user %s) to org %s as %s",
+			source, user.TenantID, user.ID, orgID, role)
+	case errors.Is(err, apprepo.ErrOrgMemberAlreadyExists):
+		logger.Infof(ctx,
+			"[auth.autojoin/%s] tenant %d already member of org %s; skipping",
+			source, user.TenantID, orgID)
+	default:
+		logger.Warnf(ctx,
+			"[auth.autojoin/%s] failed for tenant %d -> org %s (role=%s): %v",
+			source, user.TenantID, orgID, role, err)
+	}
 }
 
 func (s *userService) generateOIDCUsername(ctx context.Context, info *types.OIDCUserInfo) string {

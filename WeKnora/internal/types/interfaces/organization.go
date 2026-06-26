@@ -27,6 +27,13 @@ type OrganizationService interface {
 	// is only used for display labelling.
 	AddTenantMember(ctx context.Context, orgID string, tenantID uint64, representativeUserID string, role types.OrgMemberRole) error
 	RemoveTenantMember(ctx context.Context, orgID string, memberTenantID uint64, operatorUserID string, operatorTenantID uint64) error
+
+	// Enterprise-aware SSO: find an org by external identity (today:
+	// Clawith tenant_id passed as JWT claim), creating one if it doesn't
+	// exist yet. ownerUserID/ownerTenantID become the org's owner only
+	// on first-create; on hit the existing org is returned unchanged.
+	// displayName is the desired name when creating; ignored on hit.
+	FindOrCreateByExternalID(ctx context.Context, externalID, displayName, ownerUserID string, ownerTenantID uint64) (*types.Organization, bool, error)
 	UpdateTenantMemberRole(ctx context.Context, orgID string, memberTenantID uint64, role types.OrgMemberRole, operatorUserID string, operatorTenantID uint64) error
 	ListTenantMembers(ctx context.Context, orgID string) ([]*types.OrganizationTenantMember, error)
 	GetTenantMember(ctx context.Context, orgID string, tenantID uint64) (*types.OrganizationTenantMember, error)
@@ -61,6 +68,7 @@ type OrganizationRepository interface {
 	Create(ctx context.Context, org *types.Organization) error
 	GetByID(ctx context.Context, id string) (*types.Organization, error)
 	GetByInviteCode(ctx context.Context, inviteCode string) (*types.Organization, error)
+	GetByExternalID(ctx context.Context, externalID string) (*types.Organization, error)
 	ListByTenantID(ctx context.Context, tenantID uint64) ([]*types.Organization, error)
 	ListSearchable(ctx context.Context, query string, limit int) ([]*types.Organization, error)
 	Update(ctx context.Context, org *types.Organization) error

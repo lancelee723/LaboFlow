@@ -50,6 +50,24 @@ func (r *organizationRepository) GetByID(ctx context.Context, id string) (*types
 	return &org, nil
 }
 
+// GetByExternalID looks up a live org by its upstream identity
+// system's identifier (e.g. Clawith tenant_id). Returns
+// ErrOrganizationNotFound when no live row matches; soft-deleted rows
+// are excluded so a re-created Enterprise gets a fresh org.
+func (r *organizationRepository) GetByExternalID(ctx context.Context, externalID string) (*types.Organization, error) {
+	if externalID == "" {
+		return nil, ErrOrganizationNotFound
+	}
+	var org types.Organization
+	if err := r.db.WithContext(ctx).Where("external_id = ?", externalID).First(&org).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrOrganizationNotFound
+		}
+		return nil, err
+	}
+	return &org, nil
+}
+
 // GetByInviteCode gets an organization by invite code (returns ErrInviteCodeExpired if code has expired)
 func (r *organizationRepository) GetByInviteCode(ctx context.Context, inviteCode string) (*types.Organization, error) {
 	var org types.Organization

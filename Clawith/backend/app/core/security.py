@@ -144,12 +144,18 @@ def create_sso_token(
     audience: str,
     role: str = "user",
     ttl_minutes: int = 5,
+    extra_claims: dict | None = None,
 ) -> str:
     """Create a short-lived SSO JWT for a third-party service (e.g. WeKnora).
 
     The token is signed with the same JWT_SECRET_KEY and HS256 algorithm used
     for access tokens, but carries a distinct ``aud`` claim so the receiving
     service can reject tokens not intended for it.
+
+    ``extra_claims`` is merged into the payload after the standard fields are
+    set; standard claims (``sub``/``email``/``role``/``aud``/``exp``) cannot be
+    overridden — silently dropping them keeps a misuse from bricking the
+    receiver's signature verification.
     """
     expire = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
     to_encode = {
@@ -159,6 +165,12 @@ def create_sso_token(
         "aud": audience,
         "exp": expire,
     }
+    if extra_claims:
+        reserved = {"sub", "email", "role", "aud", "exp"}
+        for k, v in extra_claims.items():
+            if k in reserved:
+                continue
+            to_encode[k] = v
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm="HS256")
 
 

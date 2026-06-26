@@ -170,17 +170,46 @@ async def list_llm_providers(
 async def get_weknora_sso_token(
     request: Request,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Mint a short-lived SSO JWT for the authenticated Clawith user.
 
     The frontend opens ``{weknora_url}/sso?token=<jwt>`` to automatically log
     the user into WeKnora without requiring a separate credential.
+
+    Enterprise context: the JWT carries the caller's Clawith ``tenant_id``
+    (and best-effort tenant ``name``) as ``clawith_tenant_id`` /
+    ``clawith_tenant_name`` claims. WeKnora uses them to find-or-create a
+    matching organization so users from the same Clawith Enterprise land in
+    the same WeKnora space (see Enterprise-aware SSO in WeKnora's
+    LoginWithSSO). When ``tenant_id`` is missing — old single-Enterprise
+    deployments — WeKnora falls back to the static ``AUTH_AUTO_JOIN_ORG_ID``
+    env, preserving the previous behaviour.
     """
+    extra_claims: dict = {}
+    if current_user.tenant_id is not None:
+        extra_claims["clawith_tenant_id"] = str(current_user.tenant_id)
+
+        # Best-effort tenant name — purely cosmetic for the WeKnora org
+        # display label. A DB blip here must not break SSO, so we swallow
+        # and let WeKnora fall back to its default placeholder name.
+        try:
+            from app.models.tenant import Tenant  # local import — module cycle safe
+            tenant_row = await db.execute(
+                select(Tenant.name).where(Tenant.id == current_user.tenant_id)
+            )
+            tenant_name = tenant_row.scalar_one_or_none()
+            if tenant_name:
+                extra_claims["clawith_tenant_name"] = tenant_name
+        except SQLAlchemyError as e:
+            logger.warning("weknora sso-token: tenant name lookup failed: %s", e)
+
     token = create_sso_token(
         user_id=str(current_user.id),
         email=current_user.email or "",
         audience="weknora",
         role=getattr(current_user, "role", "user"),
+        extra_claims=extra_claims or None,
     )
     weknora_url = _resolve_browser_kb_url(settings.WEKNORA_URL, request)
     return {"token": token, "weknora_url": weknora_url}

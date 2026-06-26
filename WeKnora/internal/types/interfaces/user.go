@@ -12,8 +12,13 @@ type UserService interface {
 	Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
 	// Login authenticates a user and returns tokens
 	Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error)
-	// LoginWithSSO authenticates or creates a user from SSO claims and returns tokens
-	LoginWithSSO(ctx context.Context, email, username string) (*types.LoginResponse, error)
+	// LoginWithSSO authenticates or creates a user from SSO claims and
+	// returns tokens. `clawithTenantID` and `clawithTenantName`, when
+	// non-empty, drive Enterprise-aware org routing: a new user is
+	// auto-joined to the org bound to that external identity (creating
+	// the org on first sight). Empty values trigger the legacy fallback
+	// to AUTH_AUTO_JOIN_ORG_ID if configured.
+	LoginWithSSO(ctx context.Context, email, username, clawithTenantID, clawithTenantName string) (*types.LoginResponse, error)
 	// GetOIDCAuthorizationURL builds the third-party OIDC authorization URL
 	GetOIDCAuthorizationURL(ctx context.Context, redirectURI string) (*types.OIDCAuthURLResponse, error)
 	// LoginWithOIDC exchanges the callback code, auto-provisions users if needed, and completes login

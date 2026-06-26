@@ -88,6 +88,14 @@ type Organization struct {
 	Searchable bool `json:"searchable" gorm:"default:false"`
 	// Max members allowed; 0 means no limit
 	MemberLimit int `json:"member_limit" gorm:"default:50"`
+	// ExternalID is an opaque identifier that ties this org to a row in
+	// an upstream identity system. Today the only producer is Clawith,
+	// which sends its `tenant_id` (Enterprise) as a JWT claim during the
+	// SSO bridge; orgs created on the WeKnora side directly leave this
+	// nil. The unique partial index on (external_id) where deleted_at IS
+	// NULL means at most one live org per external identity — re-creation
+	// after a soft-delete is intentionally allowed.
+	ExternalID *string `json:"external_id,omitempty" gorm:"type:varchar(64);index:idx_organizations_external_id_unique,unique,where:deleted_at IS NULL AND external_id IS NOT NULL"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time

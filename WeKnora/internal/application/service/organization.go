@@ -352,6 +352,117 @@ func (s *organizationService) DeleteOrganization(ctx context.Context, id string,
 	return s.orgRepo.Delete(ctx, id)
 }
 
+// FindOrCreateByExternalID resolves an organization by its upstream
+// identity (today: Clawith tenant_id passed as a JWT claim) and creates
+// one on miss. The first SSO user from a new Enterprise wins the create
+// race and becomes the org owner; later users get a hit and are joined
+// by the caller (typically via AddTenantMember).
+//
+// Returned `created` is true only on the create branch — callers use it
+// to decide whether to skip auto-join (the create path already enrols
+// the owner as Admin) and to emit a richer "new Enterprise onboarded"
+// audit line.
+//
+// Concurrency: two concurrent calls with the same externalID will both
+// pass the initial Get-miss; one wins Create, the other trips the
+// unique partial index on organizations(external_id). We recover from
+// that race with a re-lookup so the loser still gets a usable org back
+// without bubbling a confusing 5xx to the SSO login flow.
+func (s *organizationService) FindOrCreateByExternalID(
+	ctx context.Context,
+	externalID, displayName, ownerUserID string,
+	ownerTenantID uint64,
+) (*types.Organization, bool, error) {
+	externalID = strings.TrimSpace(externalID)
+	if externalID == "" {
+		return nil, false, errors.New("externalID is required")
+	}
+	if ownerTenantID == 0 {
+		return nil, false, errors.New("ownerTenantID is required")
+	}
+
+	if existing, err := s.orgRepo.GetByExternalID(ctx, externalID); err == nil && existing != nil {
+		return existing, false, nil
+	} else if err != nil && !errors.Is(err, repository.ErrOrganizationNotFound) {
+		return nil, false, err
+	}
+
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		// Fallback when the upstream JWT didn't carry a name; operators
+		// can rename via UI later. Trim the externalID to a short suffix
+		// so the placeholder stays readable in dropdowns.
+		short := externalID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		name = "Clawith Workspace " + short
+	}
+
+	now := time.Now()
+	extIDCopy := externalID
+	org := &types.Organization{
+		ID:                     uuid.New().String(),
+		Name:                   name,
+		Description:            "Auto-created from upstream SSO",
+		OwnerID:                ownerUserID,
+		OwnerTenantID:          ownerTenantID,
+		InviteCode:             generateInviteCode(),
+		InviteCodeExpiresAt:    resolveInviteExpiry(DefaultInviteCodeValidityDays, now),
+		InviteCodeValidityDays: DefaultInviteCodeValidityDays,
+		MemberLimit:            DefaultMemberLimit,
+		ExternalID:             &extIDCopy,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}
+
+	if err := s.orgRepo.Create(ctx, org); err != nil {
+		// Likely the unique-partial-index on external_id firing because
+		// another concurrent SSO call won. Re-lookup; on hit return that
+		// org with created=false so the caller still gets the right
+		// landing org. If the re-lookup also misses we surface the
+		// original error — that's a real failure, not a race.
+		if existing, getErr := s.orgRepo.GetByExternalID(ctx, externalID); getErr == nil && existing != nil {
+			logger.Infof(ctx,
+				"[org.find-or-create] lost create race for external_id=%s, returning existing org %s",
+				externalID, existing.ID)
+			return existing, false, nil
+		}
+		logger.Errorf(ctx, "Failed to create organization (external_id=%s): %v", externalID, err)
+		return nil, false, err
+	}
+
+	// Owner tenant joins as Admin — same shape as CreateOrganization
+	// above. The membership row gives the owner regular role plumbing
+	// (visible in member list, eligible for share-management UI)
+	// while organizations.owner_tenant_id stays the load-bearing column
+	// for "cannot remove owner" checks.
+	joinedAt := now
+	member := &types.OrganizationTenantMember{
+		ID:                   uuid.New().String(),
+		OrganizationID:       org.ID,
+		TenantID:             ownerTenantID,
+		Role:                 types.OrgRoleAdmin,
+		RepresentativeUserID: ownerUserID,
+		JoinedAt:             &joinedAt,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	if err := s.orgRepo.AddTenantMember(ctx, member); err != nil {
+		// The org row already landed; the missing membership will be
+		// recovered the next time the owner's tenant uses an org-scoped
+		// route (AddTenantMember is idempotent there). Log loud — this
+		// shouldn't happen — but don't roll back the org.
+		logger.Errorf(ctx,
+			"[org.find-or-create] org %s created but adding owner tenant %d failed: %v",
+			org.ID, ownerTenantID, err)
+	}
+	logger.Infof(ctx,
+		"[org.find-or-create] created org %s (name=%q) for external_id=%s, owner=tenant=%d user=%s",
+		org.ID, name, externalID, ownerTenantID, ownerUserID)
+	return org, true, nil
+}
+
 // AddTenantMember enrols a tenant as a member of an organization.
 func (s *organizationService) AddTenantMember(ctx context.Context, orgID string, tenantID uint64, representativeUserID string, role types.OrgMemberRole) error {
 	if !role.IsValid() {

@@ -98,8 +98,12 @@ class WeKnoraClient:
         return self._request("POST", "/knowledge-bases", json=data)
 
     def list_knowledge_bases(self) -> Dict:
-        """List all knowledge bases"""
+        """List knowledge bases owned by the caller's tenant (does NOT include org-shared KBs)"""
         return self._request("GET", "/knowledge-bases")
+
+    def list_shared_knowledge_bases(self) -> Dict:
+        """List knowledge bases shared TO the caller's tenant via organization sharing"""
+        return self._request("GET", "/shared-knowledge-bases")
 
     def get_knowledge_base(self, kb_id: str) -> Dict:
         """Get knowledge base details"""
@@ -319,7 +323,22 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="list_knowledge_bases",
-            description="List all knowledge bases",
+            description=(
+                "List knowledge bases owned by the caller's tenant. "
+                "Does NOT include KBs shared from other tenants via organization "
+                "sharing — call list_shared_knowledge_bases for those, and combine "
+                "both lists when the user asks for everything they can access."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="list_shared_knowledge_bases",
+            description=(
+                "List knowledge bases shared TO the caller's tenant via "
+                "organization sharing. Each item carries a nested knowledge_base "
+                "object whose id can be passed to hybrid_search. Combine with "
+                "list_knowledge_bases to enumerate every KB the caller can read."
+            ),
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
@@ -698,6 +717,8 @@ async def handle_call_tool(
             )
         elif name == "list_knowledge_bases":
             result = client.list_knowledge_bases()
+        elif name == "list_shared_knowledge_bases":
+            result = client.list_shared_knowledge_bases()
         elif name == "get_knowledge_base":
             result = client.get_knowledge_base(args["kb_id"])
         elif name == "delete_knowledge_base":
