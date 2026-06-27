@@ -1,14 +1,18 @@
 """Alembic environment configuration for async SQLAlchemy."""
 
 import asyncio
+import logging
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from alembic.script import ScriptDirectory
+from sqlalchemy import inspect, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.database import Base
 from app.config import get_settings
+
+logger = logging.getLogger("alembic.bootstrap")
 
 # Import all models so they are registered with Base.metadata
 from app.models.identity import IdentityProvider, SSOScanSession  # noqa: F401
@@ -58,26 +62,71 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection):
-    # Pre-step: ensure alembic_version.version_num is wide enough.
-    #
-    # Alembic's default schema for this table uses VARCHAR(32), which
-    # silently truncates / 5xx-fails when a revision id exceeds 32 chars.
-    # We've already shipped at least one merge revision longer than 32
-    # ("merge_heads_user_onboarding_bridge" = 34), so any fresh DB hits a
-    # StringDataRightTruncationError on first upgrade. Both branches
-    # below are idempotent: CREATE IF NOT EXISTS does nothing when the
-    # table is already present; the ALTER widens the column on legacy
-    # DBs that were originally provisioned at width 32 and is a no-op on
-    # DBs already at 255.
-    connection.exec_driver_sql(
-        "CREATE TABLE IF NOT EXISTS alembic_version ("
-        "version_num VARCHAR(255) NOT NULL, "
-        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-    )
+    """Bootstrap path-aware migration runner.
+
+    Two distinct flows depending on whether the DB has ever been touched
+    by Clawith before. We detect this by the presence of `alembic_version`:
+
+    1. **Fresh DB** (table absent): build the entire current schema in one
+       shot via ``Base.metadata.create_all`` and stamp ``alembic_version``
+       to the current head(s). Skips the migration chain entirely.
+
+       Rationale: we accumulated 60+ migrations over time and *each* is a
+       potential failure point for a fresh deploy. One transactional
+       CREATE-from-models is strictly faster and strictly safer — no
+       chain of long-named merge revisions risking VARCHAR(32) overflow,
+       no batched rollback wiping prior steps' DDL on a mid-chain crash,
+       no historical data backfills (irrelevant for empty tables anyway).
+
+       Source of truth: the models imported above into ``target_metadata``.
+       This is exactly what ``alembic autogenerate`` already trusts, so
+       if the models drift from migrations the project has bigger problems.
+
+    2. **Existing DB** (table present): traditional migration path, with
+       two safety nets bolted on:
+       a. Widen ``alembic_version.version_num`` proactively to absorb
+          long descriptive revision ids (defaults to VARCHAR(32) which
+          we've already overflowed once).
+       b. ``transaction_per_migration=True`` so a failure in step N
+          doesn't roll back steps 1..N-1 — leaving a stuck-mid-chain
+          DB instead of an invisible "DDL gone, alembic_version reset"
+          ghost state that's painful to diagnose.
+    """
+    inspector = inspect(connection)
+    is_fresh = not inspector.has_table("alembic_version")
+
+    if is_fresh:
+        logger.info("[alembic] Fresh DB detected — bootstrapping via Base.metadata.create_all()")
+        Base.metadata.create_all(connection)
+
+        # Create alembic_version with the right width upfront so future
+        # upgrades never trip on the VARCHAR(32) default. Stamp it to
+        # the current head(s) of the migration tree so subsequent runs
+        # treat this DB as "already at latest" and use the upgrade path.
+        connection.exec_driver_sql(
+            "CREATE TABLE alembic_version ("
+            "version_num VARCHAR(255) NOT NULL, "
+            "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+        )
+        script = ScriptDirectory.from_config(context.config)
+        heads = script.get_heads()
+        for head in heads:
+            connection.exec_driver_sql(
+                "INSERT INTO alembic_version (version_num) VALUES (:v)",
+                {"v": head},
+            )
+        logger.info(f"[alembic] Stamped alembic_version to head(s): {heads}")
+        return
+
+    # Existing DB: safety nets + traditional migration chain.
     connection.exec_driver_sql(
         "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"
     )
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        transaction_per_migration=True,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
