@@ -6,7 +6,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, pool
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.database import Base
@@ -94,15 +94,23 @@ def do_run_migrations(connection):
     """
     inspector = inspect(connection)
     is_fresh = not inspector.has_table("alembic_version")
+    # ⚠️ inspector.has_table() emits a SELECT, which triggers SQLAlchemy
+    # 2.x's autobegin on the connection — a transaction is now active.
+    # We release it here so subsequent phases get a clean state to manage
+    # transactions explicitly (the fresh-path commit below, alembic's own
+    # begin_transaction() in the else branch). Committing an effectively
+    # read-only transaction is a no-op on the schema but resets the
+    # connection's "in transaction" flag, which is what we actually want.
+    connection.commit()
 
     if is_fresh:
         logger.info("[alembic] Fresh DB detected — bootstrapping via Base.metadata.create_all()")
+        # Build the entire current schema from the SQLAlchemy models in
+        # one go. The DDL participates in a single autobegun transaction
+        # which we then commit explicitly — without this commit the
+        # connection close at the end of run_sync rolls everything back
+        # silently and the next restart finds the same empty DB.
         Base.metadata.create_all(connection)
-
-        # Create alembic_version with the right width upfront so future
-        # upgrades never trip on the VARCHAR(32) default. Stamp it to
-        # the current head(s) of the migration tree so subsequent runs
-        # treat this DB as "already at latest" and use the upgrade path.
         connection.exec_driver_sql(
             "CREATE TABLE alembic_version ("
             "version_num VARCHAR(255) NOT NULL, "
@@ -110,18 +118,26 @@ def do_run_migrations(connection):
         )
         script = ScriptDirectory.from_config(context.config)
         heads = script.get_heads()
+        # Use connection.execute(text(...)) here — exec_driver_sql skips
+        # SQLAlchemy's parameter translation and passes the literal `:v`
+        # to asyncpg, which doesn't speak that paramstyle ($1 is its native
+        # one). text() rebinds correctly across drivers.
         for head in heads:
-            connection.exec_driver_sql(
-                "INSERT INTO alembic_version (version_num) VALUES (:v)",
+            connection.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
                 {"v": head},
             )
+        connection.commit()
         logger.info(f"[alembic] Stamped alembic_version to head(s): {heads}")
         return
 
-    # Existing DB: safety nets + traditional migration chain.
+    # Existing DB: traditional migration chain with two safety nets.
+    # ALTER runs in its own autobegun transaction, committed explicitly
+    # so alembic's transaction sees the wider column type.
     connection.exec_driver_sql(
         "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"
     )
+    connection.commit()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,

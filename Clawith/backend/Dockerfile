@@ -18,11 +18,11 @@ COPY pyproject.toml ./
 ARG CLAWITH_PIP_INDEX_URL
 ARG CLAWITH_PIP_TRUSTED_HOST
 RUN if [ -n "$CLAWITH_PIP_INDEX_URL" ] && [ -n "$CLAWITH_PIP_TRUSTED_HOST" ]; then \
-        pip install --no-cache-dir --index-url "$CLAWITH_PIP_INDEX_URL" --trusted-host "$CLAWITH_PIP_TRUSTED_HOST" .; \
+        pip install --no-cache-dir --index-url "$CLAWITH_PIP_INDEX_URL" --trusted-host "$CLAWITH_PIP_TRUSTED_HOST" . uv; \
     elif [ -n "$CLAWITH_PIP_INDEX_URL" ]; then \
-        pip install --no-cache-dir --index-url "$CLAWITH_PIP_INDEX_URL" .; \
+        pip install --no-cache-dir --index-url "$CLAWITH_PIP_INDEX_URL" . uv; \
     else \
-        pip install --no-cache-dir .; \
+        pip install --no-cache-dir . uv; \
     fi
 
 # ─── Production ─────────────────────────────────────────
@@ -39,7 +39,8 @@ RUN if [ "$DEBIAN_MIRROR" != "deb.debian.org" ]; then \
         grep -rl 'deb.debian.org' /etc/apt/ | xargs sed -i "s|http://deb.debian.org|http://$DEBIAN_MIRROR|g; s|https://deb.debian.org|https://$DEBIAN_MIRROR|g"; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends libpq5 curl shadowsocks-libev gosu bubblewrap libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info pango1.0-tools fonts-wqy-microhei fonts-wqy-zenhei && \
+    apt-get install -y --no-install-recommends libpq5 curl shadowsocks-libev gosu bubblewrap libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info pango1.0-tools fonts-wqy-microhei fonts-wqy-zenhei fonts-noto-cjk && \
+    fc-cache -fv && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from deps stage

@@ -87,6 +87,15 @@ def _request_origin_parts(request: Request) -> tuple[str, str, int | None]:
     elif request.url.port is not None:
         port = request.url.port
 
+    # Drop the port whenever it is 80 or 443. For matching scheme/port pairs this
+    # is plain URL normalization (https://host:443 → https://host). For mismatched
+    # pairs — most commonly https + 80 — it defends against an internal nginx
+    # leaking its own $server_port through a TLS-terminating outer tunnel (FN
+    # Connect, Cloudflare Tunnel, etc.), which would otherwise produce a broken
+    # "https://host:80/..." URL the browser cannot reach.
+    if port in (80, 443):
+        port = None
+
     return scheme, host, port
 
 

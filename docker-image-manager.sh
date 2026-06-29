@@ -121,7 +121,7 @@ print_header() {
   gradient_text "$title"
   printf "%*s${CYAN}|${RESET}\n" "$pad_right" ""
   # 副标题
-  local sub="V26.4.29  Powered by Lance"
+  local sub="V26.7.1  Powered by Lance"
   local sub_len=${#sub}
   local sub_pad_total=$((width - 2 - sub_len))
   local sub_pad_left=$((sub_pad_total / 2))
