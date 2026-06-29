@@ -39,7 +39,13 @@ _scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
+    from .agent.coordinator import bootstrap_checkpointer
     from .prune import prune
+
+    # Serialize LangGraph checkpoint-table CREATE across worker processes here
+    # so per-request compiled_coordinator() never races on pg_type catalog inserts.
+    await bootstrap_checkpointer()
+
     _scheduler.add_job(prune, CronTrigger(hour=3, minute=0), id="prune", replace_existing=True)
     _scheduler.start()
     yield

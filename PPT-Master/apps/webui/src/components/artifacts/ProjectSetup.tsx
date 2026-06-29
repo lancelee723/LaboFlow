@@ -28,7 +28,7 @@ const ACCEPT_TYPES = ".pdf,.docx,.xlsx,.xlsm,.pptx,.md,.txt"
 
 interface ProjectSetupProps {
   projectId: string
-  onSubmit: (userBrief: string, llmConfigId: string | null) => void
+  onSubmit: (userBrief: string, llmConfigId: string | null, generateNotes: boolean) => void
   isStarting?: boolean
 }
 
@@ -42,6 +42,7 @@ export function ProjectSetup({ projectId, onSubmit, isStarting }: ProjectSetupPr
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [selectedLlmId, setSelectedLlmId] = useState<string>("")
+  const [generateNotes, setGenerateNotes] = useState(false)  // default off per product decision
 
   const { data: sources } = useQuery({
     queryKey: ["sources", projectId],
@@ -151,6 +152,32 @@ export function ProjectSetup({ projectId, onSubmit, isStarting }: ProjectSetupPr
       </div>
 
       <div>
+        <label className="flex items-center justify-between rounded-md border p-3">
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">{t("projectSetup_generateNotesLabel")}</span>
+            <span className="text-xs text-muted-foreground">{t("projectSetup_generateNotesHint")}</span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={generateNotes}
+            onClick={() => setGenerateNotes(v => !v)}
+            className={cn(
+              "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              generateNotes ? "bg-primary" : "bg-input",
+            )}
+          >
+            <span
+              className={cn(
+                "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow ring-0 transition-transform",
+                generateNotes ? "translate-x-5" : "translate-x-0",
+              )}
+            />
+          </button>
+        </label>
+      </div>
+
+      <div>
         <label className="text-sm font-medium">{t("projectSetup_filesLabel")}</label>
         <div
           className={cn(
@@ -220,7 +247,7 @@ export function ProjectSetup({ projectId, onSubmit, isStarting }: ProjectSetupPr
       <div className="flex justify-end">
         <Button
           size="lg"
-          onClick={() => onSubmit(brief.trim(), selectedLlmId || null)}
+          onClick={() => onSubmit(brief.trim(), selectedLlmId || null, generateNotes)}
           disabled={isStarting}
         >
           <Play className="mr-2 h-5 w-5" />

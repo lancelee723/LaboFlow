@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import (
     ARRAY,
     Boolean,
@@ -95,6 +96,7 @@ class Session(Base):
     llm_config_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("pptmaster.llm_configs.id", ondelete="SET NULL"), nullable=True,
     )
+    generate_notes: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa.true())
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

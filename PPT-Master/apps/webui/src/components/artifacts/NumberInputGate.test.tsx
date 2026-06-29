@@ -40,4 +40,26 @@ describe("NumberInputGate", () => {
       ),
     ).not.toThrow()
   })
+
+  it("defaults the page-count input to 10 (clamped into [min, max])", () => {
+    const html = renderToStaticMarkup(
+      <NumberInputGate title="Page Count" prompt="" min={3} max={100} onSubmit={vi.fn()} />,
+    )
+    expect(html).toContain('value="10"')
+    expect(html).not.toContain('value="52"')
+  })
+
+  it("clamps default upward when 10 is below min", () => {
+    const html = renderToStaticMarkup(
+      <NumberInputGate title="Page Count" prompt="" min={20} max={50} onSubmit={vi.fn()} />,
+    )
+    expect(html).toContain('value="20"')
+  })
+
+  it("clamps default downward when 10 is above max", () => {
+    const html = renderToStaticMarkup(
+      <NumberInputGate title="Page Count" prompt="" min={3} max={6} onSubmit={vi.fn()} />,
+    )
+    expect(html).toContain('value="6"')
+  })
 })

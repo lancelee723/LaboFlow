@@ -75,6 +75,7 @@ class StartPipelineRequest(BaseModel):
     source_files: list[str] = []
     user_brief: str = ""
     llm_config_id: str | None = None
+    generate_notes: bool = True  # backward-compat default; UI always sends explicit value
 
 
 class ResumeRequest(BaseModel):
@@ -131,6 +132,7 @@ async def start_pipeline(
             current_step=1,
             is_interrupted=False,
             llm_config_id=request.llm_config_id,
+            generate_notes=request.generate_notes,
         )
         session.add(db_session)
 
@@ -157,6 +159,7 @@ async def start_pipeline(
         "current_step": 1,
         "completed_steps": [],
         "messages": [],
+        "generate_notes": request.generate_notes,
     }
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -286,6 +289,14 @@ async def _run_pipeline(
                         project.current_step = 7
                     await session.commit()
 
+            # Authoritative end-of-run signal. Sent AFTER the DB commit so a
+            # status-poll lands after status_locked="completed", and a WS-send
+            # failure here doesn't poison the just-committed completion state.
+            try:
+                await ws_manager.send_event(session_id, "pipeline_completed", {})
+            except Exception:
+                logger.warning("pipeline_completed WS send failed for session %s", session_id)
+
     except asyncio.CancelledError:
         async with open_db_session() as db:
             row = (await db.execute(select(Session).where(Session.id == session_id))).scalar_one_or_none()
@@ -378,6 +389,14 @@ async def _run_pipeline_resume(
                         proj.status = "completed"
                         proj.current_step = 7
                     await session.commit()
+
+            # Authoritative end-of-run signal. Sent AFTER the DB commit so a
+            # status-poll lands after status_locked="completed", and a WS-send
+            # failure here doesn't poison the just-committed completion state.
+            try:
+                await ws_manager.send_event(session_id, "pipeline_completed", {})
+            except Exception:
+                logger.warning("pipeline_completed WS send failed for session %s", session_id)
 
     except asyncio.CancelledError:
         async with open_db_session() as db:

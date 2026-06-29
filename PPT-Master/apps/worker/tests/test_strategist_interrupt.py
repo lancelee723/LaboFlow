@@ -207,6 +207,30 @@ async def test_page_count_gate_records_explicit_mode(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_page_count_gate_accepts_minimum_of_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """page_count=1 is the new lower bound; ensures users can request a single-page deck."""
+    monkeypatch.setattr("pptmaster.agent.strategist.get_chat_model", _fake_get_chat_model)
+
+    compiled_graph = build_strategist_subgraph().compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+
+    async for _ in compiled_graph.astream(build_base_state(), config):
+        pass
+    async for _ in compiled_graph.astream(Command(resume={"answers": {"decision": "approve"}}), config):
+        pass
+
+    async for _ in compiled_graph.astream(
+        Command(resume={"answers": {"decision": "approve", "page_count_mode": "explicit", "page_count": 1}}),
+        config,
+    ):
+        pass
+
+    snapshot = await compiled_graph.aget_state(config)
+    assert snapshot.values["confirmation_progress"]["page_count"] == "approved"
+    assert snapshot.values["page_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_page_count_gate_records_ai_decide_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("pptmaster.agent.strategist.get_chat_model", _fake_get_chat_model)
 

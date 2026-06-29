@@ -28,7 +28,9 @@ export function NumberInputGate({
 }: NumberInputGateProps) {
   const { t } = useTranslation("editor")
   const [mode, setMode] = useState<"explicit" | "ai_decide">("ai_decide")
-  const [value, setValue] = useState<number>(Math.round((min + max) / 2))
+  // Default to 10 — typical short-presentation length, clamped into [min, max]
+  // so callers with tighter ranges still get a valid initial value.
+  const [value, setValue] = useState<number>(Math.max(min, Math.min(10, max)))
   const [recApplied, setRecApplied] = useState(false)
 
   useEffect(() => {

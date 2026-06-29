@@ -372,11 +372,11 @@ def _gate_page_count_node():
                 raw_answer = response.get("answer") if isinstance(response, dict) else None
                 try:
                     coerced = int(str(raw_answer).strip())
-                    if 3 <= coerced <= 100:
+                    if 1 <= coerced <= 100:
                         mode = "explicit"
                         answers = {**answers, "page_count": coerced}
                     else:
-                        pending_feedback = "Page count must be between 3 and 100."
+                        pending_feedback = "Page count must be between 1 and 100."
                         continue
                 except (TypeError, ValueError):
                     pass
@@ -392,10 +392,10 @@ def _gate_page_count_node():
                     try:
                         value = int(answers.get("page_count"))
                     except (TypeError, ValueError):
-                        pending_feedback = "Page count must be an integer between 3 and 100."
+                        pending_feedback = "Page count must be an integer between 1 and 100."
                         continue
-                    if not (3 <= value <= 100):
-                        pending_feedback = "Page count must be between 3 and 100."
+                    if not (1 <= value <= 100):
+                        pending_feedback = "Page count must be between 1 and 100."
                         continue
                     update["page_count"] = value
                 else:

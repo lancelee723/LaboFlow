@@ -400,6 +400,12 @@ export function ProjectEditorPage() {
         }
         break
       }
+      case "pipeline_completed":
+        setIsRunning(false)
+        setThinking("")
+        // 7 is the "done" sentinel; ChatBubble reads this to switch into the completed phase.
+        setPipelineStep(7)
+        break
       case "artifact_updated":
         if (id && (!event.project_id || event.project_id === id)) {
           queryClient.invalidateQueries({ queryKey: ["project-artifacts", id] })
@@ -601,7 +607,7 @@ export function ProjectEditorPage() {
     navigator.clipboard.writeText(report).catch(() => {})
   }
 
-  const handleStartFromPanel = useCallback(async (userBrief: string, llmConfigId: string | null) => {
+  const handleStartFromPanel = useCallback(async (userBrief: string, llmConfigId: string | null, generateNotes: boolean) => {
     if (!id) return
     setPipelineStep(1)
     setSvgProgress(null)
@@ -620,6 +626,7 @@ export function ProjectEditorPage() {
           source_files: [],
           user_brief: brief,
           llm_config_id: llmConfigId,
+          generate_notes: generateNotes,
         }),
       })
       setSessionId(sess.session_id)
@@ -816,7 +823,7 @@ export function ProjectEditorPage() {
                     title={displayGateTitle}
                     prompt={gatePrompt}
                     recommendation={gateRecommendation}
-                    min={3}
+                    min={1}
                     max={100}
                     unit="pages"
                     onSubmit={async (result) => {
@@ -1047,6 +1054,8 @@ export function ProjectEditorPage() {
                 setSessionId(null)
                 setIsRunning(true)
                 try {
+                  // generate_notes intentionally omitted: soft-reset falls back to backend default (True).
+                  // User-facing toggle only applies at the initial ProjectSetup form, not on session restart.
                   const sess = await apiFetch<{ session_id: string }>("/api/orchestrate/start", {
                     method: "POST",
                     body: JSON.stringify({ project_id: id, source_files: [], user_brief: "" }),
@@ -1089,8 +1098,8 @@ export function ProjectEditorPage() {
         </div>
       )}
 
-      {/* Floating chat bubble / drawer — visible while pipeline is running */}
-      {isRunning && sessionId && (
+      {/* Floating chat bubble / drawer — visible during run AND after explicit completion sentinel */}
+      {(isRunning || pipelineStep >= 7) && sessionId && (
         chatOpen ? (
           <ChatDrawer
             messages={messages}

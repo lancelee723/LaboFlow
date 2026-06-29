@@ -7,10 +7,12 @@ import os
 import re
 import socket
 import time
+import zlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command, interrupt
@@ -519,6 +521,44 @@ async def step_5_5_preflight_review(state: PPTMasterState) -> dict[str, Any]:
     }
 
 
+async def _maybe_write_speaker_notes(
+    model: Any,
+    pages: list[dict],
+    base_path: Path,
+    generate_notes: bool,
+) -> str:
+    """Generate notes/total.md when the user enabled speaker-notes generation.
+
+    Returns a short human-readable status string used by the executor's chat
+    broadcast. Failures are logged + swallowed so they never abort the pipeline.
+    """
+    if not generate_notes:
+        return "Speaker notes disabled by user."
+
+    t_start = time.monotonic()
+    logger.info("perf_inter_step_gap", extra={"from_step": "svg_generation", "to_step": "speaker_notes"})
+    try:
+        prompt = (
+            "Write complete speaker notes for this presentation. "
+            "One section per page: '# NN_name' heading, then 2-5 natural spoken sentences. "
+            "Pages separated by '---'. No bracketed markers, no meta-lines.\n\n"
+            f"Outline: {json.dumps(pages, ensure_ascii=False, indent=2)}"
+        )
+        resp = await model.ainvoke(prompt)
+        text = resp.content if hasattr(resp, "content") else ""
+        notes_dir = base_path / "notes"
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        (notes_dir / "total.md").write_text(text, encoding="utf-8")
+        msg = "Speaker notes written to notes/total.md"
+    except Exception as e:
+        logger.warning(f"Speaker notes generation failed: {e}")
+        msg = "Speaker notes not generated (LLM error)."
+    finally:
+        t_done = time.monotonic()
+        logger.info("perf_notes_done", extra={"elapsed_s": round(t_done - t_start, 3)})
+    return msg
+
+
 # ── Step 6: Executor SVG Generation ─────────────────────────────────────────
 
 def _find_free_port() -> int:
@@ -926,26 +966,12 @@ Use it to produce a content-rich, accurate SVG slide. Specific source content fo
                       "message": f"QC retry failed for pages: {_qc_warn_pages}"}
 
     # --- 8. Speaker Notes ---
-    notes_msg = "Speaker notes not generated."
-    t_notes_start = time.monotonic()
-    logger.info("perf_inter_step_gap", extra={"from_step": "svg_generation", "to_step": "speaker_notes"})
-    try:
-        notes_prompt = (
-            "Write complete speaker notes for this presentation. "
-            "One section per page: '# NN_name' heading, then 2-5 natural spoken sentences. "
-            "Pages separated by '---'. No bracketed markers, no meta-lines.\n\n"
-            f"Outline: {json.dumps(pages, ensure_ascii=False, indent=2)}"
-        )
-        notes_response = await model.ainvoke(notes_prompt)
-        notes_text = notes_response.content if hasattr(notes_response, "content") else ""
-        notes_dir = base_path / "notes"
-        notes_dir.mkdir(parents=True, exist_ok=True)
-        (notes_dir / "total.md").write_text(notes_text, encoding="utf-8")
-        notes_msg = "Speaker notes written to notes/total.md"
-    except Exception as e:
-        logger.warning(f"Speaker notes generation failed: {e}")
-    t_notes_done = time.monotonic()
-    logger.info("perf_notes_done", extra={"elapsed_s": round(t_notes_done - t_notes_start, 3)})
+    notes_msg = await _maybe_write_speaker_notes(
+        model=model,
+        pages=pages,
+        base_path=base_path,
+        generate_notes=state.get("generate_notes", True),
+    )
 
     # --- 9. Summary ---
     fail_info = f" | {len(failed_pages)} pages failed: {failed_pages}" if failed_pages else ""
@@ -1100,13 +1126,52 @@ def create_coordinator_graph(checkpointer=None):
     return graph
 
 
+# Postgres advisory-lock key serializing checkpoint-table bootstrap across
+# concurrent worker processes. CREATE TABLE IF NOT EXISTS is not concurrency
+# safe (loser hits pg_type_typname_nsp_index); the lock forces serial setup
+# at boot. Derived from a fixed string so every worker contends on the same key.
+CHECKPOINT_BOOTSTRAP_LOCK_KEY = zlib.crc32(b"pptmaster.langgraph.checkpoint.bootstrap")
+
+
+async def bootstrap_checkpointer() -> None:
+    """One-time setup of LangGraph checkpoint tables, called from the FastAPI lifespan.
+
+    Holds a Postgres session-level advisory lock across setup() so multiple
+    worker processes booting in parallel against a fresh DB serialize through
+    it instead of both running CREATE TABLE IF NOT EXISTS concurrently.
+
+    MUST NOT be called from request handlers — per-request setup() is what
+    produced the pg_type_typname_nsp_index race in the first place.
+    """
+    settings = get_settings()
+    url = settings.database_url.replace("+asyncpg", "")
+
+    lock_conn = await psycopg.AsyncConnection.connect(url, autocommit=True)
+    try:
+        await lock_conn.execute(
+            "SELECT pg_advisory_lock(%s)", (CHECKPOINT_BOOTSTRAP_LOCK_KEY,)
+        )
+        try:
+            async with AsyncPostgresSaver.from_conn_string(url) as checkpointer:
+                await checkpointer.setup()
+        finally:
+            await lock_conn.execute(
+                "SELECT pg_advisory_unlock(%s)", (CHECKPOINT_BOOTSTRAP_LOCK_KEY,)
+            )
+    finally:
+        await lock_conn.close()
+
+
 @asynccontextmanager
 async def compiled_coordinator():
-    """Yield a compiled LangGraph with async-context-managed Postgres checkpointer."""
+    """Yield a compiled LangGraph with an async-context-managed Postgres checkpointer.
+
+    Checkpoint tables are bootstrapped once at app startup via
+    bootstrap_checkpointer(); this function MUST NOT call setup() per request.
+    """
     settings = get_settings()
     url = settings.database_url.replace("+asyncpg", "")
     async with AsyncPostgresSaver.from_conn_string(url) as checkpointer:
-        await checkpointer.setup()
         graph = create_coordinator_graph(checkpointer=checkpointer).compile(checkpointer=checkpointer)
         yield graph
 

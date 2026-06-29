@@ -1,6 +1,6 @@
 """LangGraph state definition for PPT-Master pipeline."""
 
-from typing import Any, Literal
+from typing import Any, Literal, NotRequired
 from typing_extensions import TypedDict
 
 
@@ -55,3 +55,6 @@ class PPTMasterState(TypedDict, total=False):
 
     # Gate 8 — Image strategy recommendation (deck_rendering / deck_palette)
     images_recommendation: dict[str, Any] | None
+
+    # Feature: speaker-notes toggle (notes/total.md generation gate)
+    generate_notes: NotRequired[bool]

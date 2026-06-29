@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
-import { FileSearch, FolderOpen, CheckCircle, ClipboardCheck, Palette, Package, LucideIcon } from "lucide-react"
-import { usePipelineStore } from "@/stores/pipeline"
+import { FileSearch, FolderOpen, CheckCircle, ClipboardCheck, Palette, Package, MessageCircle, LucideIcon } from "lucide-react"
+import { usePipelineStoreSSR } from "@/stores/pipeline"
 
 interface PhaseInfo {
   icon: LucideIcon
@@ -9,12 +9,13 @@ interface PhaseInfo {
 }
 
 const PHASE_CONFIG: Record<number, PhaseInfo> = {
-  1: { icon: FileSearch,    labelKey: "phase_sourceProcessing", color: "#6366f1" },
-  2: { icon: FolderOpen,    labelKey: "phase_initializing",      color: "#6366f1" },
-  3: { icon: CheckCircle,   labelKey: "phase_reviewingStrategy", color: "#8b5cf6" },
+  1: { icon: FileSearch,     labelKey: "phase_sourceProcessing", color: "#6366f1" },
+  2: { icon: FolderOpen,     labelKey: "phase_initializing",     color: "#6366f1" },
+  3: { icon: CheckCircle,    labelKey: "phase_reviewingStrategy", color: "#8b5cf6" },
   4: { icon: ClipboardCheck, labelKey: "phase_reviewingStrategy", color: "#8b5cf6" },
-  5: { icon: Palette,       labelKey: "phase_generatingSVGs",   color: "#a855f7" },
-  6: { icon: Package,       labelKey: "phase_assemblingPPTX",   color: "#7c3aed" },
+  5: { icon: Palette,        labelKey: "phase_generatingSVGs",    color: "#a855f7" },
+  6: { icon: Package,        labelKey: "phase_assemblingPPTX",    color: "#7c3aed" },
+  7: { icon: MessageCircle,  labelKey: "phase_done",              color: "#94a3b8" },
 }
 
 const DEFAULT_PHASE = PHASE_CONFIG[3]
@@ -58,9 +59,13 @@ interface ChatBubbleProps {
 
 export function ChatBubble({ onClick }: ChatBubbleProps) {
   const { t } = useTranslation("editor")
-  const step = usePipelineStore((s) => s.pipelineStep)
+  const step = usePipelineStoreSSR((s) => s.pipelineStep)
   const phase = PHASE_CONFIG[step] ?? DEFAULT_PHASE
   const Icon = phase.icon
+  // Only the explicit completion sentinel (set by the pipeline_completed WS handler)
+  // counts as done. This avoids false-positive done renders when isRunning is false
+  // mid-pipeline (e.g. session was restored at a waiting_for_input gate).
+  const done = step >= 7
 
   return (
     <button
@@ -75,7 +80,7 @@ export function ChatBubble({ onClick }: ChatBubbleProps) {
         style={{
           backgroundColor: `${phase.color}18`,
           color: phase.color,
-          animation: "breathe 2s ease-in-out infinite",
+          animation: done ? undefined : "breathe 2s ease-in-out infinite",
         }}
       >
         <Icon className="h-3.5 w-3.5" />
@@ -87,7 +92,7 @@ export function ChatBubble({ onClick }: ChatBubbleProps) {
       </span>
 
       {/* Animated dots */}
-      <AnimatedDots color={phase.color} />
+      {!done && <AnimatedDots color={phase.color} />}
     </button>
   )
 }
