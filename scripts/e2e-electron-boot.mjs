@@ -80,7 +80,7 @@ child.on("exit", () => {
     process.platform === "darwin" ? probe?.menuCount >= 6 : probe?.menuCount === 0;
   if (
     probe?.ok &&
-    probe.appName === "PI-Desktop" &&
+    probe.appName === "LaboFlow" &&
     probe.platform === process.platform &&
     (process.platform === "darwin" || probe.maximized === true) &&
     menuContractOk

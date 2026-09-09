@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const APP_NAME = "PI-Desktop";
+const APP_NAME = "LaboFlow";
 const DEV_BUNDLE_ID = "com.laboflow.app.dev";
 const BRANDING_SCHEMA = "v2";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");

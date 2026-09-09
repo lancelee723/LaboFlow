@@ -151,7 +151,7 @@ const enNav: DefaultTheme.NavItem[] = [
   { text: 'Specs', link: '/spec/README' },
   { text: 'ADRs', link: '/adr/README' },
   { text: 'Plugin guide', link: '/plugin-development' },
-  { text: 'GitHub', link: 'https://github.com/vastsa/PI-Desktop' },
+  { text: 'GitHub', link: 'https://github.com/lancelee723/laboflow' },
 ]
 
 const zhNav: DefaultTheme.NavItem[] = [
@@ -159,12 +159,13 @@ const zhNav: DefaultTheme.NavItem[] = [
   { text: '规格', link: '/zh-CN/spec/README' },
   { text: 'ADR', link: '/zh-CN/adr/' },
   { text: '插件开发', link: '/zh-CN/plugin-development' },
-  { text: 'GitHub', link: 'https://github.com/vastsa/PI-Desktop' },
+  { text: 'GitHub', link: 'https://github.com/lancelee723/laboflow' },
 ]
 
 export default defineConfig({
-  title: 'PI-Desktop',
-  description: 'Local-first AI coding agent documentation',
+  srcExclude: ['laboflow/**'],
+  title: 'LaboFlow',
+  description: 'Local-first AI agent workspace documentation',
   appearance: true,
   cleanUrls: true,
   lastUpdated: true,
@@ -179,7 +180,7 @@ export default defineConfig({
     'zh-CN': {
       label: '简体中文',
       lang: 'zh-CN',
-      title: 'PI-Desktop 文档',
+      title: 'LaboFlow 文档',
       description: '本地优先的 AI 编程代理文档',
       themeConfig: {
         nav: zhNav,
@@ -192,8 +193,8 @@ export default defineConfig({
         sidebarMenuLabel: '目录',
         darkModeSwitchLabel: '外观',
         langMenuLabel: '切换语言',
-        editLink: { pattern: 'https://github.com/vastsa/PI-Desktop/edit/main/docs/:path', text: '在 GitHub 上编辑此页' },
-        footer: { message: '为本地优先开发而构建。', copyright: 'Copyright © 2026 PI-Desktop 贡献者' },
+        editLink: { pattern: 'https://github.com/lancelee723/laboflow/edit/main/docs/:path', text: '在 GitHub 上编辑此页' },
+        footer: { message: '为本地优先开发而构建。', copyright: 'Copyright © 2026 LaboFlow 贡献者' },
       },
     },
   },
@@ -204,13 +205,13 @@ export default defineConfig({
   },
   themeConfig: {
     logo: '/brand-mark.svg',
-    siteTitle: 'PI-Desktop',
+    siteTitle: 'LaboFlow',
     search: { provider: 'local' },
-    socialLinks: [{ icon: 'github', link: 'https://github.com/vastsa/PI-Desktop' }],
-    editLink: { pattern: 'https://github.com/vastsa/PI-Desktop/edit/main/docs/:path', text: 'Edit this page on GitHub' },
+    socialLinks: [{ icon: 'github', link: 'https://github.com/lancelee723/laboflow' }],
+    editLink: { pattern: 'https://github.com/lancelee723/laboflow/edit/main/docs/:path', text: 'Edit this page on GitHub' },
     outline: { level: 'deep', label: 'On this page' },
     docFooter: { prev: 'Previous', next: 'Next' },
-    footer: { message: 'Built for local-first development.', copyright: 'Copyright © 2026 PI-Desktop contributors' },
+    footer: { message: 'Built for local-first development.', copyright: 'Copyright © 2026 LaboFlow contributors' },
     nav: enNav,
     sidebar: enSidebar,
   },

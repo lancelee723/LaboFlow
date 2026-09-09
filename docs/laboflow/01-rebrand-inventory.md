@@ -22,7 +22,8 @@
 | `apps/desktop/electron/main/{builtin-skills,plugin-mcp}.ts` | 内置技能回退名、MCP clientInfo |
 | 图标 | LaboFlow Logo SVG → `build/icon_1024.png`（rsvg-convert）→ `scripts/make-icon.py` 派生 `icon.icns`/`icon.png`/`tray-icon-mac.png`；渲染层 `src/assets/brand/logo-{light,dark}.png`（256px，暗色版反色） |
 | `apps/desktop/LaboFlow-macOS-opening-help.txt` | 由 PI-Desktop 版重写（dmg 内用户可见） |
-| 品牌一致性测试 | `development-branding` / `auto-update` / `renderer-branding` 三个测试断言同步改为 LaboFlow，反向守护新品牌 |
+| 品牌一致性测试 | `development-branding` / `auto-update` / `renderer-branding` / `packaging-footprint` / `github-feedback.test` 断言同步改为 LaboFlow，反向守护新品牌 |
+| e2e 脚本品牌断言 | `scripts/e2e-electron-boot.mjs`（appName）、`scripts/e2e-plan-ui.mjs`（窗口标题）改为 LaboFlow；`scripts/dev-electron.mjs` 的 `APP_NAME` 同步 |
 
 ## 明确保留（Stage 2 候选，均为内部标识）
 
@@ -34,9 +35,18 @@
 | 环境变量 `PI_DESKTOP_DEV` | 保留 | dev 脚本内部开关 |
 | 文档站 `docs/`（363 md）与 `docs/spec` 基线 | 保留原文 | 上游规格文档，作为架构参考；本地化改写按需进行 |
 | `.github/workflows` | 保留 | release.yml 推到新远端后自然适配；签名凭据未配置 |
+| `PI_DESKTOP_*` 环境变量名 | 保留 | e2e/dev 脚本内部开关（`PI_DESKTOP_DEV`/`PI_DESKTOP_BOOT_PROBE`/`PI_DESKTOP_TEST_*` 等） |
 | 上游文档站外链（pi-docs.aiuo.net） | 保留 | 应用内帮助入口短期仍指上游文档，功能等价 |
 | 版本号 0.14.5 | 保留 | 与上游基点对齐，便于 cherry-pick 对账；发版节奏自定后可另起版本线 |
 
-## 验证方式
+## 验证结果（2026-09-09）
 
-`pnpm typecheck && pnpm lint && pnpm test`（品牌测试在内）+ `pnpm dev` 启动后 Dock 图标/窗口标题/托盘菜单均为 LaboFlow。
+| 门 | 结果 |
+|---|---|
+| `pnpm build:js`（含 docs/VitePress 站，已 `srcExclude: laboflow/**`） | ✅ |
+| `cargo build -p host-core` | ✅（rustup stable 1.98.1） |
+| `pnpm typecheck` / `pnpm lint` | ✅ |
+| `pnpm test` | ✅ desktop 1,213 + shared 414 + agent-runtime 309 + plugin-sdk 190 + plugin-devkit 39 + i18n 22 + cargo 301，0 失败 |
+| `pnpm test:e2e:boot` | ✅ `PASS boot-probe — app v0.14.5, host protocol 11, appName=LaboFlow` |
+
+注意：`pnpm -r build` 与测试之间改源码后需重建（shared 的 dist 产物会被测试直接引用）。

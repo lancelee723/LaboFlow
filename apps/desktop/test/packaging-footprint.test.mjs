@@ -6,7 +6,7 @@ const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
 const macOpenFixNote = await readFile(
-  new URL("../PI-Desktop-macOS-opening-help.txt", import.meta.url),
+  new URL("../LaboFlow-macOS-opening-help.txt", import.meta.url),
   "utf8",
 );
 const viteConfigSource = await readFile(
@@ -195,7 +195,7 @@ test("macOS targets follow the native architecture selected by the runner", () =
 
 test("macOS installers include trusted-source opening guidance", () => {
   assert.deepEqual(packageJson.build.mac.extraDistFiles, [
-    "PI-Desktop-macOS-opening-help.txt",
+    "LaboFlow-macOS-opening-help.txt",
   ]);
   assert.deepEqual(packageJson.build.dmg.contents, [
     { x: 130, y: 220 },
@@ -204,12 +204,12 @@ test("macOS installers include trusted-source opening guidance", () => {
       x: 270,
       y: 330,
       type: "file",
-      name: "PI-Desktop-macOS-opening-help.txt",
-      path: "PI-Desktop-macOS-opening-help.txt",
+      name: "LaboFlow-macOS-opening-help.txt",
+      path: "LaboFlow-macOS-opening-help.txt",
     },
   ]);
-  assert.match(macOpenFixNote, /xattr -cr \/Applications\/PI-Desktop\.app/);
-  assert.match(macOpenFixNote, /trusted PI-Desktop source/);
+  assert.match(macOpenFixNote, /xattr -cr \/Applications\/LaboFlow\.app/);
+  assert.match(macOpenFixNote, /trusted LaboFlow source/);
   assert.match(macOpenFixNote, /Signed and\s+notarized builds do not need/);
 });
 
