@@ -47,8 +47,10 @@ test("presets and the scale slider persist AppSettings.fontScale", () => {
 test("the renderer applies a global type scale without a reload", () => {
   assert.match(appSource, /resolveFontScale\(settings/);
   assert.match(appSource, /"--font-scale"/);
+  // LaboFlow pivot: the ramp base is 110% of the upstream default so the
+  // previous 100% reads as the new default without touching --font-scale.
   assert.match(tokensSource, /--font-scale:\s*1;/);
-  assert.match(tokensSource, /--text-base:\s*calc\(14px \* var\(--font-scale\)\);/);
+  assert.match(tokensSource, /--text-base:\s*calc\(15\.4px \* var\(--font-scale\)\);/);
   assert.doesNotMatch(tokensSource, /--reading-font-size/);
   assert.doesNotMatch(tokensSource, /\.thread-wrap,\s*\n\.composer-dock \{/);
 });

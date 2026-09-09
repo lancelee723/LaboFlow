@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "pi.computer",
+  "name": "Computer Use",
+  "version": "1.0.0",
+  "description": "Let the agent see and drive this Mac: screen capture, app activation, and keyboard input through osascript. Every call passes the host permission engine; the tool stays disabled until enabled in plugin settings.",
+  "author": "LaboFlow",
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "computer-stop",
+        "title": "Computer Use: emergency stop",
+        "keywords": ["computer", "stop", "紧急停止"],
+        "category": "Agent"
+      }
+    ],
+    "agentTools": [
+      {
+        "name": "computer",
+        "description": "See and drive this Mac (macOS only): take a screenshot to a file, activate an application, type text into the focused app, or press a key by macOS key code. Every action requires permission; disabled until enabled in plugin settings.",
+        "risk": "high",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": ["screenshot", "activate", "type", "key"],
+              "description": "screenshot | activate | type | key"
+            },
+            "app": { "type": "string", "description": "activate: application name" },
+            "text": { "type": "string", "description": "type: text to keystroke" },
+            "key": { "type": "string", "description": "key: macOS key code, e.g. 36 Return, 48 Tab, 53 Escape" }
+          },
+          "required": ["action"]
+        }
+      }
+    ],
+    "settings": [
+      {
+        "key": "enabled",
+        "type": "boolean",
+        "default": false,
+        "title": "Enable Computer Use",
+        "description": "Registers the computer tool. Every call still goes through the permission engine; macOS accessibility (TCC) is required."
+      }
+    ]
+  },
+  "permissions": ["agent.tool.register"]
+}

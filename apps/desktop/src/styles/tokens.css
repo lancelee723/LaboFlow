@@ -240,20 +240,20 @@
     monospace;
 
   /* Type ramp (Codex metrics; "-plus" = half-step between named sizes) */
-  --text-3xs: calc(10.5px * var(--font-scale));
-  --text-2xs: calc(11px * var(--font-scale)); /* alias kept: --text-xs */
-  --text-xs: calc(11px * var(--font-scale));
-  --text-xs-plus: calc(11.5px * var(--font-scale));
-  --text-sm: calc(12px * var(--font-scale));
-  --text-sm-plus: calc(12.5px * var(--font-scale));
-  --text-md: calc(13px * var(--font-scale));
-  --text-md-plus: calc(13.5px * var(--font-scale));
-  --text-base: calc(14px * var(--font-scale));
-  --text-base-plus: calc(15px * var(--font-scale));
-  --text-lg: calc(16px * var(--font-scale));
-  --text-lg-plus: calc(18px * var(--font-scale));
-  --text-xl: calc(20px * var(--font-scale));
-  --text-2xl: calc(28px * var(--font-scale));
+  --text-3xs: calc(11.6px * var(--font-scale));
+  --text-2xs: calc(12.1px * var(--font-scale)); /* alias kept: --text-xs */
+  --text-xs: calc(12.1px * var(--font-scale));
+  --text-xs-plus: calc(12.7px * var(--font-scale));
+  --text-sm: calc(13.2px * var(--font-scale));
+  --text-sm-plus: calc(13.8px * var(--font-scale));
+  --text-md: calc(14.3px * var(--font-scale));
+  --text-md-plus: calc(14.9px * var(--font-scale));
+  --text-base: calc(15.4px * var(--font-scale));
+  --text-base-plus: calc(16.5px * var(--font-scale));
+  --text-lg: calc(17.6px * var(--font-scale));
+  --text-lg-plus: calc(19.8px * var(--font-scale));
+  --text-xl: calc(22px * var(--font-scale));
+  --text-2xl: calc(30.8px * var(--font-scale));
 
   --font-weight-normal: 400;
   --font-weight-medium: 500;
@@ -272,7 +272,7 @@
   --leading-relaxed: 1.5;
   --leading-chat: 1.55;
   --leading-prose: 1.6;
-  --leading-row: calc(18px * var(--font-scale)); /* sidebar thread titles */
+  --leading-row: calc(19.8px * var(--font-scale)); /* sidebar thread titles */
 
   --tracking-tighter: -0.03em;
   --tracking-tight: -0.02em;
