@@ -16,6 +16,7 @@ export type SettingsTabId =
   | "subagents"
   | "import"
   | "projects"
+  | "org"
   | "usage"
   | "about";
 
@@ -209,6 +210,19 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "project.searchPlaceholder",
       "project.archive",
       "project.restore",
+    ],
+  },
+  {
+    id: "org",
+    labelKey: "settings.nav.org",
+    titleKey: "settings.orgTitle",
+    group: "workspace",
+    keywordKeys: [
+      "settings.org.description",
+      "settings.org.server",
+      "settings.org.username",
+      "settings.org.role",
+      "settings.org.workspaces",
     ],
   },
   {

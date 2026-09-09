@@ -108,6 +108,7 @@ export const de = {
     "devDisabled": "Updates sind in Entwicklungs-Builds deaktiviert."
   },
   "nav": {
+    "org": "Organisation",
     "quickActions": "Schnellaktionen",
     "automation": "Automatisierung",
     "skills": "Skills",
@@ -516,6 +517,28 @@ export const de = {
     "dismiss": "Verwerfen"
   },
   "settings": {
+    "orgTitle": "Organisation",
+    "org": {
+      "description": "Verbinden Sie sich mit Ihrem LaboFlow Server, um gemeinsame Arbeitsbereiche, Organisationsmodelle und Kontingente zu nutzen.",
+      "server": "Server-URL",
+      "username": "Benutzername",
+      "password": "Passwort",
+      "login": "Anmelden",
+      "loggingIn": "Anmeldung…",
+      "logout": "Abmelden",
+      "expiredHint": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+      "account": "Konto",
+      "orgName": "Organisation",
+      "team": "Team",
+      "role": "Rolle",
+      "workspaces": "Arbeitsbereiche",
+      "mustChangeHint": "Erstanmeldung: Legen Sie ein neues Passwort fest",
+      "currentPassword": "Aktuelles Passwort",
+      "newPassword": "Neues Passwort",
+      "changePassword": "Passwort ändern",
+      "passwordChanged": "Passwort geändert.",
+      "loginOk": "Verbunden mit {{name}}.",
+    },
     "groupData": "Daten & Statistiken",
     "usageTitle": "Nutzungsstatistiken",
     "usageDescription": "Token-Nutzung aus dem lokalen Turn-Verlauf.",

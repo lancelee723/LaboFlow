@@ -38,6 +38,7 @@ import {
   IconChevronLeft,
   IconDownload,
   IconFileText,
+  IconShield,
   IconInfo,
   IconKeyboard,
   IconSearch,
@@ -55,6 +56,7 @@ import { NetworkProxySection } from "../components/settings/NetworkProxySection"
 import { ReleaseNotesDialog } from "../components/ReleaseNotesDialog";
 import { ProjectsPage } from "./ProjectsPage";
 import { TokenUsagePage } from "../components/settings/TokenUsagePage";
+import { OrgSettingsPage } from "../components/settings/OrgSettingsPage";
 import { AgentSkillsPage } from "../components/settings/AgentSkillsPage";
 import { AgentMcpPage } from "../components/settings/AgentMcpPage";
 import { AgentSubagentsPage } from "../components/settings/AgentSubagentsPage";
@@ -1240,6 +1242,7 @@ export function SettingsPage() {
       subagents: <IconBot size={14} />,
       import: <IconDownload size={14} />,
       projects: <IconArchive size={14} />,
+      org: <IconShield size={14} />,
       usage: <IconActivity size={14} />,
       about: <IconInfo size={14} />,
     };
@@ -1475,6 +1478,8 @@ export function SettingsPage() {
           {tab === "import" && <ImportSection />}
 
           {tab === "projects" && <ProjectsPage />}
+
+          {tab === "org" && <OrgSettingsPage />}
 
           {tab === "usage" && <TokenUsagePage />}
 

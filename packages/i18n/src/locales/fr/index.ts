@@ -108,6 +108,7 @@ export const fr = {
     "devDisabled": "Les mises à jour sont désactivées dans les versions de développement."
   },
   "nav": {
+    "org": "Organisation",
     "quickActions": "Actions rapides",
     "automation": "Automatisations",
     "skills": "Skills",
@@ -516,6 +517,28 @@ export const fr = {
     "dismiss": "Ignorer"
   },
   "settings": {
+    "orgTitle": "Organisation",
+    "org": {
+      "description": "Connectez-vous à votre LaboFlow Server pour activer les espaces partagés, les modèles d'organisation et les quotas.",
+      "server": "URL du serveur",
+      "username": "Identifiant",
+      "password": "Mot de passe",
+      "login": "Se connecter",
+      "loggingIn": "Connexion…",
+      "logout": "Se déconnecter",
+      "expiredHint": "Votre session a expiré. Reconnectez-vous.",
+      "account": "Compte",
+      "orgName": "Organisation",
+      "team": "Équipe",
+      "role": "Rôle",
+      "workspaces": "Espaces de travail",
+      "mustChangeHint": "Première connexion : définissez un nouveau mot de passe",
+      "currentPassword": "Mot de passe actuel",
+      "newPassword": "Nouveau mot de passe",
+      "changePassword": "Changer le mot de passe",
+      "passwordChanged": "Mot de passe modifié.",
+      "loginOk": "Connecté à {{name}}.",
+    },
     "groupData": "Données et stats",
     "usageTitle": "Statistiques d'utilisation",
     "usageDescription": "Utilisation des tokens basée sur l'historique local des tours.",

@@ -2206,3 +2206,70 @@
   color: var(--ds-text-secondary);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Organization settings ------------------------------------------------ */
+.org-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 24px;
+}
+
+.org-loading,
+.org-description {
+  color: var(--ds-text-muted);
+  font-size: var(--text-sm);
+}
+
+.org-expired {
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-chip);
+  border: 1px solid var(--ds-border-default);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.org-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-elevated-opaque);
+  border: 1px solid var(--ds-border-subtle);
+  max-width: 520px;
+}
+
+.org-card-title {
+  font-size: var(--text-sm);
+  color: var(--ds-text-primary);
+}
+
+.org-row {
+  display: flex;
+  gap: 12px;
+  font-size: var(--text-xs);
+}
+
+.org-label {
+  width: 120px;
+  flex: none;
+  color: var(--ds-text-muted);
+}
+
+.org-value {
+  color: var(--ds-text-primary);
+}
+
+.org-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--ds-text-secondary);
+}
+
+.org-actions {
+  display: flex;
+}

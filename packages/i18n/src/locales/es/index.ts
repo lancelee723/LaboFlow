@@ -108,6 +108,7 @@ export const es = {
     "devDisabled": "Las actualizaciones están deshabilitadas en las compilaciones de desarrollo."
   },
   "nav": {
+    "org": "Organización",
     "quickActions": "Acciones rápidas",
     "automation": "Automatización",
     "skills": "Skills",
@@ -516,6 +517,28 @@ export const es = {
     "dismiss": "Descartar"
   },
   "settings": {
+    "orgTitle": "Organización",
+    "org": {
+      "description": "Conéctese a su LaboFlow Server para habilitar espacios compartidos, modelos de organización y cuotas.",
+      "server": "URL del servidor",
+      "username": "Usuario",
+      "password": "Contraseña",
+      "login": "Iniciar sesión",
+      "loggingIn": "Iniciando sesión…",
+      "logout": "Cerrar sesión",
+      "expiredHint": "Su sesión expiró. Inicie sesión de nuevo.",
+      "account": "Cuenta",
+      "orgName": "Organización",
+      "team": "Equipo",
+      "role": "Rol",
+      "workspaces": "Espacios de trabajo",
+      "mustChangeHint": "Primer inicio: establezca una nueva contraseña",
+      "currentPassword": "Contraseña actual",
+      "newPassword": "Nueva contraseña",
+      "changePassword": "Cambiar contraseña",
+      "passwordChanged": "Contraseña cambiada.",
+      "loginOk": "Conectado a {{name}}.",
+    },
     "groupData": "Datos y estadísticas",
     "usageTitle": "Estadísticas de uso",
     "usageDescription": "Uso de tokens basado en el historial local de turnos.",

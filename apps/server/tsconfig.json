@@ -1,0 +1,5 @@
+{
+  "extends": "@laboflow/tsconfig/base.json",
+  "compilerOptions": { "noEmit": true, "experimentalDecorators": true, "emitDecoratorMetadata": true, "module": "CommonJS", "moduleResolution": "node", "useDefineForClassFields": false },
+  "include": ["src/**/*"]
+}

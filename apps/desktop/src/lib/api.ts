@@ -653,6 +653,19 @@ export const api = {
   /** Download and install one marketplace skill into the global skills root. */
   skillMarketInstall: (payload: { slug: string; name?: string }) =>
     invoke<{ skill?: UserSkillRecord }>(IPC.invoke.skillMarketInstall, payload),
+
+  // --- Organization session (PRD 4.1.12) ------------------------------------
+  orgLogin: (input: { serverUrl: string; username: string; password: string }) =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgLogin, input),
+  orgLogout: () =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgLogout),
+  orgStatus: () =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgStatus),
+  orgChangePassword: (input: { currentPassword: string; newPassword: string }) =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(
+      IPC.invoke.orgChangePassword,
+      input,
+    ),
   /**
    * Level and project must travel with the id: a project skill has no global
    * counterpart to fall back to, so resolving by id alone would miss it.

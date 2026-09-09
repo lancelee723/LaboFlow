@@ -154,6 +154,7 @@ import {
 } from "./plugin-agent-complete";
 
 import { HostProcess } from "./host-process";
+import { OrgService } from "./org-service";
 import {
   shouldCreateTaskNotification as shouldCreateTaskNotificationPolicy,
   shouldShowNativeNotification,
@@ -6809,6 +6810,24 @@ function registerIpc() {
     if (!host) throw new Error("host unavailable");
     return host.call("secrets.delete", { secretRef });
   });
+
+  // Org session (PRD 4.1.12): login/logout/status against the LaboFlow
+  // Server. Tokens live in the host secret store; the renderer only sees the
+  // mapped OrgStatus profile.
+  const orgService = new OrgService({
+    call: async <T,>(method: string, params?: unknown) => {
+      if (!host) throw new Error("host unavailable");
+      return (await host.call(method, params)) as T;
+    },
+  });
+  handle(IPC.invoke.orgLogin, (input: { serverUrl: string; username: string; password: string }) =>
+    orgService.login(input),
+  );
+  handle(IPC.invoke.orgChangePassword, (input: { currentPassword: string; newPassword: string }) =>
+    orgService.changePassword(input),
+  );
+  handle(IPC.invoke.orgLogout, () => orgService.logout());
+  handle(IPC.invoke.orgStatus, () => orgService.status());
   handle(IPC.invoke.secretsHas, async (secretRef: string) => {
     if (!host) throw new Error("host unavailable");
     return host.call("secrets.has", { secretRef });

@@ -1908,3 +1908,38 @@ export type TokenUsageHistoryResult = {
     turnCount: number;
   };
 };
+
+// --- Organization (PRD 4.1.12 / FR-S-01) -----------------------------------
+
+export type OrgRole = "sys_admin" | "team_admin" | "member";
+
+export type OrgProfile = {
+  userId: string;
+  username: string;
+  displayName?: string;
+  role?: OrgRole | string;
+};
+
+export type OrgStatus = {
+  connected: boolean;
+  /** "expired" = tokens exist but the server rejected them; re-login needed. */
+  state: "disconnected" | "connected" | "expired";
+  serverUrl?: string;
+  username?: string;
+  displayName?: string;
+  role?: string;
+  orgName?: string;
+  teamName?: string;
+  workspaceCount?: number;
+  mustChangePassword?: boolean;
+  error?: string;
+};
+
+export type OrgBootstrap = {
+  org: { name?: string; teamId?: string | null; teamName?: string | null };
+  me: OrgProfile;
+  workspaces: Array<Record<string, unknown>>;
+  orgChannels: Array<Record<string, unknown>>;
+  gateway?: { url?: string; virtualKey?: string };
+};
+

@@ -2,7 +2,7 @@
   "name": "laboflow",
   "private": true,
   "version": "0.14.5",
-  "description": "LaboFlow — local-first AI agent desktop workspace (hard fork of PI-Desktop v0.14.5)",
+  "description": "LaboFlow \u2014 local-first AI agent desktop workspace (hard fork of PI-Desktop v0.14.5)",
   "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=22.19.0",
@@ -37,6 +37,11 @@
     "clean": "pnpm -r --if-present clean && cargo clean"
   },
   "devDependencies": {
-    "@pi-desktop/plugin-devkit": "workspace:*"
+    "@pi-desktop/plugin-devkit": "workspace:*",
+    "eslint": "^9.30.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.12.0",
+    "prettier": "^3.6.0",
+    "typescript-eslint": "^8.69.0"
   }
 }
