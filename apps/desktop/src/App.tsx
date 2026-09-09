@@ -1851,7 +1851,9 @@ function AppShell() {
                 workPanelOpen={presentedWorkPanelOpen}
                 onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
                 onNewTask={() => void runMenuCommand("newTask")}
-                onOpenSearch={() => setSearchOpen(true)}
+                onToggleWorkPanel={() =>
+                  useAppStore.getState().toggleWorkPanel()
+                }
               />
             ) : (
               <div

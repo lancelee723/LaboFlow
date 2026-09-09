@@ -14,8 +14,9 @@ const viteConfigSource = await readFile(
   "utf8",
 );
 
-test("packaging installs only the updater runtime dependency", () => {
+test("packaging installs only the updater and skill-market runtime dependencies", () => {
   assert.deepEqual(Object.keys(packageJson.dependencies).sort(), [
+    "adm-zip",
     "electron-updater",
   ]);
 

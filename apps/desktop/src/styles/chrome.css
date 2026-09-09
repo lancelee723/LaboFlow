@@ -1035,3 +1035,52 @@
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* Sidebar quick action rows (ZCode-aligned top actions) */
+.sidebar-quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px 10px;
+}
+
+.sidebar-quick-actions button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.sidebar-quick-actions button:hover {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
+}
+
+.sidebar-quick-actions button span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-quick-actions button kbd {
+  font-size: var(--text-2xs);
+  color: var(--ds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.conversation-topbar .ct-icon-btn[aria-pressed="true"] {
+  background: var(--ds-bg-active);
+  color: var(--ds-text-primary);
+}

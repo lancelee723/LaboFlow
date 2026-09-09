@@ -52,6 +52,14 @@ type SkillEditorState = {
   level: AgentCapabilityLevel;
 };
 
+type MarketSkill = {
+  slug: string;
+  name: string;
+  description: string;
+  author: string;
+  downloads: number;
+};
+
 export function AgentSkillsPage() {
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
@@ -282,6 +290,43 @@ export function AgentSkillsPage() {
     };
   }, [globalSkills, projectSkills, search]);
 
+  // --- Online skill market (Clawhub by default) ---------------------------
+  const [marketQuery, setMarketQuery] = useState("");
+  const [marketResults, setMarketResults] = useState<MarketSkill[] | null>(null);
+  const [marketSearching, setMarketSearching] = useState(false);
+  const [marketBusy, setMarketBusy] = useState<string | null>(null);
+
+  const runMarketSearch = async () => {
+    const query = marketQuery.trim();
+    if (!query || marketSearching) return;
+    setMarketSearching(true);
+    try {
+      const results = await api.skillMarketSearch(query);
+      setMarketResults(results ?? []);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+      setMarketResults([]);
+    } finally {
+      setMarketSearching(false);
+    }
+  };
+
+  const installMarketSkill = async (skill: MarketSkill) => {
+    if (marketBusy) return;
+    setMarketBusy(skill.slug);
+    try {
+      await api.skillMarketInstall({ slug: skill.slug, name: skill.name });
+      showToast(t("settings.skillMarketInstalled", { name: skill.name }), {
+        variant: "success",
+      });
+      await load();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally {
+      setMarketBusy(null);
+    }
+  };
+
   const counts = {
     all: visible.global.length + visible.project.length,
     global: visible.global.length,
@@ -488,6 +533,69 @@ export function AgentSkillsPage() {
             ) : null}
           </>
         )}
+      </CapabilityPanel>
+
+      <CapabilityPanel loading={false} refreshing={marketSearching} loadingLabel={t("settings.loadingCapabilities")}>
+        <div className="skill-market">
+          <div className="skill-market-head">
+            <span className="skill-market-title">{t("settings.skillMarketTitle")}</span>
+            <span className="skill-market-source">Clawhub</span>
+          </div>
+          <div className="skill-market-search">
+            <input
+              className="field-input"
+              value={marketQuery}
+              placeholder={t("settings.skillMarketSearchPlaceholder")}
+              onChange={(event) => setMarketQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void runMarketSearch();
+                }
+              }}
+            />
+            <CapabilityButton
+              busy={marketSearching}
+              onClick={() => void runMarketSearch()}
+            >
+              {t("settings.skillMarketSearch")}
+            </CapabilityButton>
+          </div>
+          {marketResults?.length ? (
+            <div className="skill-market-results">
+              {marketResults.map((skill) => (
+                <div className="skill-market-row" key={skill.slug}>
+                  <div className="skill-market-info">
+                    <span className="skill-market-name">{skill.name}</span>
+                    <span className="skill-market-meta">
+                      {[
+                        skill.author,
+                        skill.downloads
+                          ? t("settings.skillMarketDownloads", { count: skill.downloads })
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    {skill.description ? (
+                      <span className="skill-market-desc">{skill.description}</span>
+                    ) : null}
+                  </div>
+                  <CapabilityButton
+                    busy={marketBusy === skill.slug}
+                    onClick={() => void installMarketSkill(skill)}
+                  >
+                    <IconDownload size={14} />
+                    {t("settings.skillMarketInstall")}
+                  </CapabilityButton>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {marketResults && !marketResults.length ? (
+            <CapabilityEmpty message={t("settings.skillMarketEmpty")} />
+          ) : null}
+        </div>
       </CapabilityPanel>
 
       {editor ? (

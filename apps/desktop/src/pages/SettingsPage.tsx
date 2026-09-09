@@ -31,6 +31,7 @@ import {
   type SettingsNavGroupId,
 } from "../lib/settings-search";
 import {
+  IconActivity,
   IconArchive,
   IconBookOpen,
   IconBot,
@@ -53,6 +54,7 @@ import { ThemeRow } from "../components/settings/ThemeRow";
 import { NetworkProxySection } from "../components/settings/NetworkProxySection";
 import { ReleaseNotesDialog } from "../components/ReleaseNotesDialog";
 import { ProjectsPage } from "./ProjectsPage";
+import { TokenUsagePage } from "../components/settings/TokenUsagePage";
 import { AgentSkillsPage } from "../components/settings/AgentSkillsPage";
 import { AgentMcpPage } from "../components/settings/AgentMcpPage";
 import { AgentSubagentsPage } from "../components/settings/AgentSubagentsPage";
@@ -1238,6 +1240,7 @@ export function SettingsPage() {
       subagents: <IconBot size={14} />,
       import: <IconDownload size={14} />,
       projects: <IconArchive size={14} />,
+      usage: <IconActivity size={14} />,
       about: <IconInfo size={14} />,
     };
     return SETTINGS_NAV.map((entry) => ({
@@ -1472,6 +1475,8 @@ export function SettingsPage() {
           {tab === "import" && <ImportSection />}
 
           {tab === "projects" && <ProjectsPage />}
+
+          {tab === "usage" && <TokenUsagePage />}
 
           {tab === "about" && (
             <div className="settings-stack">

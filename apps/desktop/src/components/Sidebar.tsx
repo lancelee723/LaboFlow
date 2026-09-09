@@ -67,6 +67,7 @@ import {
   IconArchiveRestore,
   IconArrowUpDown,
   IconPlug,
+  IconBookOpen,
   IconBranch,
   IconCheck,
   IconChevronDown,
@@ -85,6 +86,12 @@ import {
   IconStar,
   IconX,
 } from "./icons";
+import {
+  KEYBOARD_SHORTCUTS,
+  keybindingDisplayParts,
+  resolveKeybinding,
+  type ShortcutPlatform,
+} from "@pi-desktop/shared";
 
 type ProjectEntry = {
   path: string;
@@ -274,6 +281,17 @@ export function Sidebar({
   const showToast = useAppStore((s) => s.showToast);
   const version = useAppStore((s) => s.version);
   const setSettingsTab = useAppStore((s) => s.setSettingsTab);
+
+  const shortcutHint = (id: string) => {
+    const entry = KEYBOARD_SHORTCUTS.find((shortcut) => shortcut.id === id);
+    if (!entry) return null;
+    const platform = (window.piDesktop?.platform ?? "darwin") as ShortcutPlatform;
+    const parts = keybindingDisplayParts(
+      resolveKeybinding(entry, settings?.keybindings, platform),
+      platform,
+    );
+    return parts.length ? parts.join("") : null;
+  };
   const setSettingsAnchor = useAppStore((s) => s.setSettingsAnchor);
   const update = useUpdateState();
 
@@ -284,6 +302,10 @@ export function Sidebar({
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const [sectionMenu, setSectionMenu] = useState<"sessions" | "projects" | null>(null);
   const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const [quickTaskMenu, setQuickTaskMenu] = useState<{
     top: number;
     left: number;
   } | null>(null);
@@ -418,6 +440,7 @@ export function Sidebar({
     setSessionMenu(null);
     setProjectMenu(null);
     setSectionMenu(null);
+    setQuickTaskMenu(null);
     setMenuPosition(null);
     if (restoreFocus && trigger) requestAnimationFrame(() => trigger.focus());
   }, []);
@@ -510,7 +533,8 @@ export function Sidebar({
   );
 
   useEffect(() => {
-    if (!sortOpen && !sessionMenu && !projectMenu && !sectionMenu) return;
+    if (!sortOpen && !sessionMenu && !projectMenu && !sectionMenu && !quickTaskMenu)
+      return;
     const onPointer = (e: PointerEvent) => {
       // Right-click must not dismiss first; contextmenu handlers reopen create menus.
       if (e.button === 2 || (e.pointerType === "mouse" && e.buttons === 2)) return;
@@ -533,12 +557,13 @@ export function Sidebar({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onViewportChange);
     };
-  }, [sortOpen, sessionMenu, projectMenu, sectionMenu, closeMenus]);
+  }, [sortOpen, sessionMenu, projectMenu, sectionMenu, quickTaskMenu, closeMenus]);
 
   useEffect(() => {
-    if (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen) return;
+    if (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen && !quickTaskMenu)
+      return;
     requestAnimationFrame(() => menuFirstItemRef.current?.focus());
-  }, [sessionMenu, projectMenu, sectionMenu, sortOpen]);
+  }, [sessionMenu, projectMenu, sectionMenu, sortOpen, quickTaskMenu]);
 
   useEffect(() => {
     if (!projectPathTooltip) return;
@@ -1139,6 +1164,22 @@ export function Sidebar({
     await createSession({ projectPath: path });
   };
 
+  // Quick "new task" entry (ZCode-aligned): no open projects means a
+  // standalone session directly; otherwise pick standalone vs. a project.
+  const openQuickTaskMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setSortOpen(false);
+    setSessionMenu(null);
+    setProjectMenu(null);
+    setSectionMenu(null);
+    if (!openProjects.length) {
+      void createSession({ projectPath: null });
+      return;
+    }
+    setMenuPosition({ top: rect.bottom + 6, left: rect.left });
+    setQuickTaskMenu({ top: rect.bottom + 6, left: rect.left });
+  };
+
   const openProjectPicker = async () => {
     try {
       await openProject();
@@ -1404,9 +1445,52 @@ export function Sidebar({
     if (
       !menuPosition ||
       typeof document === "undefined" ||
-      (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen)
+      (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen && !quickTaskMenu)
     ) {
       return null;
+    }
+    if (quickTaskMenu) {
+      return createPortal(
+        <div
+          className="sidebar-row-menu sidebar-floating-menu sidebar-quick-task-menu"
+          role="menu"
+          onKeyDown={onMenuKeyDown}
+          style={{
+            top: quickTaskMenu.top,
+            left: quickTaskMenu.left,
+          }}
+        >
+          <button
+            ref={menuFirstItemRef}
+            type="button"
+            role="menuitem"
+            data-action="quick-new-standalone"
+            onClick={() => {
+              closeMenus(false);
+              void createSession({ projectPath: null });
+            }}
+          >
+            <IconNewSession size={14} />
+            <span>{t("nav.newTemporarySession")}</span>
+          </button>
+          {openProjects.map((project) => (
+            <button
+              key={project.path}
+              type="button"
+              role="menuitem"
+              data-action="quick-new-project-session"
+              onClick={() => {
+                closeMenus(false);
+                void createSession({ projectPath: project.path });
+              }}
+            >
+              <IconFolder size={14} />
+              <span>{project.name}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      );
     }
     if (sectionMenu) {
       const isSessions = sectionMenu === "sessions";
@@ -1780,6 +1864,56 @@ export function Sidebar({
           </button>
         </div>
       </div>
+
+      <nav className="sidebar-quick-actions no-drag" aria-label={t("nav.quickActions")}>
+        <button
+          type="button"
+          data-action="quick-new-task"
+          onClick={openQuickTaskMenu}
+        >
+          <IconNewSession size={15} />
+          <span>{t("nav.newTask")}</span>
+          {shortcutHint("newTask") ? <kbd>{shortcutHint("newTask")}</kbd> : null}
+        </button>
+        <button
+          type="button"
+          data-action="quick-search"
+          onClick={onOpenSearch}
+        >
+          <IconSearch size={15} />
+          <span>{t("nav.search")}</span>
+          {shortcutHint("openSearch") ? (
+            <kbd>{shortcutHint("openSearch")}</kbd>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          data-action="quick-scheduled"
+          onClick={() => setPage("scheduled")}
+        >
+          <IconClock size={15} />
+          <span>{t("nav.automation")}</span>
+        </button>
+        <button
+          type="button"
+          data-action="quick-plugins"
+          onClick={() => setPage("plugins")}
+        >
+          <IconPlug size={15} />
+          <span>{t("nav.plugins")}</span>
+        </button>
+        <button
+          type="button"
+          data-action="quick-skills"
+          onClick={() => {
+            setPage("settings");
+            setSettingsTab("skills");
+          }}
+        >
+          <IconBookOpen size={15} />
+          <span>{t("nav.skills")}</span>
+        </button>
+      </nav>
 
       <div className="sidebar-body no-drag">
 

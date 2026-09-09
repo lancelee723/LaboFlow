@@ -124,16 +124,22 @@ test("picker attachments materialize a session before importing paths", () => {
   );
 });
 
-test("composer opens one unified file picker directly from the plus button", () => {
+test("composer opens an insert menu from the plus button with attach, @ context, and $ skill", () => {
   const leftStart = composer.indexOf('<div className="composer-left">');
   const plusIndex = composer.indexOf('title={t("chat.addFiles")}', leftStart);
   const modeIndex = composer.indexOf("composer-mode-chip", leftStart);
   assert.ok(leftStart >= 0 && plusIndex > leftStart && modeIndex > leftStart);
-  assert.ok(plusIndex < modeIndex, "upload must precede the agent mode chip");
+  assert.ok(plusIndex < modeIndex, "insert menu must precede the agent mode chip");
+  assert.match(composer, /composer-plus-menu/);
+  assert.match(composer, /aria-haspopup="menu"/);
   assert.match(composer, /void pickAndAttach\(\);/);
   assert.match(composer, /const pickAndAttach = async \(\) =>/);
   assert.match(composer, /const result = await api\.pickFiles\(\);/);
-  assert.doesNotMatch(composer, /plusOpen|plusRef|composer-plus-menu|pickAndAttach\("photos"\)/);
+  // "@" inserts through the normal caret path so the file autocomplete opens.
+  assert.match(composer, /insertComposerText\("@"\)/);
+  // Skills land in the prompt as a $name token.
+  assert.match(composer, /insertComposerText\(`\$\$\{skill\.name\} `\)/);
+  assert.match(composer, /listUserSkills/);
 });
 
 test("pasted bytes stay in the session scratch directory", () => {

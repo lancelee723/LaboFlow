@@ -55,6 +55,7 @@ import {
   Palette,
   PanelLeft,
   PanelRight,
+  Paperclip,
   PawPrint,
   PencilLine,
   Pin,
@@ -194,6 +195,8 @@ export const IconReview = icon(RefreshCw);
 export const IconKeyboard = icon(Keyboard);
 export const IconMic = icon(Mic);
 export const IconPlug = icon(Plug);
+export const IconPaperclip = icon(Paperclip);
+export const IconAtSign = icon(AtSign);
 export const IconSlash = icon(Slash);
 export const IconUser = icon(UserRound);
 /** A signed-in vendor account, as opposed to a pasted key. */

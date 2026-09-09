@@ -16,18 +16,21 @@ export type SettingsTabId =
   | "subagents"
   | "import"
   | "projects"
+  | "usage"
   | "about";
 
 export type SettingsNavGroupId =
   | "preferences"
   | "agent"
   | "workspace"
+  | "data"
   | "system";
 
 export const SETTINGS_NAV_GROUP_LABELS: Record<SettingsNavGroupId, string> = {
   preferences: "settings.groupPreferences",
   agent: "settings.groupAgent",
   workspace: "settings.groupWorkspace",
+  data: "settings.groupData",
   system: "settings.groupSystem",
 };
 
@@ -206,6 +209,23 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "project.searchPlaceholder",
       "project.archive",
       "project.restore",
+    ],
+  },
+  {
+    id: "usage",
+    labelKey: "settings.nav.usage",
+    titleKey: "settings.usageTitle",
+    group: "data",
+    keywordKeys: [
+      "settings.usageDescription",
+      "settings.usage.totalTokens",
+      "settings.usage.peakTokens",
+      "settings.usage.currentStreak",
+      "settings.usage.longestStreak",
+      "settings.usage.totalTurns",
+      "settings.usage.activity",
+      "settings.usage.trend",
+      "settings.usage.dailyBreakdown",
     ],
   },
   {

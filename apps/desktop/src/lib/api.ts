@@ -639,6 +639,20 @@ export const api = {
   ) => invoke(IPC.invoke.skillSetEnabled, { id, enabled, ...query }),
   setUserSkillScope: (id: string, scope: ActivationScope) =>
     invoke(IPC.invoke.skillSetScope, { id, scope }),
+  /** Search the online skill marketplace (Clawhub by default). */
+  skillMarketSearch: (query: string) =>
+    invoke<
+      Array<{
+        slug: string;
+        name: string;
+        description: string;
+        author: string;
+        downloads: number;
+      }>
+    >(IPC.invoke.skillMarketSearch, { query }),
+  /** Download and install one marketplace skill into the global skills root. */
+  skillMarketInstall: (payload: { slug: string; name?: string }) =>
+    invoke<{ skill?: UserSkillRecord }>(IPC.invoke.skillMarketInstall, payload),
   /**
    * Level and project must travel with the id: a project skill has no global
    * counterpart to fall back to, so resolving by id alone would miss it.

@@ -13,15 +13,27 @@ import {
   Tray,
 } from "electron";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import * as path2 from "node:path";
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   existsSync,
   mkdirSync,
   statSync,
   writeFileSync,
+  type Dirent,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import AdmZip from "adm-zip";
+import { ClawhubClient } from "./clawhub";
 import { listInstalledFonts } from "./system-fonts";
 import {
   applyNetworkProxyFromAppSettings,
@@ -8459,6 +8471,64 @@ function registerIpc() {
       return res;
     },
   );
+
+  handle(IPC.invoke.skillMarketSearch, async (payload: { query: string }) => {
+    const client = new ClawhubClient();
+    return client.search(String(payload?.query ?? "").trim());
+  });
+
+  /**
+   * Download a Clawhub skill package (zip), extract it, and copy the skill
+   * directory into the global agents skills root (~/.agents/skills). Host
+   * `skills.import` only accepts single markdown files, so folder-shaped
+   * packages are materialised directly on disk; the pluginChanged event then
+   * makes the next `skills.list` pick the new directory up.
+   */
+  handle(IPC.invoke.skillMarketInstall, async (payload: { slug: string }) => {
+    const slug = String(payload?.slug ?? "").trim();
+    if (!slug) throw new Error("SKILL_MARKET_SLUG_REQUIRED");
+    const client = new ClawhubClient();
+    const zipBytes = await client.download(slug);
+    if (!zipBytes) throw new Error("SKILL_MARKET_DOWNLOAD_FAILED");
+    const workDir = await mkdtemp(path2.join(tmpdir(), "laboflow-skill-"));
+    try {
+      const zipPath = path2.join(workDir, "skill.zip");
+      const extractDir = path2.join(workDir, "extracted");
+      await writeFile(zipPath, zipBytes);
+      new AdmZip(zipPath).extractAllTo(extractDir, true);
+      const entries = await readdir(extractDir, { withFileTypes: true });
+      const hasSkillMd = (list: Dirent[]) =>
+        list.some(
+          (entry) => entry.isFile() && entry.name.toLowerCase() === "skill.md",
+        );
+      let skillDir: string | null = null;
+      if (hasSkillMd(entries)) {
+        skillDir = extractDir;
+      } else {
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const innerDir = path2.join(extractDir, entry.name);
+          if (hasSkillMd(await readdir(innerDir, { withFileTypes: true }))) {
+            skillDir = innerDir;
+            break;
+          }
+        }
+      }
+      if (!skillDir) throw new Error("SKILL_MARKET_INVALID_PACKAGE");
+      const skillsRoot = path2.join(homedir(), ".agents", "skills");
+      const destination = path2.join(
+        skillsRoot,
+        slug.replace(/[^\w.-]+/g, "-"),
+      );
+      await mkdir(skillsRoot, { recursive: true });
+      await rm(destination, { recursive: true, force: true });
+      await cp(skillDir, destination, { recursive: true });
+      sendToRenderer(IPC.event.pluginChanged, { reason: "skill" });
+      return { ok: true, destination };
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
+  });
 
   /**
    * Show a skill document in the OS file manager. The level and project travel

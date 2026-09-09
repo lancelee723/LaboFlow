@@ -14,6 +14,7 @@ import type {
   PermissionMode,
   ProviderPublic,
   ThinkingLevel,
+  UserSkillRecord,
 } from "@pi-desktop/shared";
 import {
   fileReferenceLabel,
@@ -76,6 +77,8 @@ import {
   IconListChecks,
   IconSparkles,
   IconTarget,
+  IconPaperclip,
+  IconAtSign,
   IconX,
 } from "./icons";
 
@@ -673,6 +676,10 @@ export function Composer({
   const [permissionOpen, setPermissionOpen] = useState(false);
   const permissionRef = useRef<HTMLDivElement>(null);
   const [modelThinkingOpen, setModelThinkingOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [plusSkillMode, setPlusSkillMode] = useState(false);
+  const [plusSkills, setPlusSkills] = useState<UserSkillRecord[] | null>(null);
+  const plusRef = useRef<HTMLDivElement | null>(null);
   const [modelThinkingView, setModelThinkingView] =
     useState<ComposerMenuView>("root");
   const [modelQuery, setModelQuery] = useState("");
@@ -1116,6 +1123,44 @@ export function Composer({
       window.removeEventListener("keydown", onKey);
     };
   }, [permissionOpen]);
+
+  useEffect(() => {
+    if (!plusMenuOpen) return;
+    const onPointer = (e: MouseEvent) => {
+      if (!plusRef.current?.contains(e.target as Node)) {
+        setPlusMenuOpen(false);
+        setPlusSkillMode(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPlusMenuOpen(false);
+        setPlusSkillMode(false);
+      }
+    };
+    window.addEventListener("mousedown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [plusMenuOpen]);
+
+  useEffect(() => {
+    if (!plusMenuOpen || !plusSkillMode || plusSkills) return;
+    let cancelled = false;
+    api
+      .listUserSkills({ level: "global" })
+      .then((result) => {
+        if (!cancelled) setPlusSkills(result.skills ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPlusSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plusMenuOpen, plusSkillMode, plusSkills]);
 
   useEffect(() => {
     if (!modelThinkingOpen) {
@@ -1801,6 +1846,22 @@ export function Composer({
     }
   };
 
+  /**
+   * Insert plain text at the caret (used by the "+" menu). The execCommand
+   * path fires the editor's normal input handling, so a leading "@" opens the
+   * existing file-reference autocomplete on its own.
+   */
+  const insertComposerText = (text: string) => {
+    const editor = ref.current;
+    if (editor) {
+      editor.focus();
+      if (document.execCommand("insertText", false, text)) return;
+    }
+    const next = `${valueRef.current}${text}`;
+    setValue(next);
+    updateCursor(next.length);
+  };
+
   const pasteClipboardFiles = async (event: ClipboardEvent<HTMLDivElement>) => {
     if (inputBlocked) return;
     const files = clipboardFiles(event.clipboardData);
@@ -2205,20 +2266,98 @@ export function Composer({
 
           <div className="composer-toolbar">
             <div className="composer-left">
-              <div className="composer-plus">
+              <div className="composer-plus" ref={plusRef}>
                 <button
                   type="button"
                   className="icon-btn"
                   title={t("chat.addFiles")}
                   aria-label={t("chat.addFiles")}
+                  aria-haspopup="menu"
+                  aria-expanded={plusMenuOpen}
                   disabled={controlsBlocked || pasting}
                   onClick={() => {
                     setPermissionOpen(false);
-                    void pickAndAttach();
+                    setModelThinkingOpen(false);
+                    setPlusSkillMode(false);
+                    setPlusMenuOpen((open) => !open);
                   }}
                 >
                   <IconPlus size={15} aria-hidden="true" />
                 </button>
+                {plusMenuOpen && (
+                  <div className="composer-plus-menu" role="menu">
+                    {!plusSkillMode ? (
+                      <>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="composer-plus-item"
+                          disabled={pasting}
+                          onClick={() => {
+                            setPlusMenuOpen(false);
+                            void pickAndAttach();
+                          }}
+                        >
+                          <IconPaperclip size={14} />
+                          <span>{t("chat.addFiles")}</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="composer-plus-item"
+                          onClick={() => {
+                            setPlusMenuOpen(false);
+                            insertComposerText("@");
+                          }}
+                        >
+                          <IconAtSign size={14} />
+                          <span>{t("chat.addContext")}</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="composer-plus-item"
+                          onClick={() => {
+                            setPlusSkillMode(true);
+                          }}
+                        >
+                          <IconSparkles size={14} />
+                          <span>{t("chat.pickSkill")}</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {(plusSkills ?? []).map((skill) => (
+                          <button
+                            key={skill.id}
+                            type="button"
+                            role="menuitem"
+                            className="composer-plus-item"
+                            title={skill.description ?? undefined}
+                            onClick={() => {
+                              setPlusMenuOpen(false);
+                              setPlusSkillMode(false);
+                              insertComposerText(`$${skill.name} `);
+                            }}
+                          >
+                            <IconSparkles size={14} />
+                            <span>{skill.name}</span>
+                          </button>
+                        ))}
+                        {plusSkills && !plusSkills.length ? (
+                          <div className="composer-plus-empty">
+                            {t("chat.noSkillsYet")}
+                          </div>
+                        ) : null}
+                        {!plusSkills ? (
+                          <div className="composer-plus-empty">
+                            {t("chat.skillsLoading")}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <button
                 className="icon-btn mode-chip composer-mode-chip"

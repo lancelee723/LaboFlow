@@ -166,6 +166,8 @@ export const IPC = {
     skillSetScope: "pi-desktop/skill/setScope",
     skillRead: "pi-desktop/skill/read",
     skillReveal: "pi-desktop/skill/reveal",
+    skillMarketSearch: "pi-desktop/skill/market/search",
+    skillMarketInstall: "pi-desktop/skill/market/install",
     subagentList: "pi-desktop/subagent/list",
     subagentCatalog: "pi-desktop/subagent/catalog",
     subagentCreate: "pi-desktop/subagent/create",

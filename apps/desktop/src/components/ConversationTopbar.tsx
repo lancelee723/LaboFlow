@@ -3,7 +3,7 @@ import { useAppStore } from "../stores/app-store";
 import {
   IconSidebar,
   IconNewSession,
-  IconSearch,
+  IconPanel,
 } from "./icons";
 
 function projectName(path?: string | null, name?: string | null) {
@@ -33,13 +33,13 @@ export function ConversationTopbar({
   workPanelOpen,
   onToggleSidebar,
   onNewTask,
-  onOpenSearch,
+  onToggleWorkPanel,
 }: {
   sidebarCollapsed: boolean;
   workPanelOpen: boolean;
   onToggleSidebar: () => void;
   onNewTask: () => void;
-  onOpenSearch: () => void;
+  onToggleWorkPanel: () => void;
 }) {
   const { t } = useTranslation();
   const activeSessionId = useAppStore((s) => s.activeSessionId);
@@ -102,11 +102,12 @@ export function ConversationTopbar({
           <button
             type="button"
             className="ct-icon-btn"
-            title={t("nav.search")}
-            aria-label={t("nav.search")}
-            onClick={onOpenSearch}
+            title={t("nav.toggleWorkPanel")}
+            aria-label={t("nav.toggleWorkPanel")}
+            aria-pressed={workPanelOpen}
+            onClick={onToggleWorkPanel}
           >
-            <IconSearch size={15} />
+            <IconPanel size={15} />
           </button>
         </div>
       </div>
