@@ -37,3 +37,12 @@
 ## 验收基准
 
 功能验收以冻结仓库 `docs/PRD-LaboFlow-v1.0.md` 对应条目（FR-C-27/28/29/30、FR-S-01~13）+ 服务端既有集成测试为准；UI 走上游 E2E 框架补 org 场景。
+
+---
+
+## 执行记录（2026-09-10）
+
+- **Phase 2a ✅**：`apps/server` + `apps/admin-console` + `packages/tsconfig` 已迁入本仓库；新增 `scripts/migrate-cli.ts`（幂等迁移）与 `scripts/seed-admin.ts`（SPEC §5.6 首启播种）及 start/dev(tsx) 脚本。自验：真实 Postgres 54/54 测试全过；boot 冒烟（healthz → 登录含强制改密 → 改密 → 重登 → org/bootstrap 含网关虚拟 Key 签发）全链路通过。
+- **Phase 2b ✅（垂直切片）**：shared 新增 OrgStatus/OrgProfile/OrgBootstrap 与 `org.*` IPC；main 新增 `org-service.ts`（登录/改密/登出/状态，会话存 host 秘钥库 `org/session`，401→expired）；渲染层新增设置「组织」tab（登录表单/首登改密/已连接概览）。i18n 8 语言。
+- 已知边界：服务端暂无 `/auth/refresh` 路由（P2-beta），客户端 access token 过期即要求重登；共享工作区 UI、配额面板、组织渠道注入为 Phase 3 后续。
+- **超范围附带**：上游禁用 Settings 用量页的决策（ADR-0173）由本 fork 推翻并落地第一方用量页；`pi.token-insights`（市场版，sha256 校验安装 v0.4.8）与 `pi.computer`（内置 Computer Use 插件，移植冻结版实现，ESM，默认关+权限门+紧急停止）均已装载。

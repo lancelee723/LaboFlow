@@ -6,10 +6,10 @@
  * engine plus an explicit enable switch and an emergency stop. macOS only.
  */
 
-const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
-const os = require("node:os");
-const path = require("node:path");
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import os from "node:os";
+import path from "node:path";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +60,7 @@ function accessibilityHint() {
   return "macOS Accessibility permission is missing. Grant it in System Settings → Privacy & Security → Accessibility, then retry.";
 }
 
-async function execute(args) {
+export async function execute(args) {
   if (stopped) {
     return {
       error:
@@ -99,7 +99,8 @@ async function execute(args) {
       const key = String(args?.key ?? "").trim();
       if (!/^\d+$/.test(key)) {
         return {
-          error: "key requires 'key' as a macOS key code number (36 Return, 48 Tab, 53 Escape).",
+          error:
+            "key requires 'key' as a macOS key code number (36 Return, 48 Tab, 53 Escape).",
         };
       }
       if (!(await accessibilityGranted())) return { error: accessibilityHint() };
@@ -131,7 +132,7 @@ async function setToolRegistered(enabled) {
   }
 }
 
-async function onLoad() {
+export async function onLoad() {
   const settings = await pi.plugin.getSettings();
   await pi.commands.register({
     id: "computer-stop",
@@ -153,12 +154,10 @@ async function onLoad() {
   });
 }
 
-async function onUnload() {
+export async function onUnload() {
   await pi.commands.unregister("computer-stop");
   if (registered) {
     await pi.agent.unregisterTool("computer");
     registered = false;
   }
 }
-
-module.exports = { onLoad, onUnload, execute, TOOL };
