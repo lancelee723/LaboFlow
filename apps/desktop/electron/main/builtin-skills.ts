@@ -4,7 +4,7 @@ import { parseSkillFrontmatter } from "@pi-desktop/plugin-sdk";
 import type { PluginSkillDef } from "@pi-desktop/agent-runtime";
 
 /**
- * Skills PI-Desktop ships itself.
+ * Skills LaboFlow ships itself.
  *
  * These ride the same catalog-plus-`Skill`-tool path as plugin-contributed
  * skills (D174), so a first-party skill and a third-party one are
@@ -93,7 +93,7 @@ export function builtinSkills(input: BuiltinSkillInput): PluginSkillDef[] {
   return [
     {
       id: PLUGIN_DEV_SKILL_ID,
-      name: parsed.name ?? "PI-Desktop plugin development",
+      name: parsed.name ?? "LaboFlow plugin development",
       description: parsed.description,
     },
   ];
@@ -113,7 +113,7 @@ export function loadBuiltinSkillBody(
   if (!parsed.body) return null;
   return {
     id: PLUGIN_DEV_SKILL_ID,
-    name: parsed.name ?? "PI-Desktop plugin development",
+    name: parsed.name ?? "LaboFlow plugin development",
     body: parsed.body,
   };
 }

@@ -1,7 +1,7 @@
 /**
  * Bridge to pi's prompt-template ("slash command") system for the composer
  * (D123, ADR 0024). Loading and expansion reuse pi-agent-core verbatim so
- * `.pi/prompts` assets behave identically in pi CLI and PI-Desktop.
+ * `.pi/prompts` assets behave identically in pi CLI and LaboFlow.
  *
  * Discovery: `<workspace>/.pi/prompts/*.md` (project) and
  * `~/.pi/agent/prompts/*.md` (user-global); project wins name conflicts.

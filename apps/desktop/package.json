@@ -2,11 +2,10 @@
   "name": "@pi-desktop/desktop",
   "version": "0.14.5",
   "private": true,
-  "description": "PI-Desktop Electron application",
-  "homepage": "https://github.com/vastsa/PI-Desktop",
+  "description": "LaboFlow Electron application",
+  "homepage": "https://github.com/lancelee723/laboflow",
   "author": {
-    "name": "vastsa",
-    "email": "hhxk666@gmail.com"
+    "name": "LaboFlow Team"
   },
   "main": "./out/main/index.js",
   "type": "module",
@@ -69,16 +68,16 @@
     "zustand": "^5.0.15"
   },
   "build": {
-    "appId": "com.pi-desktop.app",
-    "productName": "PI-Desktop",
+    "appId": "com.laboflow.app",
+    "productName": "LaboFlow",
     "directories": {
       "output": "release"
     },
     "publish": [
       {
         "provider": "github",
-        "owner": "vastsa",
-        "repo": "PI-Desktop"
+        "owner": "lancelee723",
+        "repo": "laboflow"
       }
     ],
     "files": [
@@ -151,7 +150,7 @@
         }
       ],
       "extraDistFiles": [
-        "PI-Desktop-macOS-opening-help.txt"
+        "LaboFlow-macOS-opening-help.txt"
       ]
     },
     "dmg": {
@@ -170,13 +169,13 @@
           "x": 270,
           "y": 330,
           "type": "file",
-          "name": "PI-Desktop-macOS-opening-help.txt",
-          "path": "PI-Desktop-macOS-opening-help.txt"
+          "name": "LaboFlow-macOS-opening-help.txt",
+          "path": "LaboFlow-macOS-opening-help.txt"
         }
       ]
     },
     "win": {
-      "executableName": "PI-Desktop",
+      "executableName": "LaboFlow",
       "target": [
         {
           "target": "nsis",
@@ -196,15 +195,15 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "PI-Desktop",
-      "artifactName": "PI-Desktop-Setup-${version}.${ext}"
+      "shortcutName": "LaboFlow",
+      "artifactName": "LaboFlow-Setup-${version}.${ext}"
     },
     "deb": {
-      "packageName": "pi-desktop",
-      "artifactName": "pi-desktop_${version}_${arch}.${ext}"
+      "packageName": "laboflow",
+      "artifactName": "laboflow_${version}_${arch}.${ext}"
     },
     "linux": {
-      "executableName": "pi-desktop",
+      "executableName": "laboflow",
       "target": [
         {
           "target": "AppImage",

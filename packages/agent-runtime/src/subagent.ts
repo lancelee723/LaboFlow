@@ -151,7 +151,7 @@ export function composeSubagentSystemPrompt(options: {
   const { definition } = options;
   const toolList = definition.tools.join(", ") || "none";
   const framing = [
-    `You are the "${definition.name}" subagent inside PI-Desktop, working on one task delegated by the main agent.`,
+    `You are the "${definition.name}" subagent inside LaboFlow, working on one task delegated by the main agent.`,
     `You cannot see the user, ask questions, or delegate further. Finish the task with the tools you have: ${toolList}.`,
     subagentCanMutate(definition)
       ? "You may change files, but only the ones the task is about; leave everything else untouched."

@@ -1,0 +1,11 @@
+LaboFlow macOS opening help
+
+If macOS says "LaboFlow is damaged and can't be opened" for this unsigned
+build, move LaboFlow.app to /Applications and run this command in Terminal:
+
+xattr -cr /Applications/LaboFlow.app
+
+Then open LaboFlow again.
+
+Use this only for an app obtained from a trusted LaboFlow source. Signed and
+notarized builds do not need this command.

@@ -48,12 +48,12 @@ test("Windows runtime registers the canonical native application identity", () =
   );
 });
 
-test("Windows packages pin PI-Desktop executable and shortcut names", () => {
-  assert.equal(packageJson.build.win.executableName, "PI-Desktop");
-  assert.equal(packageJson.build.nsis.shortcutName, "PI-Desktop");
+test("Windows packages pin LaboFlow executable and shortcut names", () => {
+  assert.equal(packageJson.build.win.executableName, "LaboFlow");
+  assert.equal(packageJson.build.nsis.shortcutName, "LaboFlow");
 });
 
-test("macOS development uses the canonical PI-Desktop Dock icon", () => {
+test("macOS development uses the canonical LaboFlow Dock icon", () => {
   assert.match(
     mainSource,
     /process\.platform !== "darwin" \|\| !isDevelopmentBuild \|\| !app\.dock/,
@@ -161,8 +161,8 @@ test(
         await readFile(join(brandedContents, "Resources", "icon.icns"), "utf8"),
         "canonical-icon",
       );
-      assert.match(plist, /<string>PI-Desktop<\/string>/);
-      assert.match(plist, /<string>com\.pi-desktop\.app\.dev<\/string>/);
+      assert.match(plist, /<string>LaboFlow<\/string>/);
+      assert.match(plist, /<string>com\.laboflow\.app\.dev<\/string>/);
       assert.equal(prepareMacDevelopmentBundle(options), brandedExecutable);
     } finally {
       await rm(root, { recursive: true, force: true });

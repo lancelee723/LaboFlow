@@ -1,8 +1,8 @@
 {
-  "name": "pi-desktop",
+  "name": "laboflow",
   "private": true,
   "version": "0.14.5",
-  "description": "Local-first AI coding agent desktop client",
+  "description": "LaboFlow — local-first AI agent desktop workspace (hard fork of PI-Desktop v0.14.5)",
   "packageManager": "pnpm@11.18.0",
   "engines": {
     "node": ">=22.19.0",

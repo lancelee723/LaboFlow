@@ -104,7 +104,7 @@ test("updater gates delivery mode by platform and delivery policy", () => {
   assert.match(updaterSource, /autoUpdater\.on\("error"/);
   assert.match(
     updaterSource,
-    /github\.com\/vastsa\/PI-Desktop\/releases/,
+    /github\.com\/lancelee723\/laboflow\/releases/,
     "releases fallback URL",
   );
   assert.match(
@@ -203,7 +203,7 @@ test("packaging publishes an electron-updater feed for GitHub Releases", () => {
   assert.ok(pkg.dependencies["electron-updater"], "electron-updater dependency");
   assert.equal(pkg.build.publish[0].provider, "github");
   assert.equal(pkg.build.publish[0].owner, "vastsa");
-  assert.equal(pkg.build.publish[0].repo, "PI-Desktop");
+  assert.equal(pkg.build.publish[0].repo, "laboflow");
   const macTargets = pkg.build.mac.target.map((entry) => entry.target);
   assert.ok(macTargets.includes("zip"), "mac zip target (Squirrel.Mac feed)");
   // electron-builder must never self-publish (implicit tag publishing would
@@ -211,12 +211,12 @@ test("packaging publishes an electron-updater feed for GitHub Releases", () => {
   for (const script of ["dist", "dist:mac", "dist:win", "dist:linux"]) {
     assert.match(pkg.scripts[script], /--publish never/, script);
   }
-  assert.equal(pkg.build.linux.executableName, "pi-desktop");
+  assert.equal(pkg.build.linux.executableName, "laboflow");
   // Scoped package name is not a valid deb package/file name.
-  assert.equal(pkg.build.deb.packageName, "pi-desktop");
+  assert.equal(pkg.build.deb.packageName, "laboflow");
   assert.ok(!pkg.build.deb.artifactName.includes("${name}"), "deb artifactName");
   // GitHub asset URLs mangle spaces; keep the NSIS artifact name space-free.
-  assert.equal(pkg.build.nsis.artifactName, "PI-Desktop-Setup-${version}.${ext}");
+  assert.equal(pkg.build.nsis.artifactName, "LaboFlow-Setup-${version}.${ext}");
   // The upload step must carry every updater feed, and the release publishes
   // all platforms unfiltered (D126/D285).
   assert.match(releaseWorkflowSource, /release\/\*\.zip/);

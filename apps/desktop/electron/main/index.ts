@@ -2478,7 +2478,7 @@ function createPluginLauncherWindow(): Promise<BrowserWindow> {
       // never let Electron transform the process type. Without
       // `skipTransformProcessType`, `visibleOnFullScreen` runs
       // TransformProcessType(kProcessTransformToUIElementApplication) on the
-      // whole process, which removes PI-Desktop from the Dock and Cmd+Tab for
+      // whole process, which removes LaboFlow from the Dock and Cmd+Tab for
       // as long as this window exists — and the launcher is prewarmed during
       // boot, so that would apply to every session (ADR 0086).
       window.setVisibleOnAllWorkspaces(true, {
@@ -9157,7 +9157,7 @@ app.on("activate", () => {
   restoreMainWindow();
 });
 
-// Launching PI-Desktop again is a request to see the app that is already
+// Launching LaboFlow again is a request to see the app that is already
 // running, not to start another one. The duplicate process quits before it
 // boots anything, and Electron hands its launch to the lock holder here, so the
 // visible result is the same as the tray's Show action — including a window

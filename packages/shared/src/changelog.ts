@@ -5,7 +5,7 @@ import { koEntries } from "./changelog-ko.js";
 import { trEntries } from "./changelog-tr.js";
 
 /**
- * Shipped-locale product changelog for PI-Desktop app releases.
+ * Shipped-locale product changelog for LaboFlow app releases.
  *
  * English is the source of truth (ADR 0009). The translated catalogs mirror
  * the same versions and bullet counts so in-app "what's new" can follow the
@@ -410,7 +410,7 @@ const enEntries: ChangelogEntry[] = [
       "Sign in to multiple vendor accounts and choose the account used for each provider.",
       "Use each model's capabilities to decide when image attachments are supported.",
       "Choose reasoning effort directly from the composer for models that expose it.",
-      "Keep one PI-Desktop instance per data directory to prevent conflicting sessions.",
+      "Keep one LaboFlow instance per data directory to prevent conflicting sessions.",
       "Organize Settings into clearer groups and simplify provider account management.",
       "Keep built-in subagents aligned with the parent conversation's permission mode.",
     ],
@@ -454,7 +454,7 @@ const enEntries: ChangelogEntry[] = [
       "Remember recently used plugins in the launcher for faster access.",
       "Add copy session path to the context menu for developer mode.",
       "Fix font picker clipping and System default reset issues.",
-      "Keep macOS PI-Desktop in the Dock and Cmd+Tab after window close.",
+      "Keep macOS LaboFlow in the Dock and Cmd+Tab after window close.",
       "Keep chat transcript pinned when composer collapses after sending.",
       "Give the work panel a real empty state with clearer guidance.",
     ],
@@ -494,7 +494,7 @@ const enEntries: ChangelogEntry[] = [
     date: "2026-08-12",
     highlights: [
       "Restore the Windows Alt+Space global plugin launcher, including when another app is focused.",
-      "Keep PI-Desktop available from the system tray when minimized across macOS, Windows, and Linux.",
+      "Keep LaboFlow available from the system tray when minimized across macOS, Windows, and Linux.",
       "Improve native select menu readability in light and dark themes.",
     ],
   },
@@ -570,8 +570,8 @@ const enEntries: ChangelogEntry[] = [
     version: "0.4.1",
     date: "2026-08-02",
     highlights: [
-      "Update GitHub Releases and auto-update links to the canonical PI-Desktop repository.",
-      "Refresh project, plugin, and release documentation to use the PI-Desktop repository name.",
+      "Update GitHub Releases and auto-update links to the canonical LaboFlow repository.",
+      "Refresh project, plugin, and release documentation to use the LaboFlow repository name.",
     ],
   },
   {
@@ -1107,7 +1107,7 @@ const zhCNEntries: ChangelogEntry[] = [
       "支持登录多个供应商账号，并为每个供应商选择实际使用的账号。",
       "根据模型能力决定是否支持图片附件。",
       "在输入框中直接选择支持该功能的模型的推理强度。",
-      "每个数据目录只运行一个 PI-Desktop 实例，避免会话冲突。",
+      "每个数据目录只运行一个 LaboFlow 实例，避免会话冲突。",
       "重新整理设置分组，简化供应商账号管理。",
       "让内置子代理遵循父级对话的权限模式。",
     ],
@@ -1151,7 +1151,7 @@ const zhCNEntries: ChangelogEntry[] = [
       "在启动器中记住最近使用的插件，加快访问速度。",
       "为开发者模式添加复制会话路径的上下文菜单。",
       "修复字体选择器裁剪和系统默认重置问题。",
-      "关闭窗口后保持 macOS PI-Desktop 在 Dock 和 Cmd+Tab 中可见。",
+      "关闭窗口后保持 macOS LaboFlow 在 Dock 和 Cmd+Tab 中可见。",
       "发送消息后收起输入框时保持聊天记录停留在最新位置。",
       "为工作面板添加真实的空状态界面和更清晰的引导。",
     ],
@@ -1191,7 +1191,7 @@ const zhCNEntries: ChangelogEntry[] = [
     date: "2026-08-12",
     highlights: [
       "修复 Windows 下的 Alt+Space 全局插件启动器，即使当前焦点在其他应用也能唤起。",
-      "最小化后可通过系统托盘访问 PI-Desktop，并支持 macOS、Windows 和 Linux。",
+      "最小化后可通过系统托盘访问 LaboFlow，并支持 macOS、Windows 和 Linux。",
       "优化浅色和深色主题下原生选择菜单的可读性。",
     ],
   },
@@ -1267,8 +1267,8 @@ const zhCNEntries: ChangelogEntry[] = [
     version: "0.4.1",
     date: "2026-08-02",
     highlights: [
-      "将 GitHub Releases 与自动更新链接统一到正式的 PI-Desktop 仓库。",
-      "更新项目、插件和发布文档中的仓库名称，统一使用 PI-Desktop。",
+      "将 GitHub Releases 与自动更新链接统一到正式的 LaboFlow 仓库。",
+      "更新项目、插件和发布文档中的仓库名称，统一使用 LaboFlow。",
     ],
   },
   {
@@ -1805,7 +1805,7 @@ const zhTWEntries: ChangelogEntry[] = [
       "支援登入多個供應商賬號，併為每個供應商選擇實際使用的賬號。",
       "根據模型能力決定是否支援圖片附件。",
       "在輸入框中直接選擇支援該功能的模型的推理強度。",
-      "每個資料目錄只執行一個 PI-Desktop 例項，避免會話衝突。",
+      "每個資料目錄只執行一個 LaboFlow 例項，避免會話衝突。",
       "重新整理設定分組，簡化供應商賬號管理。",
       "讓內建子代理遵循父級對話的許可權模式。",
     ],
@@ -1849,7 +1849,7 @@ const zhTWEntries: ChangelogEntry[] = [
       "在啟動器中記住最近使用的外掛，加快訪問速度。",
       "為開發者模式新增複製會話路徑的上下文選單。",
       "修復字型選擇器裁剪和系統預設重置問題。",
-      "關閉視窗後保持 macOS PI-Desktop 在 Dock 和 Cmd+Tab 中可見。",
+      "關閉視窗後保持 macOS LaboFlow 在 Dock 和 Cmd+Tab 中可見。",
       "傳送訊息後收起輸入框時保持聊天記錄停留在最新位置。",
       "為工作面板新增真實的空狀態介面和更清晰的引導。",
     ],
@@ -1889,7 +1889,7 @@ const zhTWEntries: ChangelogEntry[] = [
     date: "2026-08-12",
     highlights: [
       "修復 Windows 下的 Alt+Space 全域性外掛啟動器，即使當前焦點在其他應用也能喚起。",
-      "最小化後可通過系統托盤訪問 PI-Desktop，並支援 macOS、Windows 和 Linux。",
+      "最小化後可通過系統托盤訪問 LaboFlow，並支援 macOS、Windows 和 Linux。",
       "最佳化淺色和深色主題下原生選擇選單的可讀性。",
     ],
   },
@@ -1965,8 +1965,8 @@ const zhTWEntries: ChangelogEntry[] = [
     version: "0.4.1",
     date: "2026-08-02",
     highlights: [
-      "將 GitHub Releases 與自動更新連結統一到正式的 PI-Desktop 倉庫。",
-      "更新專案、外掛和釋出文件中的倉庫名稱，統一使用 PI-Desktop。",
+      "將 GitHub Releases 與自動更新連結統一到正式的 LaboFlow 倉庫。",
+      "更新專案、外掛和釋出文件中的倉庫名稱，統一使用 LaboFlow。",
     ],
   },
   {
