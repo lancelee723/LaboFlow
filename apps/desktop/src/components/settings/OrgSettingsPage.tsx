@@ -4,11 +4,13 @@ import type { OrgStatus } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { Button } from "../ui";
-import { IconShield } from "../icons";
 
 /**
  * Settings → Organization (PRD 4.1.12): login against the LaboFlow Server,
- * first-login forced password change, and the connected-org summary.
+ * first-login forced password change, and the connected-org summary. Uses the
+ * standard settings scaffold (settings-stack / settings-card-block /
+ * settings-panel / settings-row) so typography and surfaces match the rest of
+ * the IA.
  */
 export function OrgSettingsPage() {
   const { t } = useTranslation();
@@ -48,9 +50,10 @@ export function OrgSettingsPage() {
       setStatus(next);
       setPassword("");
       setMustChange(Boolean(next.mustChangePassword));
-      showToast(t("settings.org.loginOk", { name: next.orgName ?? next.serverUrl ?? "" }), {
-        variant: "success",
-      });
+      showToast(
+        t("settings.org.loginOk", { name: next.orgName ?? next.serverUrl ?? "" }),
+        { variant: "success" },
+      );
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
     } finally {
@@ -86,126 +89,173 @@ export function OrgSettingsPage() {
   };
 
   if (!status) {
-    return <div className="org-page org-loading">{t("common.loading")}</div>;
+    return (
+      <div className="settings-stack">
+        <p className="settings-row-desc">{t("common.loading")}</p>
+      </div>
+    );
   }
 
   const connected = status.state === "connected";
 
+  const infoRow = (label: string, value: string) => (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{label}</div>
+      </div>
+      <div className="settings-row-control">{value}</div>
+    </div>
+  );
+
+  const fieldRow = (
+    label: string,
+    node: React.ReactNode,
+    description?: string,
+  ) => (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <div className="settings-row-title">{label}</div>
+        {description ? <div className="settings-row-desc">{description}</div> : null}
+      </div>
+      <div className="settings-row-control">{node}</div>
+    </div>
+  );
+
   return (
-    <div className="org-page">
-      <p className="org-description">{t("settings.org.description")}</p>
-
-      {status.state === "expired" ? (
-        <div className="org-expired">{t("settings.org.expiredHint")}</div>
-      ) : null}
-
-      {connected ? (
-        <section className="org-card">
-          <div className="org-row">
-            <span className="org-label">{t("settings.org.server")}</span>
-            <span className="org-value">{status.serverUrl}</span>
-          </div>
-          <div className="org-row">
-            <span className="org-label">{t("settings.org.account")}</span>
-            <span className="org-value">
-              {status.displayName || status.username}
-              {status.role ? ` · ${status.role}` : ""}
-            </span>
-          </div>
-          {status.orgName ? (
-            <div className="org-row">
-              <span className="org-label">{t("settings.org.orgName")}</span>
-              <span className="org-value">{status.orgName}</span>
+    <div className="settings-stack">
+      <section className="settings-card-block">
+        <h3 className="settings-card-heading">{t("settings.orgTitle")}</h3>
+        <div className="settings-panel">
+          <div className="settings-row">
+            <div className="settings-row-copy">
+              <div className="settings-row-title">{t("settings.org.description")}</div>
+              {status.state === "expired" ? (
+                <div className="settings-row-desc" style={{ color: "var(--ds-warning)" }}>
+                  {t("settings.org.expiredHint")}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-          {status.teamName ? (
-            <div className="org-row">
-              <span className="org-label">{t("settings.org.team")}</span>
-              <span className="org-value">{status.teamName}</span>
-            </div>
-          ) : null}
-          <div className="org-row">
-            <span className="org-label">{t("settings.org.workspaces")}</span>
-            <span className="org-value">{status.workspaceCount ?? 0}</span>
           </div>
-          <div className="org-actions">
-            <Button variant="secondary" disabled={busy} onClick={() => void logout()}>
-              {t("settings.org.logout")}
-            </Button>
-          </div>
-        </section>
-      ) : (
-        <section className="org-card">
-          <label className="org-field">
-            <span>{t("settings.org.server")}</span>
-            <input
-              className="field-input"
-              value={serverUrl}
-              placeholder="https://laboflow.example.com"
-              onChange={(event) => setServerUrl(event.target.value)}
-            />
-          </label>
-          <label className="org-field">
-            <span>{t("settings.org.username")}</span>
-            <input
-              className="field-input"
-              value={username}
-              autoComplete="username"
-              onChange={(event) => setUsername(event.target.value)}
-            />
-          </label>
-          <label className="org-field">
-            <span>{t("settings.org.password")}</span>
-            <input
-              className="field-input"
-              type="password"
-              value={password}
-              autoComplete="current-password"
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          <div className="org-actions">
-            <Button
-              variant="primary"
-              disabled={busy || !serverUrl.trim() || !username.trim() || !password}
-              onClick={() => void login()}
-            >
-              <IconShield size={14} />
-              {busy ? t("settings.org.loggingIn") : t("settings.org.login")}
-            </Button>
-          </div>
-        </section>
-      )}
+
+          {connected ? (
+            <>
+              {infoRow(t("settings.org.server"), status.serverUrl ?? "")}
+              {infoRow(
+                t("settings.org.account"),
+                [status.displayName || status.username, status.role]
+                  .filter(Boolean)
+                  .join(" · "),
+              )}
+              {status.orgName
+                ? infoRow(t("settings.org.orgName"), status.orgName)
+                : null}
+              {status.teamName
+                ? infoRow(t("settings.org.team"), status.teamName)
+                : null}
+              {infoRow(t("settings.org.workspaces"), String(status.workspaceCount ?? 0))}
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">{t("settings.org.logout")}</div>
+                  <div className="settings-row-desc">{t("settings.org.description")}</div>
+                </div>
+                <div className="settings-row-control">
+                  <Button variant="secondary" disabled={busy} onClick={() => void logout()}>
+                    {t("settings.org.logout")}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {fieldRow(
+                t("settings.org.server"),
+                <input
+                  className="field-input"
+                  style={{ minWidth: 220 }}
+                  value={serverUrl}
+                  placeholder="https://laboflow.example.com"
+                  onChange={(event) => setServerUrl(event.target.value)}
+                />,
+              )}
+              {fieldRow(
+                t("settings.org.username"),
+                <input
+                  className="field-input"
+                  style={{ minWidth: 220 }}
+                  value={username}
+                  autoComplete="username"
+                  onChange={(event) => setUsername(event.target.value)}
+                />,
+              )}
+              {fieldRow(
+                t("settings.org.password"),
+                <input
+                  className="field-input"
+                  style={{ minWidth: 220 }}
+                  type="password"
+                  value={password}
+                  autoComplete="current-password"
+                  onChange={(event) => setPassword(event.target.value)}
+                />,
+              )}
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">{t("settings.org.login")}</div>
+                  <div className="settings-row-desc">{t("settings.org.description")}</div>
+                </div>
+                <div className="settings-row-control">
+                  <Button
+                    variant="primary"
+                    disabled={busy || !serverUrl.trim() || !username.trim() || !password}
+                    onClick={() => void login()}
+                  >
+                    {busy ? t("settings.org.loggingIn") : t("settings.org.login")}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
 
       {mustChange ? (
-        <section className="org-card">
-          <h3 className="org-card-title">{t("settings.org.mustChangeHint")}</h3>
-          <label className="org-field">
-            <span>{t("settings.org.currentPassword")}</span>
-            <input
-              className="field-input"
-              type="password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-            />
-          </label>
-          <label className="org-field">
-            <span>{t("settings.org.newPassword")}</span>
-            <input
-              className="field-input"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-            />
-          </label>
-          <div className="org-actions">
-            <Button
-              variant="primary"
-              disabled={busy || !currentPassword || !newPassword}
-              onClick={() => void changePassword()}
-            >
-              {t("settings.org.changePassword")}
-            </Button>
+        <section className="settings-card-block">
+          <h3 className="settings-card-heading">{t("settings.org.mustChangeHint")}</h3>
+          <div className="settings-panel">
+            {fieldRow(
+              t("settings.org.currentPassword"),
+              <input
+                className="field-input"
+                style={{ minWidth: 220 }}
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />,
+            )}
+            {fieldRow(
+              t("settings.org.newPassword"),
+              <input
+                className="field-input"
+                style={{ minWidth: 220 }}
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+              />,
+            )}
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <div className="settings-row-title">{t("settings.org.changePassword")}</div>
+              </div>
+              <div className="settings-row-control">
+                <Button
+                  variant="primary"
+                  disabled={busy || !currentPassword || !newPassword}
+                  onClick={() => void changePassword()}
+                >
+                  {t("settings.org.changePassword")}
+                </Button>
+              </div>
+            </div>
           </div>
         </section>
       ) : null}
