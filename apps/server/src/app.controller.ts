@@ -58,6 +58,19 @@ class CoreController {
     return { ok: true, version: SERVER_VERSION, phase: 'P2-beta' };
   }
 
+  /** Friendly landing for browsers: this is an API server, not a website. */
+  @Get()
+  @SetMetadata('isPublic', true)
+  index() {
+    return {
+      name: 'LaboFlow Server',
+      version: SERVER_VERSION,
+      phase: 'P2-beta',
+      hint: 'This is an API server — connect from the LaboFlow desktop app (Settings → Organization). API base is the same origin; try /healthz.',
+      endpoints: ['/healthz', '/auth/login', '/org/bootstrap'],
+    };
+  }
+
   // ----- T2.2 auth -----
   @Post('auth/login')
   @HttpCode(200)
