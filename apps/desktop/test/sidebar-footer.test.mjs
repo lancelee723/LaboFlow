@@ -7,6 +7,10 @@ const sidebarSource = await readFile(
   new URL("../src/components/Sidebar.tsx", import.meta.url),
   "utf8",
 );
+const orgButtonSource = await readFile(
+  new URL("../src/components/SidebarOrgButton.tsx", import.meta.url),
+  "utf8",
+);
 const globalStyles = await loadStyles();
 const zhLocale = await readFile(
   new URL("../../../packages/i18n/src/locales/zh-CN/index.ts", import.meta.url),
@@ -17,28 +21,24 @@ const enLocale = await readFile(
   "utf8",
 );
 
-test("the sidebar footer is an action bar, not a fabricated identity", () => {
-  // The app has no accounts; an avatar with a name implied one that never existed.
+test("the footer org entry is a real account surface, not a fabricated avatar", () => {
+  // The org avatar is backed by the Phase 2 org session (PRD 4.1.12) — the
+  // old "implied account that never existed" concern no longer applies.
+  assert.match(sidebarSource, /SidebarOrgButton/);
+  assert.match(orgButtonSource, /IconUser/);
+  assert.match(orgButtonSource, /api\.orgStatus/);
+  assert.match(orgButtonSource, /api\.orgLogin/);
+  assert.match(orgButtonSource, /api\.orgLogout/);
   assert.doesNotMatch(sidebarSource, /footer-profile/);
-  assert.doesNotMatch(sidebarSource, /profile-menu/);
-  assert.doesNotMatch(sidebarSource, /sidebar-profile-menu/);
-  assert.doesNotMatch(sidebarSource, /IconUser/);
   assert.doesNotMatch(globalStyles, /\.footer-profile/);
-  assert.doesNotMatch(globalStyles, /\.profile-menu/);
-  for (const locale of [zhLocale, enLocale]) {
-    assert.doesNotMatch(locale, /localProfile:/);
-    assert.doesNotMatch(locale, /openProfileMenu:/);
-  }
 });
 
-test("footer exposes settings, plugins and notifications in one row", () => {
+test("footer exposes settings, org account and notifications in one row", () => {
   assert.match(sidebarSource, /className="footer-actions"/);
   assert.match(sidebarSource, /data-nav="settings"/);
-  assert.match(sidebarSource, /data-nav="plugins"/);
-  const pluginsAction = sidebarSource.match(
-    /<button[\s\S]*?data-nav="plugins"[\s\S]*?<\/button>/,
-  )?.[0] ?? "";
-  assert.match(pluginsAction, /<IconPlug size=\{14\} aria-hidden \/>/);
+  assert.match(orgButtonSource, /data-nav="org"/);
+  // The plugins destination moved to the quick-actions row above.
+  assert.match(sidebarSource, /data-action="quick-plugins"/);
   assert.doesNotMatch(sidebarSource, /data-nav="theme"/);
   assert.match(
     sidebarSource,
@@ -46,11 +46,11 @@ test("footer exposes settings, plugins and notifications in one row", () => {
   );
   // Logs live in Settings → About; the footer stays down to daily controls.
   assert.doesNotMatch(sidebarSource, /openLogs/);
-  // Every action is icon-only, so each needs a label for pointer and AT users.
-  const actions = sidebarSource
+  // Every footer action is icon-only, so each needs a label.
+  const actions = `${sidebarSource}\n${orgButtonSource}`
     .split("<button")
     .filter((chunk) => /className=(?:"footer-action"|\{`footer-action )/.test(chunk));
-  assert.equal(actions.length, 2);
+  assert.ok(actions.length >= 2);
   for (const action of actions) {
     const attrs = action.slice(0, action.indexOf(">"));
     assert.match(attrs, /title=/);
@@ -88,4 +88,12 @@ test("build chip surfaces the version and only dots an actionable update", () =>
   assert.match(sidebarSource, /api\.updatesCheck\(\)/);
   const dot = globalStyles.match(/\.footer-build-dot\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(dot, /background:\s*var\(--ds-accent\)/);
+});
+
+test("org sign-in popover ships localized copy in both shipped locales", () => {
+  for (const locale of [enLocale, zhLocale]) {
+    assert.match(locale, /orgTitle:/);
+    assert.match(locale, /loginOk:/);
+    assert.match(locale, /expiredHint:/);
+  }
 });

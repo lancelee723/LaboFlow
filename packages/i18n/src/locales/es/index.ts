@@ -605,6 +605,7 @@ export const es = {
     "groupWorkspace": "Espacio de trabajo",
     "groupSystem": "Sistema",
     "nav": {
+      "org": "Organización",
       "usage": "Uso",
       "general": "General",
       "ai": "AI",

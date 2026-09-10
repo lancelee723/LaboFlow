@@ -613,6 +613,7 @@ export const zhCN = {
     groupWorkspace: "工作区",
     groupSystem: "系统",
     nav: {
+      org: "组织",
       usage: "使用统计",
       general: "常规",
       ai: "AI",

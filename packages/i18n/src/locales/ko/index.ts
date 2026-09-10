@@ -617,6 +617,7 @@ export const ko = {
     groupWorkspace: "작업 공간",
     groupSystem: "시스템",
     nav: {
+      org: "조직",
       usage: "사용량",
       general: "일반",
       ai: "AI",

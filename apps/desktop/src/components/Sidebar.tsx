@@ -60,6 +60,7 @@ import {
 } from "../lib/sidebar-preferences";
 import { BrandLogo } from "./BrandLogo";
 import { NotificationCenter } from "./NotificationCenter";
+import { SidebarOrgButton } from "./SidebarOrgButton";
 import { ProjectRenameDialog, SessionRenameDialog } from "./SessionRenameDialog";
 import { useUpdateState } from "../hooks/use-update-state";
 import {
@@ -1897,6 +1898,7 @@ export function Sidebar({
         <button
           type="button"
           data-action="quick-plugins"
+          data-nav="plugins"
           onClick={() => setPage("plugins")}
         >
           <IconPlug size={15} />
@@ -2064,16 +2066,13 @@ export function Sidebar({
             >
               <IconSettings size={14} aria-hidden />
             </button>
-            <button
-              type="button"
-              className={`footer-action ${page === "plugins" ? "active" : ""}`}
-              data-nav="plugins"
-              title={t("nav.plugins")}
-              aria-label={t("nav.plugins")}
-              onClick={() => setPage("plugins")}
-            >
-              <IconPlug size={14} aria-hidden />
-            </button>
+            <SidebarOrgButton
+              onOpenSettings={() => {
+                setPage("settings");
+                setSettingsTab("org");
+              }}
+              onBeforeOpen={() => closeMenus(false)}
+            />
             <NotificationCenter onBeforeOpen={() => closeMenus(false)} />
           </div>
 

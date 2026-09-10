@@ -613,6 +613,7 @@ export const zhTW = {
     groupWorkspace: "工作區",
     groupSystem: "系統",
     nav: {
+      org: "組織",
       usage: "使用統計",
       general: "常規",
       ai: "AI",

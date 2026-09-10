@@ -615,6 +615,7 @@ export const en = {
     groupWorkspace: "Workspace",
     groupSystem: "System",
     nav: {
+      org: "Organization",
       usage: "Usage",
       general: "General",
       ai: "AI",

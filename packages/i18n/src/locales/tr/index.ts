@@ -617,6 +617,7 @@ export const tr = {
     groupWorkspace: "Çalışma alanı",
     groupSystem: "Sistem",
     nav: {
+      org: "Organizasyon",
       usage: "Kullanım",
       general: "Genel",
       ai: "AI",
