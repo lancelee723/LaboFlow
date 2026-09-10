@@ -180,9 +180,11 @@ class CoreController {
     const rules = await import('./quota/quota-rules.js');
     const policies = (await this.deps.db.select().from(quotaPolicies)) as unknown as Parameters<typeof rules.effectiveLimits>[0];
     const teamId = actor.teamId;
-    const limits = teamId
-      ? rules.effectiveLimits(policies, { teamId, userId: actor.userId })
-      : [];
+    // System policies apply to every user, so teamless users still get limits.
+    const limits = rules.effectiveLimits(policies, {
+      teamId: teamId ?? "",
+      userId: actor.userId,
+    });
     const now = new Date();
     const counters = (await this.deps.db.select().from(quotaCounters)) as Array<{
       subjectType: string;
