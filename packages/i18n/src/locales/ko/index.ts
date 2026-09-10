@@ -532,6 +532,14 @@ export const ko = {
   settings: {
     orgTitle: "조직",
     org: {
+      currentOrg: "현재 조직",
+      loginOrg: "조직 로그인",
+      setAsCurrent: "현재로 설정",
+      badgeCurrent: "현재",
+      emptyOrgTitle: "연결된 조직이 없습니다",
+      emptyOrgDesc: "로그인하면 공유 작업 공간, 조직 모델, 할당량을 사용할 수 있습니다.",
+      setCurrentFirst: "먼저 현재로 설정하세요",
+      signedInOrgs: "로그인된 조직",
       description: "LaboFlow 서버에 연결하여 공유 작업 공간, 조직 모델, 할당량을 사용하세요.",
       server: "서버 주소",
       username: "사용자 이름",

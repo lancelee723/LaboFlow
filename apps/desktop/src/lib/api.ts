@@ -676,6 +676,10 @@ export const api = {
     invoke<import("@pi-desktop/shared").OrgQuotaRemaining>(
       IPC.invoke.orgQuotaRemaining,
     ),
+  orgSetCurrent: (key: string) =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgSetCurrent, {
+      key,
+    }),
   /**
    * Level and project must travel with the id: a project skill has no global
    * counterpart to fall back to, so resolving by id alone would miss it.

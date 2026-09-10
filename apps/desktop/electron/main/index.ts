@@ -6895,8 +6895,17 @@ function registerIpc() {
     orgService.changePassword(input),
   );
   handle(IPC.invoke.orgLogout, async () => {
-    await removeOrgProvider();
-    return orgService.logout();
+    const status = await orgService.logout();
+    // Signing out of the current org: the provider follows whatever org is
+    // current now (and is removed only when no session remains).
+    if (status.state === "connected") await syncOrgProvider();
+    else await removeOrgProvider();
+    return status;
+  });
+  handle(IPC.invoke.orgSetCurrent, async (input: { key: string }) => {
+    const status = await orgService.setCurrent(String(input?.key ?? ""));
+    if (status.state === "connected") await syncOrgProvider();
+    return status;
   });
   handle(IPC.invoke.orgQuotaRemaining, () => orgService.quotaRemaining());
   handle(IPC.invoke.secretsHas, async (secretRef: string) => {

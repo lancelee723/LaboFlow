@@ -521,6 +521,14 @@ export const fr = {
   "settings": {
     "orgTitle": "Organisation",
     "org": {
+      currentOrg: "Organisation actuelle",
+      loginOrg: "Se connecter à une organisation",
+      setAsCurrent: "Définir comme actuelle",
+      badgeCurrent: "Actuelle",
+      emptyOrgTitle: "Aucune organisation connectée",
+      emptyOrgDesc: "Connectez-vous pour activer les espaces partagés, les modèles d'organisation et les quotas.",
+      setCurrentFirst: "Définissez-la comme actuelle d'abord",
+      signedInOrgs: "Organisations connectées",
       "description": "Connectez-vous à votre LaboFlow Server pour activer les espaces partagés, les modèles d'organisation et les quotas.",
       "server": "URL du serveur",
       "username": "Identifiant",

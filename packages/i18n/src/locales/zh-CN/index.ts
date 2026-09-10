@@ -528,6 +528,14 @@ export const zhCN = {
   settings: {
     orgTitle: "组织",
     org: {
+      currentOrg: "当前组织",
+      loginOrg: "登录组织",
+      setAsCurrent: "设为当前",
+      badgeCurrent: "当前",
+      emptyOrgTitle: "尚未登录组织",
+      emptyOrgDesc: "登录后可使用共享工作区、组织模型与配额。",
+      setCurrentFirst: "请先设为当前",
+      signedInOrgs: "已登录的组织",
       description: "连接 LaboFlow 服务器以启用共享工作区、组织模型与配额。",
       server: "服务器地址",
       username: "用户名",

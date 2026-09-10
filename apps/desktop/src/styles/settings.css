@@ -2292,3 +2292,52 @@
   font-size: var(--text-sm);
   color: var(--ds-text-muted);
 }
+
+/* --- Org login dialog (mirrors provider-setup shell) ---------------------- */
+.org-login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, #000 55%, transparent);
+}
+
+.org-login-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: var(--ds-bg-elevated-opaque);
+  box-shadow: var(--ds-shadow-dialog);
+  border: 1px solid var(--ds-border-subtle);
+}
+
+.org-login-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.org-login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--ds-text-secondary);
+}
+
+.org-login-field .field-input {
+  width: 100%;
+}
+
+.org-login-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

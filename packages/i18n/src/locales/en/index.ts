@@ -530,6 +530,14 @@ export const en = {
   settings: {
     orgTitle: "Organization",
     org: {
+      currentOrg: "Current organization",
+      loginOrg: "Sign in to organization",
+      setAsCurrent: "Make current",
+      badgeCurrent: "Current",
+      emptyOrgTitle: "No organization connected",
+      emptyOrgDesc: "Sign in to enable shared workspaces, org models and quotas.",
+      setCurrentFirst: "Make it current first",
+      signedInOrgs: "Signed-in organizations",
       description: "Connect to your LaboFlow Server to enable shared workspaces, org models, and quotas.",
       server: "Server URL",
       username: "Username",

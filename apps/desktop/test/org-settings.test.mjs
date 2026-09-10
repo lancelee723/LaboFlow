@@ -34,7 +34,9 @@ test("org service talks to the server auth/org API and stores the session in hos
   assert.match(orgService, /ORG_SECRET_REF = "org\/session"/);
   assert.match(orgService, /secrets\.set/);
   assert.match(orgService, /secrets\.getForRuntime/);
-  assert.match(orgService, /secrets\.delete/);
+  // Multi-org book: signing out rewrites the book instead of deleting the ref.
+  assert.match(orgService, /sessions\.filter/);
+  assert.match(orgService, /setCurrent\(/);
   // 401 maps to the expired state instead of surfacing a raw error.
   assert.match(orgService, /state: "expired"/);
 });

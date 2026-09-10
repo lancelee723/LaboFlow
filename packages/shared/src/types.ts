@@ -1920,6 +1920,16 @@ export type OrgProfile = {
   role?: OrgRole | string;
 };
 
+export type OrgSessionInfo = {
+  /** Stable key: `${serverUrl}|${username}`. */
+  key: string;
+  serverUrl: string;
+  username: string;
+  displayName?: string;
+  role?: string;
+  orgName?: string;
+};
+
 export type OrgStatus = {
   connected: boolean;
   /** "expired" = tokens exist but the server rejected them; re-login needed. */
@@ -1933,6 +1943,9 @@ export type OrgStatus = {
   workspaceCount?: number;
   mustChangePassword?: boolean;
   error?: string;
+  /** Every stored org session (multi-org support) and which one is current. */
+  orgs?: OrgSessionInfo[];
+  currentKey?: string;
 };
 
 export type OrgBootstrap = {

@@ -532,6 +532,14 @@ export const tr = {
   settings: {
     orgTitle: "Organizasyon",
     org: {
+      currentOrg: "Mevcut organizasyon",
+      loginOrg: "Organizasyona giriş",
+      setAsCurrent: "Mevcut yap",
+      badgeCurrent: "Mevcut",
+      emptyOrgTitle: "Henüz organizasyon bağlanmadı",
+      emptyOrgDesc: "Giriş yaptığınızda paylaşılan çalışma alanları, kurum modelleri ve kotalar etkinleşir.",
+      setCurrentFirst: "Önce mevcut yapın",
+      signedInOrgs: "Bağlı organizasyonlar",
       description: "Paylaşılan çalışma alanları, kurumsal modeller ve kotalar için LaboFlow Sunucusu'na bağlanın.",
       server: "Sunucu adresi",
       username: "Kullanıcı adı",

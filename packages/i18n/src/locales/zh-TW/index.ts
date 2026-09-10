@@ -528,6 +528,14 @@ export const zhTW = {
   settings: {
     orgTitle: "組織",
     org: {
+      currentOrg: "目前組織",
+      loginOrg: "登入組織",
+      setAsCurrent: "設為目前",
+      badgeCurrent: "目前",
+      emptyOrgTitle: "尚未登入組織",
+      emptyOrgDesc: "登入後可使用共享工作區、組織模型與配額。",
+      setCurrentFirst: "請先設為目前",
+      signedInOrgs: "已登入的組織",
       description: "連線 LaboFlow 伺服器以啟用共享工作區、組織模型與配額。",
       server: "伺服器位址",
       username: "使用者名稱",
