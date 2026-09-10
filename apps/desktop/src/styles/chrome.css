@@ -1157,3 +1157,41 @@
   display: flex;
   gap: 8px;
 }
+
+.org-popover-orgs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.org-popover-org {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-2xs);
+  background: transparent;
+  color: var(--ds-text-secondary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.org-popover-org:hover:not(:disabled) {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
+}
+
+.org-popover-org.is-current {
+  color: var(--ds-text-primary);
+}
+
+.org-popover-org:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

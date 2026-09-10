@@ -5,7 +5,7 @@ import type { OrgStatus } from "@pi-desktop/shared";
 import { api } from "../lib/api";
 import { useAppStore } from "../stores/app-store";
 import { Button } from "./ui";
-import { IconLogOut, IconSettings, IconUser } from "./icons";
+import { IconCheck, IconLogOut, IconSettings, IconUser } from "./icons";
 
 /**
  * Sidebar footer org entry (Phase 2/3): avatar button opening a compact
@@ -105,6 +105,21 @@ export function SidebarOrgButton({
     }
   };
 
+  const switchOrg = async (key: string) => {
+    if (busy || key === status?.currentKey) return;
+    setBusy(true);
+    try {
+      setStatus(await api.orgSetCurrent(key));
+      showToast(t("settings.org.loginOk", { name: status?.orgName ?? key }), {
+        variant: "success",
+      });
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const title = t("settings.nav.org");
 
   return (
@@ -146,6 +161,28 @@ export function SidebarOrgButton({
 
               {status?.state === "connected" ? (
                 <>
+                  {(status.orgs?.length ?? 0) > 1 ? (
+                    <div className="org-popover-orgs" role="listbox" aria-label={t("settings.org.signedInOrgs")}>
+                      {(status.orgs ?? []).map((org) => {
+                        const isCurrent = org.key === status.currentKey;
+                        return (
+                          <button
+                            key={org.key}
+                            type="button"
+                            role="option"
+                            aria-selected={isCurrent}
+                            className={`org-popover-org ${isCurrent ? "is-current" : ""}`}
+                            disabled={busy}
+                            title={org.serverUrl}
+                            onClick={() => void switchOrg(org.key)}
+                          >
+                            <span>{org.orgName || org.serverUrl}</span>
+                            {isCurrent ? <IconCheck size={12} aria-hidden /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                   <div className="org-popover-row">
                     <span>{t("settings.org.account")}</span>
                     <span className="org-popover-value">

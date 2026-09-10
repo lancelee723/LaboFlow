@@ -143,7 +143,12 @@ export function OrgSettingsPage() {
       <section className="settings-card-block">
         <div className="model-config-section-head">
           <div className="settings-card-heading-line">
-            <h3 className="settings-card-heading">{t("settings.org.currentOrg")}</h3>
+            <h3 className="settings-card-heading">
+              {t("settings.org.signedInOrgs")}
+            </h3>
+            {orgs.length > 0 ? (
+              <span className="provider-section-count">{orgs.length}</span>
+            ) : null}
           </div>
           <Button variant="primary" onClick={() => setLoginOpen(true)}>
             <span className="model-config-btn-inner">
@@ -153,78 +158,6 @@ export function OrgSettingsPage() {
           </Button>
         </div>
         <div className="settings-panel model-provider-panel">
-          {current ? (
-            <ul className="model-provider-list">
-              <li className="model-provider-row">
-                <div className="model-provider-row-copy">
-                  <div className="model-provider-row-title">
-                    <span className="model-provider-row-name">
-                      {status.orgName || current.orgName || current.serverUrl}
-                    </span>
-                    <Badge tone="success">{t("settings.org.badgeCurrent")}</Badge>
-                    {mustChange ? (
-                      <Badge tone="warning">{t("settings.org.mustChangeHint")}</Badge>
-                    ) : null}
-                  </div>
-                  <div className="model-provider-row-meta">
-                    <span>{status.displayName || current.username}</span>
-                    <span className="model-provider-meta-dot" aria-hidden>
-                      ·
-                    </span>
-                    <span>{status.role ?? current.role ?? ""}</span>
-                    <span className="model-provider-meta-dot" aria-hidden>
-                      ·
-                    </span>
-                    <span>{status.serverUrl}</span>
-                  </div>
-                </div>
-                <div className="model-provider-row-actions">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => void signOut(current.key)}
-                  >
-                    {t("settings.org.logout")}
-                  </Button>
-                </div>
-              </li>
-            </ul>
-          ) : (
-            <div className="model-provider-empty">
-              <div className="model-provider-empty-icon" aria-hidden>
-                <IconUser size={18} />
-              </div>
-              <div className="model-provider-empty-title">
-                {t("settings.org.emptyOrgTitle")}
-              </div>
-              <div className="model-provider-empty-desc">
-                {t("settings.org.emptyOrgDesc")}
-              </div>
-              <Button variant="primary" onClick={() => setLoginOpen(true)}>
-                <span className="model-config-btn-inner">
-                  <IconPlus size={14} />
-                  <span>{t("settings.org.loginOrg")}</span>
-                </span>
-              </Button>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {orgs.length > 1 ? (
-        <section className="settings-card-block">
-          <div className="model-config-section-head">
-            <div className="settings-card-heading-line">
-              <h3 className="settings-card-heading">
-                {t("settings.org.signedInOrgs")}
-              </h3>
-              {orgs.length > 0 ? (
-                <span className="provider-section-count">{orgs.length}</span>
-              ) : null}
-            </div>
-          </div>
-          <div className="settings-panel model-provider-panel">
             <ul className="model-provider-list">
               {orgs.map((entry: OrgSessionInfo) => {
                 const isCurrent = entry.key === currentKey;
@@ -277,7 +210,6 @@ export function OrgSettingsPage() {
             </ul>
           </div>
         </section>
-      ) : null}
 
       {mustChange && connected ? (
         <section className="settings-card-block">

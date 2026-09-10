@@ -41,15 +41,19 @@ export function orgSessionKey(entry: {
 }
 
 export class OrgService {
+  private readonly deps: OrgHostDeps;
   private readonly fetchImpl: OrgFetch;
   private lastBootstrap: OrgBootstrap | null = null;
 
+  // Plain field assignment (no parameter properties): keeps this file runnable
+  // under Node's type-stripping mode so the multi-org book can be behavior-
+  // tested without a build step.
   constructor(
-    private readonly deps: OrgHostDeps,
+    deps: OrgHostDeps,
     fetchImpl?: OrgFetch,
   ) {
-    this.fetchImpl =
-      fetchImpl ?? ((url, init) => fetch(url, init));
+    this.deps = deps;
+    this.fetchImpl = fetchImpl ?? ((url, init) => fetch(url, init));
   }
 
   /** Raw bootstrap payload from the most recent successful status refresh. */
