@@ -79,6 +79,7 @@ import {
   IconTarget,
   IconPaperclip,
   IconAtSign,
+  IconBookOpen,
   IconX,
 } from "./icons";
 
@@ -2321,7 +2322,7 @@ export function Composer({
                             setPlusSkillMode(true);
                           }}
                         >
-                          <IconSparkles size={14} />
+                          <IconBookOpen size={14} />
                           <span>{t("chat.pickSkill")}</span>
                         </button>
                       </>
@@ -2340,7 +2341,7 @@ export function Composer({
                               insertComposerText(`$${skill.name} `);
                             }}
                           >
-                            <IconSparkles size={14} />
+                            <IconBookOpen size={14} />
                             <span>{skill.name}</span>
                           </button>
                         ))}

@@ -185,7 +185,7 @@ export const zhTW = {
     hoverCardBranchAria: "分支 {{name}}",
   },
   chat: {
-    addContext: "使用 @ 加入上下文",
+    addContext: "加入上下文",
     pickSkill: "選擇技能",
     noSkillsYet: "暫無技能",
     skillsLoading: "技能載入中…",

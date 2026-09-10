@@ -192,7 +192,7 @@ export const tr = {
     hoverCardBranchAria: "Dal {{name}}",
   },
   chat: {
-    addContext: "Bağlam ekle: @",
+    addContext: "Bağlam ekle",
     pickSkill: "Yetenek seç",
     noSkillsYet: "Henüz yetenek yok",
     skillsLoading: "Yetenekler yükleniyor…",

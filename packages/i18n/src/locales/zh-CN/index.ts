@@ -185,7 +185,7 @@ export const zhCN = {
     hoverCardBranchAria: "分支 {{name}}",
   },
   chat: {
-    addContext: "使用 @ 添加上下文",
+    addContext: "添加上下文",
     pickSkill: "选择技能",
     noSkillsYet: "暂无技能",
     skillsLoading: "技能加载中…",

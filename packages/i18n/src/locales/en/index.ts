@@ -190,7 +190,7 @@ export const en = {
     hoverCardBranchAria: "Branch {{name}}",
   },
   chat: {
-    addContext: "Add context with @",
+    addContext: "Add context",
     pickSkill: "Pick a skill",
     noSkillsYet: "No skills yet",
     skillsLoading: "Loading skills…",

@@ -181,7 +181,7 @@ export const de = {
     "hoverCardBranchAria": "Zweig {{name}}"
   },
   "chat": {
-    "addContext": "Kontext mit @ hinzufügen",
+    "addContext": "Kontext hinzufügen",
     "pickSkill": "Skill auswählen",
     "noSkillsYet": "Noch keine Skills",
     "skillsLoading": "Skills werden geladen…",

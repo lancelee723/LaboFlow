@@ -192,7 +192,7 @@ export const ko = {
     hoverCardBranchAria: "브랜치 {{name}}",
   },
   chat: {
-    addContext: "@로 컨텍스트 추가",
+    addContext: "컨텍스트 추가",
     pickSkill: "스킬 선택",
     noSkillsYet: "아직 스킬이 없습니다",
     skillsLoading: "스킬 불러오는 중…",
