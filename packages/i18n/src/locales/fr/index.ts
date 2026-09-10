@@ -182,6 +182,8 @@ export const fr = {
   },
   "chat": {
     "addContext": "Ajouter du contexte",
+    contextPickerPlaceholder: "Filtrer les conversations\u2026",
+    contextEmpty: "Aucune conversation correspondante",
     "pickSkill": "Choisir une skill",
     "noSkillsYet": "Aucune skill pour l'instant",
     "skillsLoading": "Chargement des skills…",

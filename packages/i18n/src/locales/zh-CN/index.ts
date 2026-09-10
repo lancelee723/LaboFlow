@@ -186,6 +186,8 @@ export const zhCN = {
   },
   chat: {
     addContext: "添加上下文",
+    contextPickerPlaceholder: "\u7b5b\u9009\u5bf9\u8bdd\u8bb0\u5f55\u2026",
+    contextEmpty: "\u6ca1\u6709\u5339\u914d\u7684\u5bf9\u8bdd",
     pickSkill: "选择技能",
     noSkillsYet: "暂无技能",
     skillsLoading: "技能加载中…",

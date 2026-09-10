@@ -13,6 +13,7 @@ import type {
   Mode,
   PermissionMode,
   ProviderPublic,
+  SessionSummary,
   ThinkingLevel,
   UserSkillRecord,
 } from "@pi-desktop/shared";
@@ -80,6 +81,7 @@ import {
   IconPaperclip,
   IconAtSign,
   IconBookOpen,
+  IconNewSession,
   IconX,
 } from "./icons";
 
@@ -679,8 +681,25 @@ export function Composer({
   const [modelThinkingOpen, setModelThinkingOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [plusSkillMode, setPlusSkillMode] = useState(false);
+  const [plusContextMode, setPlusContextMode] = useState(false);
+  const [contextQuery, setContextQuery] = useState("");
   const [plusSkills, setPlusSkills] = useState<UserSkillRecord[] | null>(null);
   const plusRef = useRef<HTMLDivElement | null>(null);
+
+  /** Recent conversations for the "+" context picker (self excluded). */
+  const contextSessions = useMemo(
+    () =>
+      sessions
+        .filter((session) => session.id !== activeSessionId)
+        .filter(
+          (session) =>
+            !contextQuery.trim() ||
+            (session.title || "").toLowerCase().includes(contextQuery.trim().toLowerCase()),
+        )
+        .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
+        .slice(0, 40),
+    [sessions, activeSessionId, contextQuery],
+  );
   const [modelThinkingView, setModelThinkingView] =
     useState<ComposerMenuView>("root");
   const [modelQuery, setModelQuery] = useState("");
@@ -1131,12 +1150,16 @@ export function Composer({
       if (!plusRef.current?.contains(e.target as Node)) {
         setPlusMenuOpen(false);
         setPlusSkillMode(false);
+        setPlusContextMode(false);
+        setContextQuery("");
       }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPlusMenuOpen(false);
         setPlusSkillMode(false);
+        setPlusContextMode(false);
+        setContextQuery("");
       }
     };
     window.addEventListener("mousedown", onPointer);
@@ -1776,72 +1799,109 @@ export function Composer({
       // classifies images from MIME/extension metadata after selection.
       const result = await api.pickFiles();
       if (result.canceled || !result.token || inputBlocked) return;
+      const importToken: string = result.token;
+      await attachFiles((sessionId) => api.importFiles(sessionId, importToken));
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
+    }
+  };
 
-      const editor = ref.current;
-      const sourceValue = editor ? readEditorValue(editor) : valueRef.current;
-      const { start: selectionStart, end: selectionEnd } = editor
-        ? editorSelectionRange(editor)
-        : { start: sourceValue.length, end: sourceValue.length };
-      const sourceSessionId = activeSessionId;
-      const sourceDraftKey = draftKey;
-      const previousReferences = snapshotReferences(sourceSessionId ?? "");
-      setPasting(true);
-      try {
-        // A picker action is real input, so a home draft gets a durable owner
-        // before native paths are copied into scratch.
-        const sessionId = sourceSessionId ?? (await materializeDraftSession());
-        if (!sessionId) throw new Error("session unavailable");
-        const imported = await api.importFiles(sessionId, result.token);
-        const chips = imported.files.map((file) => {
-          const token = nextChipToken();
-          return {
+  /**
+   * Shared "+"-menu attachment pipeline: resolve the owning session, fetch
+   * files (native picker or a conversation transcript), turn them into
+   * reference chips, and splice the tokens into the draft at the caret.
+   */
+  const attachFiles = async (
+    getFiles: (
+      sessionId: string,
+    ) => Promise<{
+      files: Array<{
+        path: string;
+        name: string;
+        kind: "file" | "image";
+        mimeType?: string;
+      }>;
+    }>,
+  ) => {
+    if (inputBlocked) return;
+    const editor = ref.current;
+    const sourceValue = editor ? readEditorValue(editor) : valueRef.current;
+    const { start: selectionStart, end: selectionEnd } = editor
+      ? editorSelectionRange(editor)
+      : { start: sourceValue.length, end: sourceValue.length };
+    const sourceSessionId = activeSessionId;
+    const sourceDraftKey = draftKey;
+    const previousReferences = snapshotReferences(sourceSessionId ?? "");
+    setPasting(true);
+    try {
+      // A picker action is real input, so a home draft gets a durable owner
+      // before native paths are copied into scratch.
+      const sessionId = sourceSessionId ?? (await materializeDraftSession());
+      if (!sessionId) throw new Error("session unavailable");
+      const imported = await getFiles(sessionId);
+      const chips = imported.files.map((file) => {
+        const token = nextChipToken();
+        return {
+          token,
+          reference: createFileReference(file.path, file.name, sessionId, {
+            kind: file.kind,
+            mimeType: file.mimeType,
             token,
-            reference: createFileReference(file.path, file.name, sessionId, {
-              kind: file.kind,
-              mimeType: file.mimeType,
-              token,
-            }),
-          };
-        });
-        if (!chips.length) return;
-        const inserted = chips.map((chip) => chip.token).join("");
-        const nextText =
-          sourceValue.slice(0, selectionStart) +
-          inserted +
-          sourceValue.slice(selectionEnd);
-        const nextReferences = [
-          ...previousReferences.map((reference) =>
-            createFileReference(reference.path, reference.name, sessionId, reference),
-          ),
-          ...chips.map((chip) => chip.reference),
-        ];
-        writeComposerDraft(sessionId, {
-          text: nextText,
-          fileReferences: [
-            ...previousReferences,
-            ...chips.map((chip) => ({
-              path: chip.reference.path,
-              name: chip.reference.name,
-              kind: chip.reference.kind,
-              ...(chip.reference.mimeType
-                ? { mimeType: chip.reference.mimeType }
-                : {}),
-              token: chip.token,
-            })),
-          ],
-        });
-        const currentSessionId = useAppStore.getState().activeSessionId;
-        if (currentSessionId === sessionId) {
-          applyEditorDraft(nextText, nextReferences, selectionStart + inserted.length);
-        } else if (sourceDraftKey === HOME_DRAFT_KEY) {
-          deleteComposerDraft(HOME_DRAFT_KEY);
-        }
-        showToast(t("chat.filesAttached", { count: chips.length }), {
-          variant: "success",
-        });
-      } finally {
-        setPasting(false);
+          }),
+        };
+      });
+      if (!chips.length) return;
+      const inserted = chips.map((chip) => chip.token).join("");
+      const nextText =
+        sourceValue.slice(0, selectionStart) +
+        inserted +
+        sourceValue.slice(selectionEnd);
+      const nextReferences = [
+        ...previousReferences.map((reference) =>
+          createFileReference(reference.path, reference.name, sessionId, reference),
+        ),
+        ...chips.map((chip) => chip.reference),
+      ];
+      writeComposerDraft(sessionId, {
+        text: nextText,
+        fileReferences: [
+          ...previousReferences,
+          ...chips.map((chip) => ({
+            path: chip.reference.path,
+            name: chip.reference.name,
+            kind: chip.reference.kind,
+            ...(chip.reference.mimeType
+              ? { mimeType: chip.reference.mimeType }
+              : {}),
+            token: chip.token,
+          })),
+        ],
+      });
+      const currentSessionId = useAppStore.getState().activeSessionId;
+      if (currentSessionId === sessionId) {
+        applyEditorDraft(nextText, nextReferences, selectionStart + inserted.length);
+      } else if (sourceDraftKey === HOME_DRAFT_KEY) {
+        deleteComposerDraft(HOME_DRAFT_KEY);
       }
+      showToast(t("chat.filesAttached", { count: chips.length }), {
+        variant: "success",
+      });
+    } finally {
+      setPasting(false);
+    }
+  };
+
+  /** ZCode-style context: attach another conversation's transcript as a file. */
+  const attachSessionContext = async (session: SessionSummary) => {
+    setPlusMenuOpen(false);
+    setPlusContextMode(false);
+    try {
+      await attachFiles((targetSessionId) =>
+        api.composerAttachSession({
+          sessionId: session.id,
+          targetSessionId,
+        }),
+      );
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
     }
@@ -2280,6 +2340,8 @@ export function Composer({
                     setPermissionOpen(false);
                     setModelThinkingOpen(false);
                     setPlusSkillMode(false);
+                    setPlusContextMode(false);
+                    setContextQuery("");
                     setPlusMenuOpen((open) => !open);
                   }}
                 >
@@ -2287,7 +2349,37 @@ export function Composer({
                 </button>
                 {plusMenuOpen && (
                   <div className="composer-plus-menu" role="menu">
-                    {!plusSkillMode ? (
+                    {plusContextMode ? (
+                      <>
+                        <div className="composer-plus-search">
+                          <input
+                            className="field-input"
+                            autoFocus
+                            value={contextQuery}
+                            placeholder={t("chat.contextPickerPlaceholder")}
+                            onChange={(event) => setContextQuery(event.target.value)}
+                          />
+                        </div>
+                        {contextSessions.map((session) => (
+                          <button
+                            key={session.id}
+                            type="button"
+                            role="menuitem"
+                            className="composer-plus-item"
+                            title={session.title}
+                            onClick={() => void attachSessionContext(session)}
+                          >
+                            <IconNewSession size={14} />
+                            <span>{session.title || t("chat.untitledTask")}</span>
+                          </button>
+                        ))}
+                        {!contextSessions.length ? (
+                          <div className="composer-plus-empty">
+                            {t("chat.contextEmpty")}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : !plusSkillMode ? (
                       <>
                         <button
                           type="button"
@@ -2307,8 +2399,7 @@ export function Composer({
                           role="menuitem"
                           className="composer-plus-item"
                           onClick={() => {
-                            setPlusMenuOpen(false);
-                            insertComposerText("@");
+                            setPlusContextMode(true);
                           }}
                         >
                           <IconAtSign size={14} />

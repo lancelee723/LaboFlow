@@ -654,6 +654,12 @@ export const api = {
   skillMarketInstall: (payload: { slug: string; ownerHandle?: string; name?: string }) =>
     invoke<{ ok: boolean }>(IPC.invoke.skillMarketInstall, payload),
 
+  /** Attach another conversation's transcript as a scratch markdown file. */
+  composerAttachSession: (input: { sessionId: string; targetSessionId: string }) =>
+    invoke<{
+      files: Array<{ path: string; name: string; kind: "file" | "image" }>;
+    }>(IPC.invoke.composerAttachSession, input),
+
   // --- Organization session (PRD 4.1.12) ------------------------------------
   orgLogin: (input: { serverUrl: string; username: string; password: string }) =>
     invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgLogin, input),

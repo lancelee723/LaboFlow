@@ -193,6 +193,8 @@ export const ko = {
   },
   chat: {
     addContext: "컨텍스트 추가",
+    contextPickerPlaceholder: "\ub300\ud654 \ud544\ud130\u2026",
+    contextEmpty: "\uc77c\uce58\ud558\ub294 \ub300\ud654 \uc5c6\uc74c",
     pickSkill: "스킬 선택",
     noSkillsYet: "아직 스킬이 없습니다",
     skillsLoading: "스킬 불러오는 중…",

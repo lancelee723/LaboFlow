@@ -471,3 +471,14 @@
   font-size: var(--text-xs);
   color: var(--ds-text-muted);
 }
+
+.composer-plus-search {
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+  margin-bottom: 4px;
+}
+
+.composer-plus-search .field-input {
+  width: 100%;
+  font-size: var(--text-xs);
+}

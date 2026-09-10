@@ -186,6 +186,8 @@ export const zhTW = {
   },
   chat: {
     addContext: "加入上下文",
+    contextPickerPlaceholder: "\u7be9\u9078\u5c0d\u8a71\u8a18\u9304\u2026",
+    contextEmpty: "\u6c92\u6709\u7b26\u5408\u7684\u5c0d\u8a71",
     pickSkill: "選擇技能",
     noSkillsYet: "暫無技能",
     skillsLoading: "技能載入中…",

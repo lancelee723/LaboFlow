@@ -193,6 +193,8 @@ export const tr = {
   },
   chat: {
     addContext: "Bağlam ekle",
+    contextPickerPlaceholder: "Konu\u015fmalar\u0131 filtrele\u2026",
+    contextEmpty: "E\u015fle\u015fen konu\u015fma yok",
     pickSkill: "Yetenek seç",
     noSkillsYet: "Henüz yetenek yok",
     skillsLoading: "Yetenekler yükleniyor…",

@@ -155,6 +155,7 @@ import {
 
 import { HostProcess } from "./host-process";
 import { OrgService } from "./org-service";
+import { attachSessionTranscript } from "./session-attach";
 import {
   shouldCreateTaskNotification as shouldCreateTaskNotificationPolicy,
   shouldShowNativeNotification,
@@ -7024,6 +7025,50 @@ function registerIpc() {
       const saved = await saveComposerPasteFiles(dataDir, sessionId, files);
       recordPastedClipboardFiles(files);
       return { files: saved };
+    },
+  );
+
+  /**
+   * ZCode-style context (PRD FR-C-34): attach another conversation's
+   * transcript to the current session as a scratch markdown file. The
+   * composer inserts a normal file-reference chip, so the model reads it
+   * through the same attachment path as imported files.
+   */
+  handle(
+    IPC.invoke.composerAttachSession,
+    async (
+      event,
+      input: { sessionId?: unknown; targetSessionId?: unknown } = {},
+    ) => {
+      assertMainWindowSender(event);
+      if (!host) throw new Error("host unavailable");
+      const sessionId =
+        typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+      const targetSessionId =
+        typeof input.targetSessionId === "string"
+          ? input.targetSessionId.trim()
+          : "";
+      if (!sessionId || !targetSessionId || targetSessionId === sessionId) {
+        throw Object.assign(new Error("invalid session attach input"), {
+          errorCode: ErrorCodes.INVALID_ARGUMENT,
+        });
+      }
+      const detail = (await host.call("session.get", {
+        id: sessionId,
+      })) as { session?: { title?: string; messages?: Array<{ role?: string; content?: string; createdAt?: string }> } | null };
+      const source = detail.session;
+      if (!source) {
+        throw Object.assign(new Error("session not found"), {
+          errorCode: ErrorCodes.NOT_FOUND,
+        });
+      }
+      const saved = await attachSessionTranscript(
+        dataDir,
+        targetSessionId,
+        source.title || "",
+        source.messages ?? [],
+      );
+      return { files: [saved] };
     },
   );
 

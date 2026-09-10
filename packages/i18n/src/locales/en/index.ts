@@ -191,6 +191,8 @@ export const en = {
   },
   chat: {
     addContext: "Add context",
+    contextPickerPlaceholder: "Filter conversations\u2026",
+    contextEmpty: "No matching conversations",
     pickSkill: "Pick a skill",
     noSkillsYet: "No skills yet",
     skillsLoading: "Loading skills…",

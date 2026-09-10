@@ -113,7 +113,7 @@ test("picker attachments materialize a session before importing paths", () => {
     composer,
     /const sessionId = sourceSessionId \?\? \(await materializeDraftSession\(\)\)/,
   );
-  assert.match(composer, /api\.importFiles\(\s*sessionId,\s*result\.token\s*\)/);
+  assert.match(composer, /api\.importFiles\(\s*sessionId,\s*importToken\s*\)/);
   assert.match(
     composer,
     /createFileReference\(file\.path, file\.name, sessionId, \{[\s\S]*kind: file\.kind/,
@@ -136,7 +136,10 @@ test("composer opens an insert menu from the plus button with attach, @ context,
   assert.match(composer, /const pickAndAttach = async \(\) =>/);
   assert.match(composer, /const result = await api\.pickFiles\(\);/);
   // "@" inserts through the normal caret path so the file autocomplete opens.
-  assert.match(composer, /insertComposerText\("@"\)/);
+  // Context picker: attach another conversation's transcript as a file.
+  assert.match(composer, /composerAttachSession/);
+  assert.match(composer, /attachSessionContext/);
+  assert.match(composer, /plusContextMode/);
   // Skills land in the prompt as a $name token.
   assert.match(composer, /insertComposerText\(`\$\$\{skill\.name\} `\)/);
   assert.match(composer, /listUserSkills/);
