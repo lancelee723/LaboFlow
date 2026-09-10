@@ -48,6 +48,26 @@ export function periodKey(period: QuotaPeriod, now: Date): string {
     }
   }
 }
+/**
+ * Exclusive end boundary of the period containing `now` (server timezone),
+ * exposed by the remaining API as the client-visible reset time.
+ */
+export function periodEnd(period: QuotaPeriod, now: Date): Date {
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  switch (period) {
+    case 'daily':
+      return new Date(y, m, d + 1);
+    case 'weekly': {
+      const day = now.getDay() || 7; // Mon=1..Sun=7
+      return new Date(y, m, d + (8 - day));
+    }
+    case 'monthly':
+      return new Date(y, m + 1, 1);
+  }
+}
+
 
 /**
  * Effective limit per (kind × period): STRICTEST WINS.

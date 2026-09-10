@@ -172,6 +172,7 @@ export const IPC = {
     orgLogout: "pi-desktop/org/logout",
     orgStatus: "pi-desktop/org/status",
     orgChangePassword: "pi-desktop/org/changePassword",
+    orgQuotaRemaining: "pi-desktop/org/quotaRemaining",
     subagentList: "pi-desktop/subagent/list",
     subagentCatalog: "pi-desktop/subagent/catalog",
     subagentCreate: "pi-desktop/subagent/create",

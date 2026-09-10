@@ -168,11 +168,51 @@ class CoreController {
     return inserted;
   }
 
+  /**
+   * Live quota view (PRD 4.2.4): strictest effective limits for this actor ×
+   * current-period usage from the atomic quota counters the gateway bumps.
+   * Team-scoped subjects appear only for team members.
+   */
   @Get('quota/remaining')
   async remaining(@Req() req: FastifyRequest) {
     const actor = requireActor(req);
-    void actor;
-    return { ok: true }; // detailed remaining view lands with T2.9 console
+    const { quotaPolicies, quotaCounters } = await import('./db/schema.js');
+    const rules = await import('./quota/quota-rules.js');
+    const policies = (await this.deps.db.select().from(quotaPolicies)) as unknown as Parameters<typeof rules.effectiveLimits>[0];
+    const teamId = actor.teamId;
+    const limits = teamId
+      ? rules.effectiveLimits(policies, { teamId, userId: actor.userId })
+      : [];
+    const now = new Date();
+    const counters = (await this.deps.db.select().from(quotaCounters)) as Array<{
+      subjectType: string;
+      subjectId: string;
+      periodKind: string;
+      periodKey: string;
+      sessions: number;
+      tokensIn: number;
+      tokensOut: number;
+    }>;
+    const used = (subjectType: 'team' | 'user', subjectId: string, period: 'daily' | 'weekly' | 'monthly') => {
+      const key = rules.periodKey(period, now);
+      const row = counters.find(
+        (c) => c.subjectType === subjectType && c.subjectId === subjectId && c.periodKind === period && c.periodKey === key,
+      );
+      return { tokens: (row?.tokensIn ?? 0) + (row?.tokensOut ?? 0), sessions: row?.sessions ?? 0 };
+    };
+    const entries = limits.map((limit) => {
+      const team = teamId ? used('team', teamId, limit.period) : null;
+      const self = used('user', actor.userId, limit.period);
+      return {
+        kind: limit.kind,
+        period: limit.period,
+        limit: limit.limit,
+        teamUsed: team ? (limit.kind === 'tokens' ? team.tokens : team.sessions) : null,
+        selfUsed: limit.kind === 'tokens' ? self.tokens : self.sessions,
+        resetAt: rules.periodEnd(limit.period, now).toISOString(),
+      };
+    });
+    return { ok: true, entries, generatedAt: now.toISOString() };
   }
 
   // ----- T2.4 admin: channels -----

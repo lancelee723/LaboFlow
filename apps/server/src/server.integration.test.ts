@@ -203,4 +203,51 @@ describe('P2 server integration (T2.1–T2.5)', () => {
     void usageLogs;
     void quotaCounters;
   });
+
+  it('quota remaining: live limits × counters (团队+本人, resetAt) — P3', async () => {
+    if (!pgAvailable) return;
+    // 团队日会话配额已在前面用例创建：{kind:'sessions', limit:50, period:'daily'}
+    const teamNow = await api('GET', '/quota/remaining', undefined, teamAdminToken);
+    expect(teamNow.status).toBe(200);
+    const teamEntry = (teamNow.json as { entries: Array<{ kind: string; period: string; limit: number; teamUsed: number; selfUsed: number; resetAt: string }> }).entries.find((e: { kind: string; period: string }) => e.kind === 'sessions' && e.period === 'daily');
+    expect(teamEntry).toBeTruthy();
+    expect(teamEntry!.limit).toBe(50);
+    expect(teamEntry!.teamUsed).toBe(0);
+    expect(typeof teamEntry!.resetAt).toBe('string');
+
+    // 直接种计数器：团队今日已用 20 个会话
+    const { periodKey } = await import('./quota/quota-rules.js');
+    const key = periodKey('daily', new Date());
+    const pool = new Pool({ connectionString: DATABASE_URL });
+    await pool.query(
+      `INSERT INTO quota_counters (subject_type, subject_id, period_kind, period_key, sessions)
+       VALUES ('team', $1, 'daily', $2, 20)
+       ON CONFLICT (subject_type, subject_id, period_kind, period_key)
+       DO UPDATE SET sessions = 20`,
+      [teamId, key],
+    );
+    await pool.end();
+
+    const after = await api('GET', '/quota/remaining', undefined, teamAdminToken);
+    const afterEntry = (after.json as { entries: Array<{ kind: string; period: string; limit: number; teamUsed: number; selfUsed: number }> }).entries.find((e: { kind: string; period: string }) => e.kind === 'sessions' && e.period === 'daily');
+    expect(afterEntry!.teamUsed).toBe(20);
+    expect(afterEntry!.limit).toBe(50);
+
+    // 系统级月度 Tokens 配额 + 管理员本人计数器 → selfUsed
+    await api('PUT', '/quota/policies', { scope: 'system', kind: 'tokens', limitValue: 1000, period: 'monthly' }, adminToken);
+    const monthKey = periodKey('monthly', new Date());
+    const pool2 = new Pool({ connectionString: DATABASE_URL });
+    await pool2.query(
+      `INSERT INTO quota_counters (subject_type, subject_id, period_kind, period_key, tokens_in, tokens_out)
+       VALUES ('user', $1, 'monthly', $2, 300, 100)
+       ON CONFLICT (subject_type, subject_id, period_kind, period_key)
+       DO UPDATE SET tokens_in = 300, tokens_out = 100`,
+      [memberId, monthKey],
+    );
+    await pool2.end();
+    const adminNow = await api('GET', '/quota/remaining', undefined, adminToken);
+    const tokenEntry = (adminNow.json as { entries: Array<{ kind: string; limit: number; selfUsed: number }> }).entries.find((e: { kind: string }) => e.kind === 'tokens');
+    expect(tokenEntry!.limit).toBe(1000);
+    expect(tokenEntry!.selfUsed).toBe(400);
+  });
 });

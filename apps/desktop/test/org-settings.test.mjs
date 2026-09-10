@@ -59,3 +59,35 @@ test("settings exposes the organization destination end to end", () => {
   assert.match(serverController, /@Post\('auth\/login'\)/);
   assert.match(serverController, /@Get\('org\/bootstrap'\)/);
 });
+
+test("phase 3: org provider sync and live quota panel", async () => {
+  const main = await readFile(
+    new URL("../electron/main/index.ts", import.meta.url),
+    "utf8",
+  );
+  const orgService = await readFile(
+    new URL("../electron/main/org-service.ts", import.meta.url),
+    "utf8",
+  );
+  const usagePage = await readFile(
+    new URL("../src/components/settings/TokenUsagePage.tsx", import.meta.url),
+    "utf8",
+  );
+  // Provider sync: gateway URL + virtual key become an org-gateway provider.
+  assert.match(main, /vendorKey: "org-gateway"/);
+  assert.match(main, /providers\.create/);
+  assert.match(main, /providers\.update/);
+  assert.match(main, /providers\.delete/);
+  assert.match(main, /syncOrgProvider/);
+  assert.match(orgService, /getBootstrap/);
+  assert.match(orgService, /quotaRemaining/);
+  // Quota panel reads the live remaining API (server computes limits × counters).
+  assert.match(usagePage, /orgQuotaRemaining/);
+  assert.match(usagePage, /usage-quota-card/);
+  assert.match(serverController, /@Get\('quota\/remaining'\)/);
+  assert.match(serverController, /quotaCounters/);
+  // Threshold colors per PRD 4.2.4: exhausted → error, near → warning.
+  // Threshold colors per PRD 4.2.4: exhausted → error, near → warning.
+  assert.match(usagePage, /is-\$\{tone\}/);
+  assert.match(usagePage, /worst >= 1 \? "error" : worst >= 0\.8 \? "warning"/);
+});

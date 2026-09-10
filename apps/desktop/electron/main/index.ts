@@ -6821,14 +6821,84 @@ function registerIpc() {
       return (await host.call(method, params)) as T;
     },
   });
-  handle(IPC.invoke.orgLogin, (input: { serverUrl: string; username: string; password: string }) =>
-    orgService.login(input),
-  );
+
+  // Phase 3: register the "org-provided" provider from the bootstrap payload
+  // (gateway URL + freshly issued virtual key + assigned channel models) so
+  // the model picker lists org channels alongside personal ones.
+  const syncOrgProvider = async (): Promise<void> => {
+    const bootstrap = orgService.getBootstrap();
+    if (!bootstrap) return;
+    const gateway = bootstrap.gateway;
+    if (!host || !gateway?.url || !gateway.virtualKey) return;
+    const modelIds = [
+      ...new Set(
+        (bootstrap.orgChannels ?? []).flatMap((channel) =>
+          Array.isArray(channel.models) ? channel.models.map(String) : [],
+        ),
+      ),
+    ];
+    if (!modelIds.length) return;
+    const thinkingLevels: ThinkingLevel[] = ["off", "low", "medium", "high"];
+    const models = modelIds.map((id) => ({
+      id,
+      contextWindow: 128_000,
+      maxTokens: 8_192,
+      thinkingLevels,
+      defaultThinkingLevel: null as ThinkingLevel | null,
+    }));
+    const input = {
+      name: "LaboFlow 组织渠道",
+      vendorKey: "org-gateway",
+      type: "openai_compatible" as const,
+      protocol: "openai_compatible",
+      baseUrl: `${gateway.url.replace(/\/+$/, "")}/openai/v1`,
+      authKind: "api_key_and_base_url",
+      models,
+      defaultModelId: models[0]?.id,
+      secretValue: gateway.virtualKey,
+    };
+    const list = await host.call<{
+      providers?: Array<{ id?: string; vendorKey?: string }>;
+    }>("providers.list", { includeDisabled: true });
+    const existing = (list.providers ?? []).find(
+      (provider) => provider.vendorKey === "org-gateway",
+    );
+    if (existing?.id) {
+      await host.call("providers.update", { id: existing.id, ...input });
+    } else {
+      await host.call("providers.create", input);
+    }
+  };
+
+  const removeOrgProvider = async (): Promise<void> => {
+    if (!host) return;
+    const list = await host.call<{
+      providers?: Array<{ id?: string; vendorKey?: string }>;
+    }>("providers.list", { includeDisabled: true });
+    const existing = (list.providers ?? []).find(
+      (provider) => provider.vendorKey === "org-gateway",
+    );
+    if (existing?.id) await host.call("providers.delete", { id: existing.id });
+  };
+
+  handle(IPC.invoke.orgLogin, async (input: { serverUrl: string; username: string; password: string }) => {
+    const status = await orgService.login(input);
+    if (status.state === "connected") await syncOrgProvider();
+    return status;
+  });
+  handle(IPC.invoke.orgStatus, async () => {
+    const status = await orgService.status();
+    if (status.state === "connected") await syncOrgProvider();
+    return status;
+  });
   handle(IPC.invoke.orgChangePassword, (input: { currentPassword: string; newPassword: string }) =>
     orgService.changePassword(input),
   );
-  handle(IPC.invoke.orgLogout, () => orgService.logout());
-  handle(IPC.invoke.orgStatus, () => orgService.status());
+  handle(IPC.invoke.orgLogout, async () => {
+    await removeOrgProvider();
+    return orgService.logout();
+  });
+  handle(IPC.invoke.orgQuotaRemaining, () => orgService.quotaRemaining());
   handle(IPC.invoke.secretsHas, async (secretRef: string) => {
     if (!host) throw new Error("host unavailable");
     return host.call("secrets.has", { secretRef });

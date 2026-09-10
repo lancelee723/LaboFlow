@@ -2273,3 +2273,89 @@
 .org-actions {
   display: flex;
 }
+
+/* --- Org quota card (P3 quota panel) ------------------------------------- */
+.usage-quota-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-elevated-opaque);
+  border: 1px solid var(--ds-border-subtle);
+}
+
+.usage-quota-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.usage-quota-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.usage-quota-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.usage-quota-kind {
+  font-size: var(--text-xs);
+  color: var(--ds-text-primary);
+}
+
+.usage-quota-period {
+  margin-left: 6px;
+  font-size: var(--text-2xs);
+  color: var(--ds-text-muted);
+}
+
+.usage-quota-flags {
+  display: inline-flex;
+  gap: 10px;
+  font-size: var(--text-2xs);
+  color: var(--ds-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-quota-exceeded {
+  color: var(--ds-error);
+}
+
+.usage-quota-bar {
+  height: 4px;
+  border-radius: var(--radius-3xs);
+  background: var(--ds-bg-hover);
+  overflow: hidden;
+}
+
+.usage-quota-fill {
+  height: 100%;
+  border-radius: var(--radius-3xs);
+  background: var(--ds-text-primary);
+}
+
+.usage-quota-row.is-warning .usage-quota-fill {
+  background: var(--ds-warning);
+}
+
+.usage-quota-row.is-error .usage-quota-fill {
+  background: var(--ds-error);
+}
+
+.usage-quota-reset {
+  font-size: var(--text-3xs);
+  color: var(--ds-text-muted);
+}
+
+.usage-quota-none {
+  font-size: var(--text-sm);
+  color: var(--ds-text-muted);
+}

@@ -1943,3 +1943,20 @@ export type OrgBootstrap = {
   gateway?: { url?: string; virtualKey?: string };
 };
 
+// --- Org quota view (PRD 4.2.4, P3 quota panel) -----------------------------
+
+export type OrgQuotaEntry = {
+  kind: "tokens" | "sessions" | string;
+  period: "daily" | "weekly" | "monthly" | string;
+  limit: number;
+  teamUsed?: number | null;
+  selfUsed: number;
+  resetAt?: string;
+};
+
+export type OrgQuotaRemaining = {
+  ok: boolean;
+  entries: OrgQuotaEntry[];
+  generatedAt?: string;
+};
+

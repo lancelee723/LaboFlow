@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatTokenCount } from "@pi-desktop/shared";
-import type { TokenUsageHistoryItem } from "@pi-desktop/shared";
+import type {
+  OrgQuotaRemaining,
+  OrgStatus,
+  TokenUsageHistoryItem,
+} from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 
 type RangeId = "7d" | "30d";
@@ -45,6 +49,31 @@ export function TokenUsagePage() {
   const [items, setItems] = useState<TokenUsageHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<RangeId>("30d");
+  const [orgStatus, setOrgStatus] = useState<OrgStatus | null>(null);
+  const [quota, setQuota] = useState<OrgQuotaRemaining | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // P3 quota panel: when the org session is live, surface limits × usage.
+    api
+      .orgStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setOrgStatus(status);
+        if (status.state === "connected") {
+          api
+            .orgQuotaRemaining()
+            .then((remaining) => {
+              if (!cancelled) setQuota(remaining);
+            })
+            .catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +199,69 @@ export function TokenUsagePage() {
   return (
     <div className="usage-page">
       {!hasData ? <div className="usage-empty">{t("settings.usage.empty")}</div> : null}
+
+      {orgStatus?.state === "connected" ? (
+        <section className="usage-section">
+          <h3 className="usage-section-title">{t("settings.usage.orgQuota")}</h3>
+          <div className="usage-quota-card">
+            {quota?.entries?.length ? (
+              quota.entries.map((entry, index) => {
+                const limit = Math.max(1, entry.limit);
+                const teamRatio = entry.teamUsed != null ? entry.teamUsed / limit : null;
+                const selfRatio = entry.selfUsed / limit;
+                const worst = Math.max(teamRatio ?? 0, selfRatio);
+                const tone = worst >= 1 ? "error" : worst >= 0.8 ? "warning" : "ok";
+                return (
+                  <div className={`usage-quota-row is-${tone}`} key={`${entry.kind}-${entry.period}-${index}`}>
+                    <div className="usage-quota-head">
+                      <span className="usage-quota-kind">
+                        {t(entry.kind === "tokens" ? "settings.usage.tokensKind" : "settings.usage.sessionsKind")}
+                        <span className="usage-quota-period">
+                          {t(
+                            entry.period === "daily"
+                              ? "settings.usage.periodDay"
+                              : entry.period === "weekly"
+                                ? "settings.usage.periodWeek"
+                                : "settings.usage.periodMonth",
+                          )}
+                        </span>
+                      </span>
+                      <span className="usage-quota-flags">
+                        {teamRatio != null ? (
+                          <span>
+                            {t("settings.usage.team")}: {entry.teamUsed}/{entry.limit}
+                          </span>
+                        ) : null}
+                        <span>
+                          {t("settings.usage.self")}: {entry.selfUsed}/{entry.limit}
+                        </span>
+                        {worst >= 1 ? (
+                          <b className="usage-quota-exceeded">{t("settings.usage.exceeded")}</b>
+                        ) : null}
+                      </span>
+                    </div>
+                    <div className="usage-quota-bar">
+                      <div
+                        className="usage-quota-fill"
+                        style={{ width: `${Math.min(100, worst * 100).toFixed(1)}%` }}
+                      />
+                    </div>
+                    {entry.resetAt ? (
+                      <div className="usage-quota-reset">
+                        {t("settings.usage.reset", {
+                          time: new Date(entry.resetAt).toLocaleString(),
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            ) : (
+              <div className="usage-quota-none">{t("settings.usage.quotaNone")}</div>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       <div className="usage-cards">
         <div className="usage-card">

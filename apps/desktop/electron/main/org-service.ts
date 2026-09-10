@@ -41,6 +41,7 @@ function normalizeServerUrl(input: string): string {
 
 export class OrgService {
   private readonly fetchImpl: OrgFetch;
+  private lastBootstrap: OrgBootstrap | null = null;
 
   constructor(
     private readonly deps: OrgHostDeps,
@@ -48,6 +49,11 @@ export class OrgService {
   ) {
     this.fetchImpl =
       fetchImpl ?? ((url, init) => fetch(url, init));
+  }
+
+  /** Raw bootstrap payload from the most recent successful status refresh. */
+  getBootstrap(): OrgBootstrap | null {
+    return this.lastBootstrap;
   }
 
   private async readSession(): Promise<StoredSession | null> {
@@ -193,6 +199,7 @@ export class OrgService {
       };
     }
     const bootstrap = body as OrgBootstrap;
+    this.lastBootstrap = bootstrap;
     return {
       connected: true,
       state: "connected",
@@ -207,5 +214,27 @@ export class OrgService {
         : 0,
       mustChangePassword: session.mustChangePassword,
     };
+  }
+
+  /**
+   * Authenticated GET passthrough for org endpoints (e.g. /quota/remaining).
+   * Throws ORG_EXPIRED when the stored session is no longer accepted.
+   */
+  async getOrgJson(path: string): Promise<unknown> {
+    const session = await this.readSession();
+    if (!session) throw new Error("ORG_NOT_CONNECTED");
+    const response = await this.fetchImpl(`${session.serverUrl}${path}`, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.accessToken}`,
+      },
+    });
+    if (response.status === 401) throw new Error("ORG_EXPIRED");
+    if (!response.ok) throw new Error(`ORG_API_FAILED: HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async quotaRemaining(): Promise<unknown> {
+    return this.getOrgJson("/quota/remaining");
   }
 }

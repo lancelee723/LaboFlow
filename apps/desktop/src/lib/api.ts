@@ -672,6 +672,10 @@ export const api = {
       IPC.invoke.orgChangePassword,
       input,
     ),
+  orgQuotaRemaining: () =>
+    invoke<import("@pi-desktop/shared").OrgQuotaRemaining>(
+      IPC.invoke.orgQuotaRemaining,
+    ),
   /**
    * Level and project must travel with the id: a project skill has no global
    * counterpart to fall back to, so resolving by id alone would miss it.
