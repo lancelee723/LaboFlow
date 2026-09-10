@@ -54,9 +54,9 @@ type SkillEditorState = {
 
 type MarketSkill = {
   slug: string;
+  ownerHandle: string;
   name: string;
   description: string;
-  author: string;
   downloads: number;
 };
 
@@ -315,7 +315,11 @@ export function AgentSkillsPage() {
     if (marketBusy) return;
     setMarketBusy(skill.slug);
     try {
-      await api.skillMarketInstall({ slug: skill.slug, name: skill.name });
+      await api.skillMarketInstall({
+        slug: skill.slug,
+        ownerHandle: skill.ownerHandle,
+        name: skill.name,
+      });
       showToast(t("settings.skillMarketInstalled", { name: skill.name }), {
         variant: "success",
       });
@@ -569,7 +573,7 @@ export function AgentSkillsPage() {
                     <span className="skill-market-name">{skill.name}</span>
                     <span className="skill-market-meta">
                       {[
-                        skill.author,
+                        skill.ownerHandle,
                         skill.downloads
                           ? t("settings.skillMarketDownloads", { count: skill.downloads })
                           : "",

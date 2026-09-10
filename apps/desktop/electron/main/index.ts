@@ -8503,17 +8503,18 @@ function registerIpc() {
    * packages are materialised directly on disk; the pluginChanged event then
    * makes the next `skills.list` pick the new directory up.
    */
-  handle(IPC.invoke.skillMarketInstall, async (payload: { slug: string }) => {
+  handle(IPC.invoke.skillMarketInstall, async (payload: { slug: string; ownerHandle?: string }) => {
     const slug = String(payload?.slug ?? "").trim();
     if (!slug) throw new Error("SKILL_MARKET_SLUG_REQUIRED");
+    const ownerHandle = payload?.ownerHandle ? String(payload.ownerHandle).trim() : undefined;
     const client = new ClawhubClient();
-    const zipBytes = await client.download(slug);
-    if (!zipBytes) throw new Error("SKILL_MARKET_DOWNLOAD_FAILED");
+    const pkg = await client.download(slug, ownerHandle);
+    if (!pkg) throw new Error("SKILL_MARKET_DOWNLOAD_FAILED");
     const workDir = await mkdtemp(path2.join(tmpdir(), "laboflow-skill-"));
     try {
       const zipPath = path2.join(workDir, "skill.zip");
       const extractDir = path2.join(workDir, "extracted");
-      await writeFile(zipPath, zipBytes);
+      await writeFile(zipPath, pkg.zip);
       new AdmZip(zipPath).extractAllTo(extractDir, true);
       const entries = await readdir(extractDir, { withFileTypes: true });
       const hasSkillMd = (list: Dirent[]) =>

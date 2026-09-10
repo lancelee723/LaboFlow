@@ -1,19 +1,51 @@
 /**
- * Clawhub.ai skill marketplace adapter (ported from the frozen LaboFlow
- * client, W11/#12). The live API is served from https://clawhub.ai; an
- * unreachable network surfaces as an empty result list, not an error.
+ * Clawhub.ai skill marketplace adapter (W11/#12, rewritten against the real
+ * ClawHub API — the same contract the official `clawhub` CLI speaks):
+ *   search   GET /api/v1/search?q=…                  → { results: […] }
+ *   detail   GET /api/v1/skills/{slug}?ownerHandle=…  → latestVersion
+ *   download GET /api/v1/download?slug=&ownerHandle=&version= → zip bytes
+ * An unreachable network surfaces as an empty result list, not an error.
  */
 
 export interface ClawhubSkill {
+  /** Registry slug, e.g. "planning-with-files". */
   slug: string;
+  /** Publisher handle, e.g. "othmanadi"; passed back on download. */
+  ownerHandle: string;
   name: string;
   description: string;
-  author: string;
   downloads: number;
+}
+
+export interface ClawhubDownload {
+  slug: string;
+  ownerHandle: string;
+  /** Resolved latest version (from the detail endpoint). */
+  version: string;
+  zip: Buffer;
 }
 
 const SKILL_MARKET_BASE =
   process.env.LABOFLOW_SKILL_MARKET_BASE?.trim() || "https://clawhub.ai";
+
+type SearchItem = {
+  displayName?: string;
+  downloads?: number;
+  canonicalUrl?: string;
+  install?: { reference?: string };
+  native?: {
+    ownerHandle?: string;
+    skill?: { slug?: string; summary?: string; description?: string };
+  };
+};
+
+type SkillDetail = {
+  skill?: {
+    slug?: string;
+    latestVersion?: { version?: string };
+  };
+  latestVersion?: { version?: string };
+};
 
 export class ClawhubClient {
   constructor(
@@ -22,29 +54,56 @@ export class ClawhubClient {
   ) {}
 
   async search(query: string): Promise<ClawhubSkill[]> {
-    const res = await this.fetchImpl(
-      `${this.base}/api/skills?q=${encodeURIComponent(query)}`,
+    const response = await this.fetchImpl(
+      `${this.base}/api/v1/search?q=${encodeURIComponent(query)}`,
       { headers: { accept: "application/json" } },
     );
-    if (!res.ok) return [];
-    const json = (await res.json().catch(() => ({}))) as {
-      skills?: Array<Record<string, unknown>>;
+    if (!response.ok) return [];
+    const body = (await response.json().catch(() => ({}))) as {
+      results?: SearchItem[];
     };
-    return (json.skills ?? []).map((s) => ({
-      slug: String(s.slug ?? s.id ?? ""),
-      name: String(s.name ?? s.slug ?? ""),
-      description: String(s.description ?? ""),
-      author: String(s.author ?? ""),
-      downloads: Number(s.downloads ?? 0),
-    }));
+    return (body.results ?? []).map((item) => {
+      const native = item.native ?? {};
+      const reference = item.install?.reference ?? "";
+      const fallbackSlug = reference.includes("/")
+        ? reference.split("/").slice(1).join("/")
+        : reference;
+      return {
+        slug: native.skill?.slug ?? fallbackSlug,
+        ownerHandle: native.ownerHandle ?? "",
+        name: item.displayName ?? native.skill?.slug ?? fallbackSlug,
+        description: native.skill?.summary ?? "",
+        downloads: Number(item.downloads ?? 0),
+      };
+    });
   }
 
-  /** Download one skill package (zip bytes); null when unavailable. */
-  async download(slug: string): Promise<Buffer | null> {
-    const res = await this.fetchImpl(
-      `${this.base}/api/skills/${encodeURIComponent(slug)}/download`,
+  /**
+   * Download the latest version of one skill as a zip. The version comes from
+   * the detail endpoint, mirroring the CLI's resolve-then-download flow.
+   */
+  async download(
+    slug: string,
+    ownerHandle?: string,
+  ): Promise<ClawhubDownload | null> {
+    const detail = await this.fetchImpl(
+      `${this.base}/api/v1/skills/${encodeURIComponent(slug)}${
+        ownerHandle ? `?ownerHandle=${encodeURIComponent(ownerHandle)}` : ""
+      }`,
+      { headers: { accept: "application/json" } },
     );
-    if (!res.ok) return null;
-    return Buffer.from(await res.arrayBuffer());
+    if (!detail.ok) return null;
+    const meta = (await detail.json().catch(() => ({}))) as SkillDetail;
+    const version = meta.skill?.latestVersion?.version ?? meta.latestVersion?.version;
+    if (!version) return null;
+
+    const url = new URL(`${this.base}/api/v1/download`);
+    url.searchParams.set("slug", slug);
+    if (ownerHandle) url.searchParams.set("ownerHandle", ownerHandle);
+    url.searchParams.set("version", version);
+    const response = await this.fetchImpl(url.toString());
+    if (!response.ok) return null;
+    const zip = Buffer.from(await response.arrayBuffer());
+    return { slug, ownerHandle: ownerHandle ?? "", version, zip };
   }
 }

@@ -644,15 +644,15 @@ export const api = {
     invoke<
       Array<{
         slug: string;
+        ownerHandle: string;
         name: string;
         description: string;
-        author: string;
         downloads: number;
       }>
     >(IPC.invoke.skillMarketSearch, { query }),
   /** Download and install one marketplace skill into the global skills root. */
-  skillMarketInstall: (payload: { slug: string; name?: string }) =>
-    invoke<{ skill?: UserSkillRecord }>(IPC.invoke.skillMarketInstall, payload),
+  skillMarketInstall: (payload: { slug: string; ownerHandle?: string; name?: string }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.skillMarketInstall, payload),
 
   // --- Organization session (PRD 4.1.12) ------------------------------------
   orgLogin: (input: { serverUrl: string; username: string; password: string }) =>
