@@ -42,6 +42,7 @@ import { ExpertService } from "./expert-service";
 import { TeamRunner } from "./team-runner";
 import { KbService } from "./kb-service";
 import { createChannelRegistryHost } from "./channels/registry";
+import { createSpaceClient, createSpaceIpcHost } from "./space-client";
 import { createChannelCredentialStore } from "./channels/credential-store";
 import { createFeishuAdapterFactory } from "./channels/feishu";
 import { createWecomAdapterFactory } from "./channels/wecom";
@@ -4749,6 +4750,7 @@ const kbService = new KbService({
 // Module 04: IM channels — registry, adapters, and channel IPC. Messages
 // that pass the allowlist dispatch through the headless driver and the
 // result is sent back over the channel adapter.
+let spaceHost: ReturnType<typeof createSpaceIpcHost> | undefined;
 const channelHost = createChannelRegistryHost({
   getLogger: () => logger,
   getDriver: () => headlessAgentDriver,
@@ -5866,6 +5868,8 @@ function registerIpc() {
   };
   // Module 04: channel accounts + connect/test lifecycle IPC (registry-owned).
   channelHost.registerIpc(handle);
+  // Module 02: team-space tree/docs/comments/revisions/events IPC.
+  spaceHost?.registerIpc(handle);
   const handleWithEvent = (
     channel: string,
     fn: (event: { sender: { id: number } }, ...args: any[]) => Promise<any>,
@@ -7138,6 +7142,53 @@ function registerIpc() {
     getUserId: async () => orgService.getMe()?.userId,
     getServerUrl: async () => orgService.getServerUrl(),
     emit: (frame) => sendToRenderer(IPC.event.orgWsFrame, frame),
+  });
+
+  // Module 02: Team Spaces — REST client + per-space event poll loop.
+  // PATCH/PUT/DELETE mirror postOrgJson but keep the server's machine-readable
+  // {code,message} body so EVERSION/EANCHOR reach the renderer as readable toasts.
+  async function spaceOrgRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> {
+    const token = await orgService.getAccessToken();
+    const serverUrl = orgService.getServerUrl();
+    if (!token || !serverUrl) throw new Error("ORG_NOT_CONNECTED");
+    const response = await fetch(`${serverUrl}${path}`, {
+      method,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    if (response.status === 401) throw new Error("ORG_EXPIRED");
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        message?: string;
+      };
+      throw Object.assign(
+        new Error(errBody.message ?? `ORG_API_FAILED: HTTP ${response.status}`),
+        { code: errBody.code, status: response.status },
+      );
+    }
+    return response.json().catch(() => ({}));
+  }
+  spaceHost = createSpaceIpcHost({
+    client: createSpaceClient({
+      getJson: (path) => orgService.getOrgJson(path),
+      postJson: (path, body) => orgService.postOrgJson(path, body),
+      patchJson: (path, body) => spaceOrgRequest("PATCH", path, body),
+      putJson: (path, body) => spaceOrgRequest("PUT", path, body),
+      deleteJson: (path) => spaceOrgRequest("DELETE", path),
+    }),
+    emit: (frame) => sendToRenderer(IPC.event.spaceEvent, frame),
+    warn: (context, message) =>
+      logger.app("session", "warn", "space events poll", {
+        data: `${context}: ${message}`,
+      }),
   });
   handle(IPC.invoke.orgLogout, async () => {
     const status = await orgService.logout();
