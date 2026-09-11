@@ -261,6 +261,12 @@ export const IPC = {
     closeBehaviorSet: "pi-desktop/window/closeBehavior/set",
     menuRendererReady: "pi-desktop/menu/rendererReady",
     nativeMenuAction: "pi-desktop/menu/nativeAction",
+    channelsList: "pi-desktop/channels/list",
+    channelsSave: "pi-desktop/channels/save",
+    channelsDelete: "pi-desktop/channels/delete",
+    channelsConnect: "pi-desktop/channels/connect",
+    channelsDisconnect: "pi-desktop/channels/disconnect",
+    channelsTest: "pi-desktop/channels/test",
   },
   event: {
     pluginChanged: "pi-desktop/event/pluginChanged",
@@ -281,6 +287,7 @@ export const IPC = {
     providersOauth: "pi-desktop/providers/oauth/event",
     expertTeamRun: "pi-desktop/expert/event/teamRun",
     updatesState: "pi-desktop/updates/event/state",
+    channelState: "pi-desktop/channel/event/state",
   },
 } as const;
 

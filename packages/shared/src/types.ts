@@ -2092,3 +2092,71 @@ export interface KbUrlEntry {
   source: "user" | "org";
   orgId?: string;
 }
+
+/** Module 04: IM channels (feishu / wecom intelligent bots). */
+
+export type ChannelProvider = "feishu" | "wecom";
+
+export type ChannelAccountScope = "p2p" | "group" | "both";
+
+/**
+ * One configured IM channel. Credentials ride along as `credentials` only
+ * inside the main process (injected just before `connect`); IPC list/save
+ * responses must strip them — the renderer never sees secret material.
+ */
+export interface ChannelAccount {
+  id: string;
+  provider: ChannelProvider;
+  name: string;
+  /** Host secrets key that holds the credential blob (future migration v15). */
+  secretRef?: string;
+  scope: ChannelAccountScope;
+  /** Platform identities (feishu open_id / wecom userid) allowed to command. */
+  allowlist: string[];
+  enabled: boolean;
+  /** Main-process only; plaintext over IPC save, never returned. */
+  credentials?: Record<string, string>;
+}
+
+export type ChannelState =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "error";
+
+export interface DiagInfo {
+  kind: "network" | "credential" | "permission" | "publish" | "unknown";
+  message: string;
+  rawCode?: string;
+}
+
+export interface InboundMessage {
+  /** ChannelAccount.id the message arrived on. */
+  channelId: string;
+  provider: ChannelProvider;
+  /** Platform sender identity (feishu open_id / wecom userid). */
+  senderRef: string;
+  /** Platform chat identity used as the reply address. */
+  chatRef: string;
+  chatType: "p2p" | "group";
+  text: string;
+  raw: unknown;
+  receivedAt: number;
+}
+
+export interface OutboundPayload {
+  replyText: string;
+  statusCard?: {
+    title: string;
+    status: string;
+    detail?: string;
+  };
+}
+
+export interface ChannelCapabilities {
+  maxTextBytes: number;
+  fileMaxBytes: number;
+  streaming: boolean;
+  card: boolean;
+  replyWindowMs?: number;
+}
