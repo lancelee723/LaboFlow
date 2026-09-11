@@ -165,6 +165,10 @@ pub struct UiMessage {
     /// Structured AppError for an assistant turn that failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Value>,
+    /// Card kind for synthesized rows (`expert-card`, `team-card` — module 01)
+    /// so the renderer can badge them across host roundtrips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     /// Stable regenerate-family key shared across rewritten user prompts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision_root_id: Option<String>,
@@ -510,6 +514,7 @@ fn record_to_ui(record: MessageRecord) -> UiMessage {
             is_error,
             parent_tool_call_id,
             agent_name,
+            kind: None,
         }
     } else {
         let content = blocks
@@ -547,6 +552,7 @@ fn record_to_ui(record: MessageRecord) -> UiMessage {
             is_error,
             parent_tool_call_id,
             agent_name,
+            kind: None,
         }
     }
 }
@@ -2796,7 +2802,7 @@ pub fn get_token_usage_history(
     let bucket = normalize_usage_bucket(bucket);
     let (range_start, range_end) = resolve_history_range(start_date, end_date, bucket);
     let mut stmt = db.conn().prepare_cached(
-        "SELECT ended_at, input_tokens, output_tokens, usage_json
+        "SELECT ended_at, input_tokens, output_tokens, usage_json, model_id
          FROM turns
          WHERE status = 'completed' AND ended_at IS NOT NULL AND ended_at >= ?1 AND ended_at <= ?2
          ORDER BY ended_at ASC",
@@ -2808,11 +2814,17 @@ pub fn get_token_usage_history(
             row.get::<_, i64>(1)?,
             row.get::<_, i64>(2)?,
             row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
         ))
     })?;
 
     use std::collections::BTreeMap;
     let mut bucket_map: BTreeMap<String, UsageBucketAcc> = BTreeMap::new();
+    // Per-model series for the trend chart: model id → bucket date → totals.
+    // Turns with no recorded model land under "unknown" so older data still
+    // shows up instead of silently disappearing from the per-model view.
+    let mut model_bucket_map: BTreeMap<String, BTreeMap<String, UsageBucketAcc>> =
+        BTreeMap::new();
     let mut total_input = 0i64;
     let mut total_output = 0i64;
     let mut total_turns = 0i64;
@@ -2821,7 +2833,7 @@ pub fn get_token_usage_history(
     let mut total_reasoning = 0i64;
 
     for row in rows {
-        let (ended_at, input_tokens, output_tokens, usage_json) = row?;
+        let (ended_at, input_tokens, output_tokens, usage_json, model_id) = row?;
         let Some(dt) = local_from_ms(ended_at) else {
             continue;
         };
@@ -2852,7 +2864,7 @@ pub fn get_token_usage_history(
         total_reasoning += reasoning;
 
         let key = usage_bucket_key(&dt, bucket);
-        bucket_map.entry(key).or_default().add(
+        bucket_map.entry(key.clone()).or_default().add(
             input_tokens,
             output_tokens,
             cache_read,
@@ -2860,16 +2872,51 @@ pub fn get_token_usage_history(
             reasoning,
             ended_at,
         );
+        model_bucket_map
+            .entry(model_id.unwrap_or_else(|| "unknown".to_string()))
+            .or_default()
+            .entry(key)
+            .or_default()
+            .add(input_tokens, output_tokens, cache_read, cache_write, reasoning, ended_at);
     }
 
-    let items: Vec<Value> = filled_history_keys(range_start, range_end, bucket)
-        .into_iter()
+    let filled = filled_history_keys(range_start, range_end, bucket);
+    let items: Vec<Value> = filled
+        .iter()
         .map(|(date, timestamp)| {
-            let mut acc = bucket_map.remove(&date).unwrap_or_default();
+            let mut acc = bucket_map.remove(date).unwrap_or_default();
             if acc.turns == 0 {
-                acc.timestamp = timestamp;
+                acc.timestamp = *timestamp;
             }
-            acc.to_json(&date)
+            acc.to_json(date)
+        })
+        .collect();
+
+    // Same bucket alignment as the top-level items, then ranked by total
+    // consumption so the chart legend leads with the heaviest model.
+    let mut model_series: Vec<(String, i64, Vec<Value>)> = model_bucket_map
+        .into_iter()
+        .map(|(model_id, buckets)| {
+            let mut running_total = 0i64;
+            let series = filled
+                .iter()
+                .map(|(date, timestamp)| {
+                    let mut acc = buckets.get(date).cloned().unwrap_or_default();
+                    if acc.turns == 0 {
+                        acc.timestamp = *timestamp;
+                    }
+                    running_total += acc.total_tokens();
+                    acc.to_json(date)
+                })
+                .collect::<Vec<Value>>();
+            (model_id, running_total, series)
+        })
+        .collect();
+    model_series.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
+    let models_json: Vec<Value> = model_series
+        .into_iter()
+        .map(|(model_id, _, series)| {
+            json!({ "modelId": model_id, "items": series })
         })
         .collect();
 
@@ -2878,6 +2925,7 @@ pub fn get_token_usage_history(
         "rangeStart": range_start,
         "rangeEnd": range_end,
         "items": items,
+        "models": models_json,
         "totals": {
             "inputTokens": total_input,
             "outputTokens": total_output,
@@ -2928,6 +2976,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            kind: None,
         }
     }
 
@@ -3403,6 +3452,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            kind: None,
         };
         append_message(&db, &session.id, &tool, None).unwrap();
         // Host recovery may replay the Electron persistence outbox; a message
@@ -3736,6 +3786,7 @@ mod tests {
             is_error: None,
             parent_tool_call_id: None,
             agent_name: None,
+            kind: None,
         };
         append_message(&db, &session.id, &assistant, None).unwrap();
 
@@ -4958,6 +5009,50 @@ mod tests {
             .find(|item| item.get("turnCount").and_then(|v| v.as_i64()) == Some(1))
             .expect("active day");
         assert_eq!(active.get("totalTokens").unwrap().as_i64(), Some(250));
+    }
+
+    #[test]
+    fn token_usage_history_groups_by_model() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let turn_a = begin_turn(&db, &session.id, Some("prov"), Some("glm-5.3-flash")).unwrap();
+        let usage_a = json!({ "inputTokens": 100, "outputTokens": 50 });
+        end_turn_settling(&db, &turn_a, "completed", None, Some(&usage_a), false, false).unwrap();
+        let turn_b = begin_turn(&db, &session.id, Some("prov"), Some("glm-5.3")).unwrap();
+        let usage_b = json!({ "inputTokens": 10, "outputTokens": 5 });
+        end_turn_settling(&db, &turn_b, "completed", None, Some(&usage_b), false, false).unwrap();
+
+        let history = get_token_usage_history(&db, None, None, "day").unwrap();
+        let models = history.get("models").unwrap().as_array().unwrap();
+        let flash = models
+            .iter()
+            .find(|m| m.get("modelId").and_then(|v| v.as_str()) == Some("glm-5.3-flash"))
+            .expect("glm-5.3-flash series");
+        let flash_items = flash.get("items").unwrap().as_array().unwrap();
+        let flash_total: i64 = flash_items
+            .iter()
+            .map(|item| item.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0))
+            .sum();
+        assert_eq!(flash_total, 150);
+
+        let other = models
+            .iter()
+            .find(|m| m.get("modelId").and_then(|v| v.as_str()) == Some("glm-5.3"))
+            .expect("glm-5.3 series");
+        let other_total: i64 = other
+            .get("items")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0))
+            .sum();
+        assert_eq!(other_total, 15);
+        // Heaviest model leads the series list for the chart legend.
+        assert_eq!(
+            models[0].get("modelId").and_then(|v| v.as_str()),
+            Some("glm-5.3-flash")
+        );
     }
 
     #[test]
