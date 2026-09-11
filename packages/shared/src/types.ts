@@ -2235,3 +2235,43 @@ export interface SpaceEventPayload {
   actorId: string | null;
   createdAt: string;
 }
+
+// --- Module 01: Org expert packs (T51.8; SPEC §3.4, FR-E-18/19) ---
+// 服务端发布的组织专家/专家团定义包，经 GET /org/bootstrap 的 expertPacks[]
+// 下发；客户端 OrgService 落为只读定义文件（upsert by name，source=org，
+// 版本变化 UI 提示更新）。payload 即定义文档 frontmatter+正文（SPEC §2.1/2.2）。
+
+export type OrgExpertPackKind = "expert" | "team";
+
+/** expert: {industry?, tags?, examples?, skills?, mcpServers?, model?, thinkingLevel?, budgetTokens?, body}；team: {members, leaderStyle, integration, budgetTokens?, body}。skills/mcpServers 仅存名称引用（缺失即降级，不自动安装）。 */
+export interface OrgExpertPackPayload {
+  industry?: string;
+  tags?: string[];
+  examples?: string[];
+  skills?: string[];
+  mcpServers?: string[];
+  model?: string;
+  thinkingLevel?: string;
+  budgetTokens?: number;
+  members?: string[];
+  leaderStyle?: "fine" | "coarse";
+  integration?: "moderator" | "summary" | "sections";
+  body: string;
+}
+
+/** bootstrap 交付项（SPEC §3.4：[{kind, name, payload, version}]，仅 enabled）。 */
+export interface OrgExpertPack {
+  kind: OrgExpertPackKind;
+  name: string;
+  payload: OrgExpertPackPayload;
+  version: number;
+}
+
+/** 管理台列表行（GET /org/expert-packs）：含说明/启停/发布者元信息。 */
+export interface OrgExpertPackDto extends OrgExpertPack {
+  id: string;
+  description: string;
+  enabled: boolean;
+  createdBy: string | null;
+  createdAt: string;
+}

@@ -344,6 +344,34 @@ export const spaceEvents = pgTable(
   (t) => [primaryKey({ columns: [t.spaceId, t.seq] })],
 );
 
+
+// ---------------------------------------------------------------------------
+// Module 01 组织专家库 (T51.8, FR-E-18/19, SPEC §3.4)：org_expert_packs。
+// 管理台发布组织专家/专家团定义包（payload=定义文档 frontmatter+正文，SPEC
+// §2.1/2.2），成员经 GET /org/bootstrap 的 expertPacks[] 收到 enabled 的只读
+// 副本（客户端 upsert by name, source=org；版本变化 UI 提示更新，FR-E-19）。
+// 发布幂等（蓝本=org_skills）：同名同内容 → 原版本不 bump；内容变化 → version+1。
+// ---------------------------------------------------------------------------
+
+export const orgExpertPacks = pgTable(
+  'org_expert_packs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: text('org_id').notNull().default('default'), // 单租户：一次部署 = 一个组织（rbac.ts 同语义）
+    kind: text('kind').notNull(), // expert（专家）| team（专家团）
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    payload: jsonb('payload').notNull().default({}), // expert: {industry?,tags?,examples?,skills?,mcpServers?,model?,thinkingLevel?,budgetTokens?,body}；team: {members,leaderStyle,integration,budgetTokens?,body}
+    version: integer('version').notNull().default(1), // 首发为 1；重发布同内容幂等不 bump，内容变化 +1
+    enabled: boolean('enabled').notNull().default(true), // 停用则不下发
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uniq_org_expert_pack_name').on(t.orgId, t.name)],
+);
+
+export type OrgExpertPack = typeof orgExpertPacks.$inferSelect;
+
 export const inviteLinks = pgTable('invite_links', {
   id: uuid('id').defaultRandom().primaryKey(),
   spaceId: uuid('space_id').notNull(),

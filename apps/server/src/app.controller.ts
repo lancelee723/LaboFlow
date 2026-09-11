@@ -20,6 +20,7 @@ import { canWorkspace } from './workspaces/workspace-rules.js';
 import { DeliverableService, OrgLibraryService, DeliverableError } from './workspaces/library.service.js';
 import { KbServerService, KbError, type KbPatchInput } from './kb/kb.service.js';
 import { SecretBox } from './kb/secret-box.js';
+import { ExpertPackService, ExpertPackError } from './experts/expert-packs.service.js';
 import { SpaceService, SpaceError } from './spaces/spaces.service.js';
 import { SERVER_VERSION } from './index.js';
 
@@ -37,6 +38,7 @@ export interface ServerDeps {
   deliverables: DeliverableService;
   library: OrgLibraryService;
   kb: KbServerService;
+  expertPacks: ExpertPackService;
   spaces: SpaceService;
 }
 
@@ -403,6 +405,9 @@ class CoreController {
     // Module 05 知识库下发（FR-KB-02）：enabled 的条目按团队 scope 过滤后交付；
     // mcp 项含明文 apiKey（TLS 下=交付本身），web 项仅 name/url。
     const kbServers = await this.deps.kb.deliveryFor(actor.teamId);
+    // Module 01 组织专家库下发（FR-E-18）：enabled 的专家/专家团定义包
+    // [{kind, name, payload, version}]；客户端落为只读副本（source=org）。
+    const expertPacks = await this.deps.expertPacks.deliveryFor();
     return {
       org: { name: 'LaboFlow Org', teamId: actor.teamId, teamName },
       me: { userId: actor.userId, username: user.username, displayName: user.displayName, role: actor.role },
@@ -412,6 +417,7 @@ class CoreController {
       policyFloor,
       orgSkills: skills,
       kbServers,
+      expertPacks,
     };
   }
 
@@ -486,6 +492,63 @@ class CoreController {
       return { ok: true };
     } catch (err) {
       if (err instanceof KbError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  // ----- Module 01 组织专家库 (T51.8, FR-E-18/19)：发布/版本/bootstrap 下发 -----
+  /** 幂等发布：同名同内容 → 版本不变；内容变化 → version+1（SPEC §3.4 蓝本=org_skills）。 */
+  @Post('org/expert-packs')
+  @HttpCode(200)
+  async publishExpertPack(@Req() req: FastifyRequest, @Body() body: {
+    kind?: string; name?: string; description?: string; payload?: unknown;
+  }) {
+    const actor = requireActor(req);
+    if (!can('expertPacks.manage', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可发布组织专家/专家团', 403);
+    }
+    try {
+      const r = await this.deps.expertPacks.publish({
+        kind: String(body.kind ?? ''),
+        name: String(body.name ?? ''),
+        description: body.description,
+        payload: body.payload,
+      }, actor.userId);
+      await this.deps.auth.audit(actor.userId, 'expertPack.publish', r.pack.name, {
+        id: r.pack.id,
+        kind: r.pack.kind,
+        version: r.pack.version,
+        changed: r.changed, // false=幂等重发布（无内容变化）
+      });
+      return r.pack;
+    } catch (err) {
+      if (err instanceof ExpertPackError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  /** 管理台列表（系统/团队管理员）：全量含停用，每名一行=当前版本。 */
+  @Get('org/expert-packs')
+  async listExpertPacks(@Req() req: FastifyRequest) {
+    const actor = requireActor(req);
+    if (!can('expertPacks.manage', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可查看组织专家库', 403);
+    }
+    return this.deps.expertPacks.list();
+  }
+
+  @Delete('org/expert-packs/:id')
+  async deleteExpertPack(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    if (!can('expertPacks.manage', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可删除组织专家/专家团', 403);
+    }
+    try {
+      const removed = await this.deps.expertPacks.remove(id);
+      await this.deps.auth.audit(actor.userId, 'expertPack.delete', removed.name, { id });
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof ExpertPackError) throw new HttpException(err.message, err.status);
       throw err;
     }
   }
@@ -935,6 +998,7 @@ export async function bootstrap(options: {
       options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
       options.jwtSecret,
     )),
+    expertPacks: new ExpertPackService(db),
     spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail)),
   };
 

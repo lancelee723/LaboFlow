@@ -300,6 +300,25 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       );`,
     ],
   },
+  {
+    version: 5,
+    name: 'p5-org-expert-packs',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS org_expert_packs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id TEXT NOT NULL DEFAULT 'default',  -- 单租户：一次部署 = 一个组织
+        kind TEXT NOT NULL,                      -- expert | team
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        payload JSONB NOT NULL DEFAULT '{}',     -- 定义文档 frontmatter+正文（SPEC §2.1/2.2）
+        version INTEGER NOT NULL DEFAULT 1,      -- 同名重发布：同内容幂等不 bump，内容变化 +1
+        enabled BOOLEAN NOT NULL DEFAULT true,   -- 停用则 bootstrap 不下发
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (org_id, name)
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {
