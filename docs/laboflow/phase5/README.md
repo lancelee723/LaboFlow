@@ -108,3 +108,30 @@ Phase 4 共享工作区（前置，未启动）
 - 安全自查：每模块 Gate 抽查凭据不落明文（host secrets / safeStorage）、依赖许可清单（重点：PPT-Master 的 PyMuPDF AGPL 规避）、LGPL 合规三件套不变。
 - i18n：所有新 UI 文案进 `packages/i18n` 8 语言目录，en 为源。
 - 文档同步：模块 Gate 通过后在本 README 追加执行记录（沿用 `02-org-integration-plan.md` 的执行记录惯例）。
+
+---
+
+## 执行记录（2026-09-12，开发阶段一）
+
+**裁决补充**：用户裁定模块 03（远程指挥与定时任务）暂缓开发；01/02/04/05/06 进入实施。共享地基 T53.1（HeadlessAgentDriver）不随 03 暂缓——它同时是 01 后台专家派发与 04 通道任务的执行底座，最先合入。
+
+**已落地（分支 phase5-dev，全部带测试）**：
+
+| 提交 | 内容 |
+|---|---|
+| T53.1 | HeadlessAgentDriver：主进程可发起 agent 回合（beginDurableTurnAndPrompt 共享持久回合核心；agentPrompt 尾段重构共用；scheduledRun 改主进程自动驱动；personaPrompt 通道预留）——契约测试 10 例 |
+| T51.1 | host-core 专家/团队能力类别：`.agents/experts|teams` 定义文件（CJK 名称一等公民）、experts.*/expertTeams.* RPC、agents-root 测试接缝——306 Rust 测试 |
+| T51.2/4/5/6 | ExpertService（6 预设专家+2 团队内置文档，同名遮蔽）、@专家指派（后台独立会话+完成卡片回投）、TeamRunner（团长 one-shot 拆解→拓扑+并发≤4 派发→整合 one-shot；预算 80% 预警/100% 停止；单成员重跑；失败不阻断） |
+| T51.3/7 | 渲染层（子代理交付）：专家中心三 Tab、@拦截 sendPrompt、团队实时状态板、composer 专家选择器、8 语言 |
+| T56.1-3 | laboflow.slides 插件 L1：slides_plan（大纲规范化+质量提示）+ slides_export（8 版式原生可编辑 PPTX+讲者备注）；pptxgenjs 私有 vendor——真实中文 8 页 PPTX 生成测试 |
+| T56.4-6 | L2：PPT-Master vendor（pin aee33e5，MIT；ai-image-comparison/sounds 裁剪、SPONSORS 保留因上游守卫 fail-closed）；requirements-laboflow.txt 裁剪 PyMuPDF/pandoc；laboflow_guard.py 启动断言；venv 运行时管理器五态分诊断；受控工具面 ppt_master_status/setup/quality/finalize/export |
+| T55.1/3/6 | KbService（org 下发 mcp.upsert source=org、登出停用、kbUrls 设置存储）、WeKnora 指引、mcp_servers source 扩展（org 豁免 16 上限+只读保护） |
+| T55.5 | 服务端 org_kb_servers（服务端子代理交付）：AES-256-GCM 密封、bootstrap kbServers[] 下发（团队过滤）、管理台知识库页、RBAC/审计——16 集成测试（真实 PG） |
+| T55.2 | 引用契约：toolGuidanceClauses 通道（检索形工具在场才注入 [引用:n] 契约，普通会话零提示词税） |
+| T51.x | UiMessage.kind 可选字段（专家/团队卡片跨回合持久） |
+
+**测试水位**：desktop 1244（基线 1224）/ host-core 307（基线 301）/ agent-runtime 309 / server kb 切片 +16（真实 PG）。
+
+**进行中**：模块 04 通道框架+飞书/企微适配器（子代理）、模块 02 服务端空间模型（子代理）、模块 05 渲染层收尾（侧栏入口/引用角标/卡片徽标，子代理）。
+
+**待办**：模块 04 index 接线+公众号中继；模块 02 客户端（MD 审阅/HTML CRDT/CSV）；模块 01 T51.8 组织专家下发；L3 幻灯片工作台；各模块 Gate 全量回归。
