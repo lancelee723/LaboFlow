@@ -41,6 +41,10 @@ import {
 import { ExpertService } from "./expert-service";
 import { TeamRunner } from "./team-runner";
 import { KbService } from "./kb-service";
+import { createChannelRegistryHost } from "./channels/registry";
+import { createChannelCredentialStore } from "./channels/credential-store";
+import { createFeishuAdapterFactory } from "./channels/feishu";
+import { createWecomAdapterFactory } from "./channels/wecom";
 import { listInstalledFonts } from "./system-fonts";
 import {
   applyNetworkProxyFromAppSettings,
@@ -4742,6 +4746,20 @@ const kbService = new KbService({
   getLogger: () => logger,
 });
 
+// Module 04: IM channels — registry, adapters, and channel IPC. Messages
+// that pass the allowlist dispatch through the headless driver and the
+// result is sent back over the channel adapter.
+const channelHost = createChannelRegistryHost({
+  getLogger: () => logger,
+  getDriver: () => headlessAgentDriver,
+  adapters: {
+    feishu: createFeishuAdapterFactory(),
+    wecom: createWecomAdapterFactory(),
+  },
+  credentialStore: createChannelCredentialStore(),
+  broadcast: (event) => sendToRenderer(IPC.event.channelState, event),
+});
+
 const teamRunner = new TeamRunner({
   getLogger: () => logger,
   getDriver: () => headlessAgentDriver,
@@ -5846,6 +5864,8 @@ function registerIpc() {
   const handle = (channel: string, fn: (...args: any[]) => Promise<any>) => {
     ipcMain.handle(channel, async (_event, ...args) => wrap(() => fn(...args)));
   };
+  // Module 04: channel accounts + connect/test lifecycle IPC (registry-owned).
+  channelHost.registerIpc(handle);
   const handleWithEvent = (
     channel: string,
     fn: (event: { sender: { id: number } }, ...args: any[]) => Promise<any>,
