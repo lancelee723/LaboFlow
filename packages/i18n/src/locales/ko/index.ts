@@ -1334,6 +1334,7 @@ export const ko = {
     teamDispatched: "\"{{team}}\" 팀이 작업을 시작했습니다. 결과가 해당 세션으로 돌아옵니다.",
     sourcePreset: "프리셋",
     sourceMine: "내 전문가",
+    sourceOrg: "조직",
     enabled: "사용 중",
     disabled: "중지",
     newExpert: "새 전문가",
@@ -2052,6 +2053,17 @@ export const ko = {
       continue: "계속",
       dismiss: "닫기",
     },
+  },
+  kb: {
+    title: "지식 베이스",
+    tooltip: "지식 베이스 웹 열기",
+    emptyToast: "구성된 지식 베이스가 없습니다. 설정 → Agent → MCP에서 검색 서비스를 추가하세요.",
+    pickerTitle: "지식 베이스 선택",
+    sourceOrg: "조직",
+    sourceUser: "개인",
+    citationTitle: "지식 베이스 인용 {{n}}",
+    cardBadgeExpert: "전문가",
+    cardBadgeTeam: "전문가 팀",
   },
 } satisfies EnglishCatalog;
 

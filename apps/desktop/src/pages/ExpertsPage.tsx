@@ -249,8 +249,17 @@ export function ExpertsPage() {
     return "neutral";
   };
 
+  // Org-delivered experts (source "org", FR-E-18) get their own badge label;
+  // the badge tone picker below maps them off the personal "success" color.
   const sourceBadge = (source: string) =>
-    source === "preset" ? t("expert.sourcePreset") : t("expert.sourceMine");
+    source === "preset"
+      ? t("expert.sourcePreset")
+      : source === "org"
+        ? t("expert.sourceOrg")
+        : t("expert.sourceMine");
+
+  const sourceBadgeTone = (source: string): "neutral" | "success" | "warning" =>
+    source === "preset" ? "neutral" : source === "org" ? "warning" : "success";
 
   const openInvoke = (expert: ExpertListItem) => {
     setInvokeTask(expert.examples[0] ?? "");
@@ -459,7 +468,7 @@ export function ExpertsPage() {
           </span>
           <span className="min-w-0 truncate text-base-plus font-medium">{expert.name}</span>
         </div>
-        <Badge tone={expert.source === "preset" ? "neutral" : "success"}>
+        <Badge tone={sourceBadgeTone(expert.source)}>
           {sourceBadge(expert.source)}
         </Badge>
       </div>
@@ -865,7 +874,7 @@ export function ExpertsPage() {
           </span>
           <span className="min-w-0 truncate text-base-plus font-medium">{team.name}</span>
         </div>
-        <Badge tone={team.source === "preset" ? "neutral" : "success"}>
+        <Badge tone={sourceBadgeTone(team.source)}>
           {sourceBadge(team.source)}
         </Badge>
       </div>

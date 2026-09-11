@@ -1324,6 +1324,7 @@ export const zhCN = {
     teamDispatched: "团队「{{team}}」已开始执行，交付结果将回到该会话",
     sourcePreset: "预设",
     sourceMine: "我的",
+    sourceOrg: "组织",
     enabled: "已启用",
     disabled: "已停用",
     newExpert: "新建专家",
@@ -2023,6 +2024,17 @@ export const zhCN = {
       continue: "继续",
       dismiss: "关闭",
     },
+  },
+  kb: {
+    title: "知识库",
+    tooltip: "打开知识库网页端",
+    emptyToast: "尚未配置知识库，可在设置→Agent→MCP 中添加检索服务",
+    pickerTitle: "选择知识库",
+    sourceOrg: "组织",
+    sourceUser: "个人",
+    citationTitle: "知识库引用 {{n}}",
+    cardBadgeExpert: "专家",
+    cardBadgeTeam: "专家团",
   },
 } satisfies EnglishCatalog;
 

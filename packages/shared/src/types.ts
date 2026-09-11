@@ -358,6 +358,8 @@ export type UiMessage = {
   id: string;
   role: UiMessageRole;
   content: string;
+  /** Host card kind, e.g. "expert-card" / "team-card" (module 01). */
+  kind?: string;
   /** Files or images associated with a user turn, kept separate from text. */
   attachments?: MessageAttachment[];
   /** Model reasoning kept separate from the answer text. */

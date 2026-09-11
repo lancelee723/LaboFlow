@@ -1313,6 +1313,7 @@ export const de = {
     teamDispatched: "Team „{{team}}“ ist an der Aufgabe; das Ergebnis landet wieder in dieser Sitzung.",
     sourcePreset: "Preset",
     sourceMine: "Meine",
+    sourceOrg: "Organisation",
     enabled: "Aktiviert",
     disabled: "Deaktiviert",
     newExpert: "Neuer Experte",
@@ -2009,7 +2010,18 @@ export const de = {
       "retry": "Noch einmal versuchen",
       "continue": "Weiter",
       "dismiss": "Verwerfen"
-    }
+    },
+  },
+  "kb": {
+    "title": "Wissensbasis",
+    "tooltip": "Weboberfläche der Wissensbasis öffnen",
+    "emptyToast": "Noch keine Wissensbasis konfiguriert. Fügen Sie unter Einstellungen → Agent → MCP einen Suchdienst hinzu.",
+    "pickerTitle": "Wissensbasis wählen",
+    "sourceOrg": "Organisation",
+    "sourceUser": "Persönlich",
+    "citationTitle": "Wissensbasis-Quelle {{n}}",
+    "cardBadgeExpert": "Experte",
+    "cardBadgeTeam": "Experten-Team"
   }
 } as const;
 

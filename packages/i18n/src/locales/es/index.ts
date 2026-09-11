@@ -1313,6 +1313,7 @@ export const es = {
     teamDispatched: "El equipo \"{{team}}\" está en la tarea; la entrega volverá a esa sesión.",
     sourcePreset: "Predefinido",
     sourceMine: "Mío",
+    sourceOrg: "Organización",
     enabled: "Activado",
     disabled: "Desactivado",
     newExpert: "Nuevo experto",
@@ -2009,7 +2010,18 @@ export const es = {
       "retry": "Inténtalo de nuevo",
       "continue": "Continuar",
       "dismiss": "Descartar"
-    }
+    },
+  },
+  "kb": {
+    "title": "Base de conocimiento",
+    "tooltip": "Abrir la web de la base de conocimiento",
+    "emptyToast": "Aún no hay una base de conocimiento configurada. Añade un servicio de búsqueda en Ajustes → Agente → MCP.",
+    "pickerTitle": "Elegir una base de conocimiento",
+    "sourceOrg": "Organización",
+    "sourceUser": "Personal",
+    "citationTitle": "Cita de la base de conocimiento {{n}}",
+    "cardBadgeExpert": "Experto",
+    "cardBadgeTeam": "Equipo de expertos"
   }
 } as const;
 

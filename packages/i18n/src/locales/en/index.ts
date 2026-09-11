@@ -1332,6 +1332,7 @@ export const en = {
     teamDispatched: "Team \"{{team}}\" is on the task; the delivery will land back in that session.",
     sourcePreset: "Preset",
     sourceMine: "Mine",
+    sourceOrg: "Org",
     enabled: "Enabled",
     disabled: "Disabled",
     newExpert: "New expert",
@@ -2050,6 +2051,18 @@ export const en = {
       continue: "Continue",
       dismiss: "Dismiss",
     },
+  },
+  kb: {
+    title: "Knowledge Base",
+    tooltip: "Open the knowledge-base web portal",
+    emptyToast:
+      "No knowledge base configured yet. Add a retrieval service in Settings → Agent → MCP.",
+    pickerTitle: "Choose a knowledge base",
+    sourceOrg: "Org",
+    sourceUser: "Personal",
+    citationTitle: "Knowledge-base citation {{n}}",
+    cardBadgeExpert: "Expert",
+    cardBadgeTeam: "Expert Team",
   },
 } as const;
 

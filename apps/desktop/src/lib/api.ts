@@ -31,6 +31,7 @@ import type {
   FsReadResult,
   HostHealth,
   HostStatusEvent,
+  KbUrlEntry,
   ModelInfo,
   McpServerInput,
   McpServerRecord,
@@ -965,6 +966,12 @@ export const api = {
     invoke(IPC.invoke.browserOpenExternal, url ? { url } : {}),
   browserGetState: () =>
     invoke<BrowserState | null>(IPC.invoke.browserGetState),
+  /** Module 05: knowledge-base web-URL entries (personal + org-delivered). */
+  listKbUrls: () => invoke<KbUrlEntry[]>(IPC.invoke.kbListUrls),
+  saveKbUrl: (entry: { name: string; url: string }) =>
+    invoke<KbUrlEntry[]>(IPC.invoke.kbSaveUrl, entry),
+  deleteKbUrl: (id: string) =>
+    invoke<KbUrlEntry[]>(IPC.invoke.kbDeleteUrl, { id }),
   fsList: (path?: string) =>
     invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "" }),
   fsRead: (path: string, mimeType?: string) =>

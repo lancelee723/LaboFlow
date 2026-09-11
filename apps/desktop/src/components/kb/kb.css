@@ -1,0 +1,76 @@
+/* Knowledge-base renderer slice (module 05 + module 01 cards).
+   Scoped under .kb-citation-host / .kb-card-badge / .sidebar-kb-menu so it
+   never leaks into other surfaces. Lives next to the components that own the
+   markup; tokens come from styles/tokens.css. */
+
+/* [引用:n] badges: markdown links rewritten to #kb-citation-n hrefs. */
+.kb-citation-host a[href^="#kb-citation-"] {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  vertical-align: super;
+  margin: 0 1px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in oklab, var(--ds-text-primary) 55%, transparent);
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
+  font-weight: var(--font-weight-semibold);
+  color: var(--ds-text-secondary);
+  text-decoration: none;
+  cursor: default;
+  user-select: none;
+}
+
+.kb-citation-host a[href^="#kb-citation-"]:hover {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
+}
+
+/* 「专家」/「专家团」 header badges on assistant message rows. */
+.kb-card-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+}
+
+.kb-card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  color: var(--ds-text-secondary);
+  background: color-mix(in oklab, var(--ds-text-primary) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--ds-text-primary) 30%, transparent);
+}
+
+.kb-card-badge-team {
+  color: var(--ds-success);
+  background: color-mix(in oklab, var(--ds-success) 14%, transparent);
+  border-color: color-mix(in oklab, var(--ds-success) 40%, transparent);
+}
+
+/* Sidebar 知识库 picker rows: name + source badge. */
+.sidebar-kb-menu .kb-source-badge {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-prose);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kb-source-badge.org {
+  color: var(--ds-text-primary);
+  background: color-mix(in oklab, var(--ds-text-primary) 12%, transparent);
+}
+
+.kb-source-badge.user {
+  color: var(--ds-text-secondary);
+  background: color-mix(in oklab, var(--ds-text-primary) 6%, transparent);
+}

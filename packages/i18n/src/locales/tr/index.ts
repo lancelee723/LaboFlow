@@ -1334,6 +1334,7 @@ export const tr = {
     teamDispatched: "\"{{team}}\" ekibi göreve başladı; teslimat bu oturuma geri gelecek.",
     sourcePreset: "Hazır",
     sourceMine: "Benim",
+    sourceOrg: "Kurum",
     enabled: "Etkin",
     disabled: "Devre dışı",
     newExpert: "Yeni uzman",
@@ -2052,6 +2053,18 @@ export const tr = {
       continue: "Devam et",
       dismiss: "Kapat",
     },
+  },
+  kb: {
+    title: "Bilgi Bankası",
+    tooltip: "Bilgi bankası web arayüzünü aç",
+    emptyToast:
+      "Henüz bilgi bankası yapılandırılmadı. Ayarlar → Agent → MCP bölümünden bir arama hizmeti ekleyin.",
+    pickerTitle: "Bilgi bankası seç",
+    sourceOrg: "Kurum",
+    sourceUser: "Kişisel",
+    citationTitle: "Bilgi bankası referansı {{n}}",
+    cardBadgeExpert: "Uzman",
+    cardBadgeTeam: "Uzman Ekibi",
   },
 } satisfies EnglishCatalog;
 

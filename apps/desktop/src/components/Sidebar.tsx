@@ -43,6 +43,7 @@ import {
   type SidebarSessionStatus,
 } from "../lib/sidebar-session-status";
 import type {
+  KbUrlEntry,
   Mode,
   PermissionMode,
   ProjectWorkspace,
@@ -77,6 +78,7 @@ import {
   IconCircleAlert,
   IconNewSession,
   IconFolder,
+  IconFolderOpen,
   IconMore,
   IconNewProject,
   IconPin,
@@ -89,6 +91,8 @@ import {
   IconStar,
   IconX,
 } from "./icons";
+import { decideKbEntry } from "./kb/kbUrls";
+import "./kb/kb.css";
 import {
   KEYBOARD_SHORTCUTS,
   keybindingDisplayParts,
@@ -282,6 +286,7 @@ export function Sidebar({
   const setProjectCollapsed = useAppStore((s) => s.setProjectCollapsed);
   const setProjectSort = useAppStore((s) => s.setProjectSort);
   const showToast = useAppStore((s) => s.showToast);
+  const openUrlInWorkPanel = useAppStore((s) => s.openUrlInWorkPanel);
   const version = useAppStore((s) => s.version);
   const setSettingsTab = useAppStore((s) => s.setSettingsTab);
 
@@ -314,6 +319,11 @@ export function Sidebar({
   const [quickTaskMenu, setQuickTaskMenu] = useState<{
     top: number;
     left: number;
+  } | null>(null);
+  const [kbPicker, setKbPicker] = useState<{
+    top: number;
+    left: number;
+    urls: KbUrlEntry[];
   } | null>(null);
   const [projectPathTooltip, setProjectPathTooltip] = useState<ProjectPathTooltip | null>(null);
   const [sessionHoverCard, setSessionHoverCard] = useState<SessionHoverCard | null>(null);
@@ -447,6 +457,7 @@ export function Sidebar({
     setProjectMenu(null);
     setSectionMenu(null);
     setQuickTaskMenu(null);
+    setKbPicker(null);
     setMenuPosition(null);
     if (restoreFocus && trigger) requestAnimationFrame(() => trigger.focus());
   }, []);
@@ -539,7 +550,14 @@ export function Sidebar({
   );
 
   useEffect(() => {
-    if (!sortOpen && !sessionMenu && !projectMenu && !sectionMenu && !quickTaskMenu)
+    if (
+      !sortOpen &&
+      !sessionMenu &&
+      !projectMenu &&
+      !sectionMenu &&
+      !quickTaskMenu &&
+      !kbPicker
+    )
       return;
     const onPointer = (e: PointerEvent) => {
       // Right-click must not dismiss first; contextmenu handlers reopen create menus.
@@ -563,13 +581,20 @@ export function Sidebar({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onViewportChange);
     };
-  }, [sortOpen, sessionMenu, projectMenu, sectionMenu, quickTaskMenu, closeMenus]);
+  }, [sortOpen, sessionMenu, projectMenu, sectionMenu, quickTaskMenu, kbPicker, closeMenus]);
 
   useEffect(() => {
-    if (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen && !quickTaskMenu)
+    if (
+      !sessionMenu &&
+      !projectMenu &&
+      !sectionMenu &&
+      !sortOpen &&
+      !quickTaskMenu &&
+      !kbPicker
+    )
       return;
     requestAnimationFrame(() => menuFirstItemRef.current?.focus());
-  }, [sessionMenu, projectMenu, sectionMenu, sortOpen, quickTaskMenu]);
+  }, [sessionMenu, projectMenu, sectionMenu, sortOpen, quickTaskMenu, kbPicker]);
 
   useEffect(() => {
     if (!projectPathTooltip) return;
@@ -1194,6 +1219,35 @@ export function Sidebar({
     }
   };
 
+  // 知识库 entry (FR-KB-06): open the work-panel browser on the current KB
+  // URL — none → hint toast; one → straight there; several → tiny picker.
+  const openKbEntry = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setSortOpen(false);
+    setSessionMenu(null);
+    setProjectMenu(null);
+    setSectionMenu(null);
+    setQuickTaskMenu(null);
+    let urls: KbUrlEntry[] = [];
+    try {
+      urls = await api.listKbUrls();
+    } catch (error) {
+      reportError(error);
+      return;
+    }
+    const decision = decideKbEntry(urls);
+    if (decision.action === "empty") {
+      showToast(t("kb.emptyToast"));
+      return;
+    }
+    if (decision.action === "open") {
+      openUrlInWorkPanel(decision.url);
+      return;
+    }
+    setMenuPosition({ top: rect.bottom + 6, left: rect.left });
+    setKbPicker({ top: rect.bottom + 6, left: rect.left, urls });
+  };
+
   const renderSessionRows = (
     items: SessionSummary[],
     options?: { temporary?: boolean; projectPath?: string },
@@ -1451,9 +1505,50 @@ export function Sidebar({
     if (
       !menuPosition ||
       typeof document === "undefined" ||
-      (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen && !quickTaskMenu)
+      (!sessionMenu && !projectMenu && !sectionMenu && !sortOpen && !quickTaskMenu && !kbPicker)
     ) {
       return null;
+    }
+    if (kbPicker) {
+      return createPortal(
+        <div
+          className="sidebar-row-menu sidebar-floating-menu sidebar-kb-menu"
+          role="menu"
+          aria-label={t("kb.pickerTitle")}
+          onKeyDown={onMenuKeyDown}
+          style={{
+            top: kbPicker.top,
+            left: kbPicker.left,
+          }}
+        >
+          <div className="sidebar-popover-title">{t("kb.pickerTitle")}</div>
+          {kbPicker.urls.map((entry, index) => (
+            <button
+              key={entry.id}
+              ref={index === 0 ? menuFirstItemRef : undefined}
+              type="button"
+              role="menuitem"
+              data-action="kb-open-url"
+              title={entry.url}
+              onClick={() => {
+                closeMenus(false);
+                openUrlInWorkPanel(entry.url);
+              }}
+            >
+              <IconFolderOpen size={14} />
+              <span>{entry.name}</span>
+              <span
+                className={`kb-source-badge ${entry.source === "org" ? "org" : "user"}`}
+              >
+                {entry.source === "org"
+                  ? t("kb.sourceOrg")
+                  : t("kb.sourceUser")}
+              </span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      );
     }
     if (quickTaskMenu) {
       return createPortal(
@@ -1915,6 +2010,16 @@ export function Sidebar({
         >
           <IconSparkles size={15} />
           <span>{t("nav.experts")}</span>
+        </button>
+        <button
+          type="button"
+          data-action="quick-kb"
+          title={t("kb.tooltip")}
+          aria-label={t("kb.title")}
+          onClick={(event) => void openKbEntry(event)}
+        >
+          <IconFolderOpen size={15} />
+          <span>{t("kb.title")}</span>
         </button>
         <button
           type="button"

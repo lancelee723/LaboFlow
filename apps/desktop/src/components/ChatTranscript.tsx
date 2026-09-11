@@ -25,6 +25,8 @@ import { ConversationMinimap } from "./ConversationMinimap";
 import { TurnOutcomeCard } from "./TurnOutcomeCard";
 import { ReviewChangeCard } from "./ReviewChangeCard";
 import { Markdown, useCopy } from "./Markdown";
+import { CitationMarkdown } from "./kb/CitationMarkdown";
+import { kbCardKind, type KbCardKind } from "./kb/citations";
 import { ToolChips, ToolDetailBlocks } from "./ToolDetails";
 import {
   formatToolDuration,
@@ -133,6 +135,19 @@ import {
 import { useAppStore } from "../stores/app-store";
 import type { PendingPermission } from "../lib/pending-permissions";
 import { PermissionCard } from "./PermissionCard";
+
+/** 「专家」/「专家团」 header badge for host-posted expert/team cards (FR-E-16). */
+function KbCardBadge({ kind }: { kind: KbCardKind }) {
+  const { t } = useTranslation();
+  const team = kind === "team-card";
+  return (
+    <div className="kb-card-badge-row">
+      <span className={`kb-card-badge${team ? " kb-card-badge-team" : ""}`}>
+        {t(team ? "kb.cardBadgeTeam" : "kb.cardBadgeExpert")}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Copy chip. Message toolbars are glyph-only (`icon`) with the label in a
@@ -1816,6 +1831,9 @@ const MessageRow = memo(function MessageRow({
   const isUser = message.role === "user";
   const workspaceRoot = useAppStore((s) => s.workspace?.path);
   const openFileRef = useOpenChatFileRef();
+  // Expert/team dispatch cards carry a host-stored kind; show the badge on
+  // the row and keep persisting across reloads (module 01, FR-E-16).
+  const cardKind = !isUser ? kbCardKind(message.kind) : null;
   // Slash prompts are stored expanded; editing works on the typed form so the
   // resent turn re-expands the template (D123).
   const editSeed = (isUser && message.command) || message.content || "";
@@ -1862,6 +1880,7 @@ const MessageRow = memo(function MessageRow({
       aria-label={isUser ? t("chat.userMessage") : t("chat.assistantMessage")}
     >
       <div className="message-col">
+        {cardKind ? <KbCardBadge kind={cardKind} /> : null}
         {isUser || displayed ? (
           <div className="message-bubble">
             {editing ? (
@@ -1956,7 +1975,7 @@ const MessageRow = memo(function MessageRow({
               </>
             ) : (
               <div className="prose-chat">
-                <Markdown source={displayed} />
+                <CitationMarkdown source={displayed} />
               </div>
             )}
           </div>
@@ -2236,6 +2255,9 @@ const AssistantTurn = memo(function AssistantTurn({
     () => collectDelegationTimings(turnAllActivityItems),
     [turnAllActivityItems],
   );
+  // A dispatched expert/team card may ride inside a turn; badge the row.
+  const turnCardKind =
+    messages.map((message) => kbCardKind(message.kind)).find(Boolean) ?? null;
 
   return (
     <div
@@ -2245,6 +2267,7 @@ const AssistantTurn = memo(function AssistantTurn({
       aria-label={t("chat.assistantMessage")}
     >
       <div className="message-col">
+        {turnCardKind ? <KbCardBadge kind={turnCardKind} /> : null}
         {entry.parts.map((part, index) =>
           part.kind === "activity" ? (
             <ActivityGroup
@@ -2266,7 +2289,7 @@ const AssistantTurn = memo(function AssistantTurn({
             >
               {part.message.content ? (
                 <div className="prose-chat">
-                  <Markdown source={part.message.content} />
+                  <CitationMarkdown source={part.message.content} />
                 </div>
               ) : null}
               {part.message.error ? (

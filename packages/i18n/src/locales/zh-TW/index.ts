@@ -1324,6 +1324,7 @@ export const zhTW = {
     teamDispatched: "團隊「{{team}}」已開始執行，交付結果將回到該會話",
     sourcePreset: "預設",
     sourceMine: "我的",
+    sourceOrg: "組織",
     enabled: "已啟用",
     disabled: "已停用",
     newExpert: "新增專家",
@@ -2023,6 +2024,17 @@ export const zhTW = {
       continue: "繼續",
       dismiss: "關閉",
     },
+  },
+  kb: {
+    title: "知識庫",
+    tooltip: "開啟知識庫網頁端",
+    emptyToast: "尚未設定知識庫，可在設定→Agent→MCP 中新增檢索服務",
+    pickerTitle: "選擇知識庫",
+    sourceOrg: "組織",
+    sourceUser: "個人",
+    citationTitle: "知識庫引用 {{n}}",
+    cardBadgeExpert: "專家",
+    cardBadgeTeam: "專家團",
   },
 } satisfies EnglishCatalog;
 

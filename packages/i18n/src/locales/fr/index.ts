@@ -1313,6 +1313,7 @@ export const fr = {
     teamDispatched: "L'équipe « {{team}} » est sur la tâche ; la livraison reviendra dans cette session.",
     sourcePreset: "Prédéfini",
     sourceMine: "À moi",
+    sourceOrg: "Organisation",
     enabled: "Activé",
     disabled: "Désactivé",
     newExpert: "Nouvel expert",
@@ -2009,7 +2010,18 @@ export const fr = {
       "retry": "Réessayer",
       "continue": "Continuer",
       "dismiss": "Ignorer"
-    }
+    },
+  },
+  "kb": {
+    "title": "Base de connaissances",
+    "tooltip": "Ouvrir le portail web de la base de connaissances",
+    "emptyToast": "Aucune base de connaissances configurée. Ajoutez un service de recherche dans Réglages → Agent → MCP.",
+    "pickerTitle": "Choisir une base de connaissances",
+    "sourceOrg": "Organisation",
+    "sourceUser": "Personnel",
+    "citationTitle": "Référence {{n}} de la base de connaissances",
+    "cardBadgeExpert": "Expert",
+    "cardBadgeTeam": "Équipe d'experts"
   }
 } as const;
 
