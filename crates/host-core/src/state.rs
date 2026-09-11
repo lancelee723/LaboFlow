@@ -11,6 +11,7 @@ use crate::plugins::PluginManager;
 use crate::secrets::SecretStore;
 use crate::tool_budget::ToolBudget;
 use crate::user_skills::UserSkillRegistry;
+use crate::user_experts::{UserExpertRegistry, UserTeamRegistry};
 use crate::user_subagents::UserSubagentRegistry;
 use crate::workspace::WorkspaceState;
 
@@ -34,6 +35,8 @@ pub struct AppState {
     /// Subagent definitions the user owns, alongside the builtin and per-project
     /// ones the runtime discovers itself (D202).
     pub user_subagents: UserSubagentRegistry,
+    pub user_experts: UserExpertRegistry,
+    pub user_teams: UserTeamRegistry,
     pub started_at: Instant,
     pub handshook: bool,
     pub shutting_down: bool,
@@ -91,6 +94,8 @@ impl AppState {
         let mcp_servers = McpServerRegistry::new(data_dir);
         let user_skills = UserSkillRegistry::new(data_dir);
         let user_subagents = UserSubagentRegistry::new(data_dir);
+        let user_experts = UserExpertRegistry::new(data_dir);
+        let user_teams = UserTeamRegistry::new(data_dir);
         Ok(Self {
             data_dir: data_dir.to_path_buf(),
             db,
@@ -102,6 +107,8 @@ impl AppState {
             mcp_servers,
             user_skills,
             user_subagents,
+            user_experts,
+            user_teams,
             started_at: Instant::now(),
             handshook: false,
             shutting_down: false,

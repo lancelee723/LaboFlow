@@ -855,6 +855,15 @@ fn parse_skill_input(params: &Value) -> Result<crate::user_skills::UserSkillInpu
     serde_json::from_value(raw).map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))
 }
 
+fn expert_err(err: impl ToString) -> JsonRpcError {
+    let msg = err.to_string();
+    if msg.contains("EXPERT_INVALID") {
+        rpc_err(1018, msg, "EXPERT_INVALID")
+    } else {
+        rpc_err(1000, msg, "INTERNAL")
+    }
+}
+
 fn subagent_err(err: impl ToString) -> JsonRpcError {
     let msg = err.to_string();
     if msg.contains("SUBAGENT_INVALID") {
@@ -871,6 +880,28 @@ fn parse_subagent_input(
 ) -> Result<crate::user_subagents::UserSubagentInput, JsonRpcError> {
     let raw = params
         .get("subagent")
+        .cloned()
+        .unwrap_or_else(|| params.clone());
+    serde_json::from_value(raw).map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))
+}
+
+/// Read the create/update payload for a user expert or team. Absent fields
+/// stay absent so `update` can distinguish "unchanged" from "cleared".
+fn parse_expert_input(
+    params: &Value,
+) -> Result<crate::user_experts::UserExpertInput, JsonRpcError> {
+    let raw = params
+        .get("expert")
+        .cloned()
+        .unwrap_or_else(|| params.clone());
+    serde_json::from_value(raw).map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))
+}
+
+fn parse_team_input(
+    params: &Value,
+) -> Result<crate::user_experts::UserTeamInput, JsonRpcError> {
+    let raw = params
+        .get("team")
         .cloned()
         .unwrap_or_else(|| params.clone());
     serde_json::from_value(raw).map_err(|e| rpc_err(1002, e.to_string(), "INVALID_PARAMS"))
@@ -3370,6 +3401,103 @@ async fn handle_request(
                 .set_scope(&id, scope)
                 .map_err(subagent_err)?;
             Ok(json!({ "subagent": subagent }))
+        }
+
+        "experts.list" => {
+            let mut st = state.lock().await;
+            Ok(json!({ "experts": st.user_experts.list().map_err(expert_err)? }))
+        }
+        "experts.active" => {
+            let project_path = params.get("projectPath").and_then(Value::as_str);
+            let mut st = state.lock().await;
+            Ok(
+                json!({ "experts": st.user_experts.active_for(project_path).map_err(expert_err)? }),
+            )
+        }
+        "experts.create" => {
+            let input = parse_expert_input(&params)?;
+            let mut st = state.lock().await;
+            let expert = st.user_experts.create(input).map_err(expert_err)?;
+            Ok(json!({ "expert": expert }))
+        }
+        "experts.update" => {
+            let id = require_id(&params)?;
+            let input = parse_expert_input(&params)?;
+            let mut st = state.lock().await;
+            let expert = st.user_experts.update(&id, input).map_err(expert_err)?;
+            Ok(json!({ "expert": expert }))
+        }
+        "experts.read" => {
+            let id = require_id(&params)?;
+            let mut st = state.lock().await;
+            match st.user_experts.read(&id).map_err(expert_err)? {
+                Some((expert, body)) => Ok(json!({ "expert": expert, "body": body })),
+                None => Ok(json!({ "expert": null, "body": null })),
+            }
+        }
+        "experts.remove" => {
+            let id = require_id(&params)?;
+            let mut st = state.lock().await;
+            let ok = st.user_experts.remove(&id).map_err(expert_err)?;
+            Ok(json!({ "ok": ok }))
+        }
+        "experts.setEnabled" => {
+            let id = require_id(&params)?;
+            let enabled = params
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let mut st = state.lock().await;
+            let expert = st
+                .user_experts
+                .set_enabled(&id, enabled)
+                .map_err(expert_err)?;
+            Ok(json!({ "expert": expert }))
+        }
+
+        "expertTeams.list" => {
+            let mut st = state.lock().await;
+            Ok(json!({ "teams": st.user_teams.list().map_err(expert_err)? }))
+        }
+        "expertTeams.create" => {
+            let input = parse_team_input(&params)?;
+            let mut st = state.lock().await;
+            let team = st.user_teams.create(input).map_err(expert_err)?;
+            Ok(json!({ "team": team }))
+        }
+        "expertTeams.update" => {
+            let id = require_id(&params)?;
+            let input = parse_team_input(&params)?;
+            let mut st = state.lock().await;
+            let team = st.user_teams.update(&id, input).map_err(expert_err)?;
+            Ok(json!({ "team": team }))
+        }
+        "expertTeams.read" => {
+            let id = require_id(&params)?;
+            let mut st = state.lock().await;
+            match st.user_teams.read(&id).map_err(expert_err)? {
+                Some((team, body)) => Ok(json!({ "team": team, "body": body })),
+                None => Ok(json!({ "team": null, "body": null })),
+            }
+        }
+        "expertTeams.remove" => {
+            let id = require_id(&params)?;
+            let mut st = state.lock().await;
+            let ok = st.user_teams.remove(&id).map_err(expert_err)?;
+            Ok(json!({ "ok": ok }))
+        }
+        "expertTeams.setEnabled" => {
+            let id = require_id(&params)?;
+            let enabled = params
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let mut st = state.lock().await;
+            let team = st
+                .user_teams
+                .set_enabled(&id, enabled)
+                .map_err(expert_err)?;
+            Ok(json!({ "team": team }))
         }
 
         "market.refresh" => {
