@@ -528,6 +528,16 @@ export const zhTW = {
   settings: {
     orgTitle: "組織",
     org: {
+      defaultsTitle: "預設項",
+      defaultOrg: "預設組織",
+      changeOrg: "變更",
+      accountsTitle: "帳戶管理",
+      editLoginTitle: "編輯登入資訊",
+      editLogin: "編輯登入資訊",
+      removeAccount: "刪除帳戶",
+      removeArmed: "再點一次確認刪除",
+      toggleAccount: "啟用 {{name}}",
+      disabledBadge: "已停用",
       currentOrg: "目前組織",
       loginOrg: "登入組織",
       setAsCurrent: "設為目前",

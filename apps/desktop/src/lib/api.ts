@@ -680,6 +680,15 @@ export const api = {
     invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgSetCurrent, {
       key,
     }),
+  orgRemoveSession: (key: string) =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(IPC.invoke.orgRemoveSession, {
+      key,
+    }),
+  orgSetSessionEnabled: (input: { key: string; enabled: boolean }) =>
+    invoke<import("@pi-desktop/shared").OrgStatus>(
+      IPC.invoke.orgSetSessionEnabled,
+      input,
+    ),
   /**
    * Level and project must travel with the id: a project skill has no global
    * counterpart to fall back to, so resolving by id alone would miss it.

@@ -26,6 +26,8 @@ export type StoredSession = {
   displayName?: string;
   role?: string;
   orgName?: string;
+  /** Disabled accounts stay stored but cannot be current (provider toggle). */
+  enabled?: boolean;
 };
 
 export type OrgBook = {
@@ -97,9 +99,12 @@ export class OrgService {
 
   private async currentSession(): Promise<StoredSession | null> {
     const book = await this.readBook();
+    const byKey = (key: string | null) =>
+      book.sessions.find((entry) => orgSessionKey(entry) === key && entry.enabled !== false) ??
+      null;
     return (
-      book.sessions.find((entry) => orgSessionKey(entry) === book.current) ??
-      book.sessions[0] ??
+      byKey(book.current) ??
+      book.sessions.find((entry) => entry.enabled !== false) ??
       null
     );
   }
@@ -163,6 +168,7 @@ export class OrgService {
       mustChangePassword: Boolean(body.mustChangePassword),
       displayName: body.user?.displayName,
       role: body.user?.role,
+      enabled: true,
     };
     const book = await this.readBook();
     const key = orgSessionKey(session);
@@ -259,6 +265,7 @@ export class OrgService {
       displayName: entry.displayName,
       role: entry.role,
       orgName: entry.orgName,
+      enabled: entry.enabled !== false,
     }));
     if (status === 401) {
       return {
@@ -309,6 +316,40 @@ export class OrgService {
         entry.key === currentKey ? { ...entry, orgName } : entry,
       ),
     };
+  }
+
+  /** Remove one stored org account (any slot, not just the current one). */
+  async removeSession(key: string): Promise<OrgStatus> {
+    const book = await this.readBook();
+    const sessions = book.sessions.filter((entry) => orgSessionKey(entry) !== key);
+    let current = book.current;
+    if (current === key || !sessions.some((entry) => orgSessionKey(entry) === current)) {
+      current = sessions.find((entry) => entry.enabled !== false)
+        ? orgSessionKey(sessions.find((entry) => entry.enabled !== false)!)
+        : null;
+    }
+    await this.writeBook({ sessions, current });
+    this.lastBootstrap = null;
+    return this.status();
+  }
+
+  /** Enable/disable an account. Disabling the current one falls back. */
+  async setSessionEnabled(key: string, enabled: boolean): Promise<OrgStatus> {
+    const book = await this.readBook();
+    const sessions = book.sessions.map((entry) =>
+      orgSessionKey(entry) === key ? { ...entry, enabled } : entry,
+    );
+    let current = book.current;
+    const currentEntry = sessions.find((entry) => orgSessionKey(entry) === current);
+    if (currentEntry && currentEntry.enabled === false) {
+      const fallback = sessions.find(
+        (entry) => orgSessionKey(entry) !== key && entry.enabled !== false,
+      );
+      current = fallback ? orgSessionKey(fallback) : null;
+    }
+    await this.writeBook({ sessions, current });
+    this.lastBootstrap = null;
+    return this.status();
   }
 
   /**

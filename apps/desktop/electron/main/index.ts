@@ -6908,6 +6908,14 @@ function registerIpc() {
     return status;
   });
   handle(IPC.invoke.orgQuotaRemaining, () => orgService.quotaRemaining());
+  handle(IPC.invoke.orgRemoveSession, (input: { key: string }) =>
+    orgService.removeSession(String(input?.key ?? "")),
+  );
+  handle(
+    IPC.invoke.orgSetSessionEnabled,
+    (input: { key: string; enabled: boolean }) =>
+      orgService.setSessionEnabled(String(input?.key ?? ""), Boolean(input.enabled)),
+  );
   handle(IPC.invoke.secretsHas, async (secretRef: string) => {
     if (!host) throw new Error("host unavailable");
     return host.call("secrets.has", { secretRef });

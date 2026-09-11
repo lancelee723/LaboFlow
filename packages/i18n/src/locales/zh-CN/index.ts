@@ -528,6 +528,16 @@ export const zhCN = {
   settings: {
     orgTitle: "组织",
     org: {
+      defaultsTitle: "默认项",
+      defaultOrg: "默认组织",
+      changeOrg: "更改",
+      accountsTitle: "账户管理",
+      editLoginTitle: "编辑登录信息",
+      editLogin: "编辑登录信息",
+      removeAccount: "删除账户",
+      removeArmed: "再点一次确认删除",
+      toggleAccount: "启用 {{name}}",
+      disabledBadge: "已停用",
       currentOrg: "当前组织",
       loginOrg: "登录组织",
       setAsCurrent: "设为当前",

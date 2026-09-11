@@ -530,6 +530,16 @@ export const en = {
   settings: {
     orgTitle: "Organization",
     org: {
+      defaultsTitle: "Defaults",
+      defaultOrg: "Default organization",
+      changeOrg: "Change",
+      accountsTitle: "Accounts",
+      editLoginTitle: "Edit sign-in",
+      editLogin: "Edit sign-in info",
+      removeAccount: "Remove account",
+      removeArmed: "Click again to remove",
+      toggleAccount: "Enable {{name}}",
+      disabledBadge: "Disabled",
       currentOrg: "Current organization",
       loginOrg: "Sign in to organization",
       setAsCurrent: "Make current",

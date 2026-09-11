@@ -1928,6 +1928,8 @@ export type OrgSessionInfo = {
   displayName?: string;
   role?: string;
   orgName?: string;
+  /** Disabled accounts stay stored but cannot be current. */
+  enabled?: boolean;
 };
 
 export type OrgStatus = {

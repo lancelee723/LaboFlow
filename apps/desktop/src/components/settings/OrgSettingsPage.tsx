@@ -1,23 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OrgSessionInfo, OrgStatus } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
+import { AnchoredMenu } from "./AnchoredMenu";
+import { CapabilityToggle } from "./AgentCapabilityLayout";
 import { Badge, Button } from "../ui";
-import { IconPlus, IconUser } from "../icons";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconPencil,
+  IconPlus,
+  IconTrash,
+  IconUser,
+} from "../icons";
 
 /**
- * Settings → Organization (PRD 4.1.12), mirroring the model-provider IA:
- * "当前组织" (the live connection) at the top, the list of signed-in
- * organizations with a top-right "登录组织" primary action that opens the
- * login dialog. Forced password change (must_change_password) gets its own
- * card, exactly like the add-provider flow.
+ * Settings → Organization (PRD 4.1.12), mirroring the model-config IA:
+ * 默认项 — the default organization row with a 更改 picker; 账户管理 — the
+ * signed-in org accounts (edit login info, remove, enable toggle) with the
+ * "登录组织" primary action top-right.
  */
 export function OrgSettingsPage() {
   const { t } = useTranslation();
   const showToast = useAppStore((state) => state.showToast);
   const [status, setStatus] = useState<OrgStatus | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -25,6 +34,8 @@ export function OrgSettingsPage() {
   const [mustChange, setMustChange] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [changingOrg, setChangingOrg] = useState(false);
+  const [armedRemove, setArmedRemove] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,19 +55,10 @@ export function OrgSettingsPage() {
     };
   }, []);
 
-  const login = async () => {
-    if (busy) return;
+  const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     try {
-      const next = await api.orgLogin({ serverUrl, username, password });
-      setStatus(next);
-      setPassword("");
-      setLoginOpen(false);
-      setMustChange(Boolean(next.mustChangePassword));
-      showToast(
-        t("settings.org.loginOk", { name: next.orgName ?? next.serverUrl ?? "" }),
-        { variant: "success" },
-      );
+      await action();
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
     } finally {
@@ -64,45 +66,58 @@ export function OrgSettingsPage() {
     }
   };
 
+  const submitLogin = async () => {
+    await run(async () => {
+      const next = await api.orgLogin({ serverUrl, username, password });
+      setStatus(next);
+      setPassword("");
+      setLoginOpen(false);
+      setEditingKey(null);
+      setMustChange(Boolean(next.mustChangePassword));
+      showToast(
+        t("settings.org.loginOk", { name: next.orgName ?? next.serverUrl ?? "" }),
+        { variant: "success" },
+      );
+    });
+  };
+
+  /** Sign out of the current org session (row action on the current account). */
+  const signOut = async () => {
+    await run(async () => {
+      setStatus(await api.orgLogout());
+      setMustChange(false);
+    });
+  };
+
   const changePassword = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
+    await run(async () => {
       const next = await api.orgChangePassword({ currentPassword, newPassword });
       setStatus(next);
       setMustChange(false);
       setCurrentPassword("");
       setNewPassword("");
       showToast(t("settings.org.passwordChanged"), { variant: "success" });
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
-    } finally {
-      setBusy(false);
-    }
+    });
   };
 
-  const signOut = async (key: string) => {
-    setBusy(true);
-    try {
-      setStatus(await api.orgLogout());
-      void key;
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
-    } finally {
-      setBusy(false);
-    }
+  const orgs = status?.orgs ?? [];
+  const currentKey = status?.currentKey;
+  const currentEntry = orgs.find((org) => org.key === currentKey) ?? null;
+
+  const openLogin = () => {
+    setEditingKey(null);
+    setServerUrl("");
+    setUsername("");
+    setPassword("");
+    setLoginOpen(true);
   };
 
-  const setCurrent = async (key: string) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      setStatus(await api.orgSetCurrent(key));
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
-    } finally {
-      setBusy(false);
-    }
+  const openEdit = (org: OrgSessionInfo) => {
+    setEditingKey(org.key);
+    setServerUrl(org.serverUrl);
+    setUsername(org.username);
+    setPassword("");
+    setLoginOpen(true);
   };
 
   if (!status) {
@@ -114,43 +129,213 @@ export function OrgSettingsPage() {
   }
 
   const connected = status.state === "connected";
-  const currentKey = status.currentKey;
-  const orgs = status.orgs ?? [];
-  const current =
-    orgs.find((entry) => entry.key === currentKey) ??
-    (connected
-      ? {
-          key: currentKey ?? "",
-          serverUrl: status.serverUrl ?? "",
-          username: status.username ?? "",
-          displayName: status.displayName,
-          role: status.role,
-          orgName: status.orgName,
-        }
-      : null);
+  const currentOrgLabel =
+    currentEntry?.orgName || currentEntry?.serverUrl || "";
 
-  const currentRow = (label: string, value: string) => (
-    <div className="settings-row">
-      <div className="settings-row-copy">
-        <div className="settings-row-title">{label}</div>
-      </div>
-      <div className="settings-row-control">{value}</div>
-    </div>
-  );
+  const accountRow = (org: OrgSessionInfo) => {
+    const isCurrent = org.key === currentKey && org.enabled !== false;
+    const isArmed = armedRemove === org.key;
+    return (
+      <li
+        key={org.key}
+        className={`model-provider-row ${org.enabled === false ? "is-disabled" : ""}`}
+      >
+        <div className="model-provider-row-copy">
+          <div className="model-provider-row-title">
+            <span className="model-provider-row-name">
+              {org.orgName || org.serverUrl}
+            </span>
+            {isCurrent ? (
+              <Badge tone="success">{t("settings.org.badgeCurrent")}</Badge>
+            ) : null}
+            {org.enabled === false ? (
+              <Badge tone="neutral">{t("settings.org.disabledBadge")}</Badge>
+            ) : null}
+          </div>
+          <div className="model-provider-row-meta">
+            <span>{org.serverUrl}</span>
+            <span className="model-provider-meta-dot" aria-hidden>
+              ·
+            </span>
+            <span>{org.username}</span>
+            {org.role ? (
+              <>
+                <span className="model-provider-meta-dot" aria-hidden>
+                  ·
+                </span>
+                <span>{org.role}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
+        <div className="model-provider-row-actions">
+          <button
+            type="button"
+            className="icon-btn model-provider-icon-btn"
+            title={t("settings.org.editLogin")}
+            aria-label={t("settings.org.editLogin")}
+            onClick={() => openEdit(org)}
+          >
+            <IconPencil size={14} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn model-provider-icon-btn"
+            title={
+              isArmed ? t("settings.org.removeArmed") : t("settings.org.removeAccount")
+            }
+            aria-label={t("settings.org.removeAccount")}
+            disabled={busy}
+            onClick={() => {
+              if (isArmed) {
+                setArmedRemove(null);
+                void run(async () => {
+                  setStatus(await api.orgRemoveSession(org.key));
+                });
+              } else {
+                setArmedRemove(org.key);
+              }
+            }}
+          >
+            <IconTrash size={14} />
+          </button>
+          {isCurrent ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void signOut()}
+            >
+              {t("settings.org.logout")}
+            </Button>
+          ) : null}
+          <CapabilityToggle
+            checked={org.enabled !== false}
+            busy={busy}
+            label={t("settings.org.toggleAccount", { name: org.username })}
+            onChange={() =>
+              void run(async () => {
+                setStatus(
+                  await api.orgSetSessionEnabled({
+                    key: org.key,
+                    enabled: !(org.enabled !== false),
+                  }),
+                );
+              })
+            }
+          />
+        </div>
+      </li>
+    );
+  };
 
   return (
     <div className="settings-stack">
       <section className="settings-card-block">
         <div className="model-config-section-head">
+          <h3 className="settings-card-heading">{t("settings.org.defaultsTitle")}</h3>
+        </div>
+        <div className="settings-panel model-default-panel">
+          <div className="settings-row model-default-row">
+            <div className="settings-row-copy model-default-copy">
+              <div className="settings-row-title model-default-label">
+                {t("settings.org.defaultOrg")}
+              </div>
+              {currentEntry && connected ? (
+                <div className="settings-row-desc model-default-value">
+                  <span className="model-default-provider">
+                    {currentOrgLabel}
+                  </span>
+                  <span className="model-default-sep" aria-hidden>
+                    ·
+                  </span>
+                  <span className="model-default-model font-mono">
+                    {currentEntry?.username ?? ""}
+                  </span>
+                </div>
+              ) : (
+                <div className="settings-row-desc model-default-value">
+                  <span className="model-default-empty">
+                    {t("settings.org.emptyOrgTitle")}
+                  </span>
+                </div>
+              )}
+            </div>
+            {orgs.length > 0 ? (
+              <AnchoredMenu
+                className="model-default-anchor"
+                open={changingOrg}
+                onClose={() => setChangingOrg(false)}
+                menuClassName="model-default-menu"
+                label={t("settings.org.changeOrg")}
+                align="end"
+                trigger={(ref) => (
+                  <Button
+                    ref={ref}
+                    className="settings-text-action model-default-trigger"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => setChangingOrg((current) => !current)}
+                    aria-haspopup="listbox"
+                    aria-expanded={changingOrg}
+                  >
+                    {t("settings.org.changeOrg")}
+                    <IconChevronDown
+                      className="model-default-trigger-chevron"
+                      size={13}
+                      aria-hidden
+                    />
+                  </Button>
+                )}
+              >
+                <ul className="model-default-list">
+                  {orgs
+                    .filter((org) => org.enabled !== false)
+                    .map((org) => {
+                      const isCurrent = org.key === currentKey;
+                      return (
+                        <li key={org.key}>
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={isCurrent}
+                            className={`model-default-option ${isCurrent ? "is-current" : ""}`}
+                            disabled={busy}
+                            onClick={() => {
+                              setChangingOrg(false);
+                              if (!isCurrent) {
+                                void run(async () => {
+                                  setStatus(await api.orgSetCurrent(org.key));
+                                });
+                              }
+                            }}
+                          >
+                            <span className="model-default-option-check" aria-hidden>
+                              {isCurrent ? <IconCheck size={12} /> : null}
+                            </span>
+                            <span className="model-default-option-model">
+                              {org.orgName || org.serverUrl}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                </ul>
+              </AnchoredMenu>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-card-block">
+        <div className="model-config-section-head">
           <div className="settings-card-heading-line">
-            <h3 className="settings-card-heading">
-              {t("settings.org.signedInOrgs")}
-            </h3>
+            <h3 className="settings-card-heading">{t("settings.org.accountsTitle")}</h3>
             {orgs.length > 0 ? (
               <span className="provider-section-count">{orgs.length}</span>
             ) : null}
           </div>
-          <Button variant="primary" onClick={() => setLoginOpen(true)}>
+          <Button variant="primary" onClick={openLogin}>
             <span className="model-config-btn-inner">
               <IconPlus size={14} />
               <span>{t("settings.org.loginOrg")}</span>
@@ -158,58 +343,29 @@ export function OrgSettingsPage() {
           </Button>
         </div>
         <div className="settings-panel model-provider-panel">
-            <ul className="model-provider-list">
-              {orgs.map((entry: OrgSessionInfo) => {
-                const isCurrent = entry.key === currentKey;
-                return (
-                  <li
-                    key={entry.key}
-                    className={`model-provider-row ${isCurrent ? "" : "is-disabled"}`}
-                  >
-                    <div className="model-provider-row-copy">
-                      <div className="model-provider-row-title">
-                        <span className="model-provider-row-name">
-                          {entry.orgName || entry.serverUrl}
-                        </span>
-                        {isCurrent ? (
-                          <Badge tone="success">{t("settings.org.badgeCurrent")}</Badge>
-                        ) : null}
-                      </div>
-                      <div className="model-provider-row-meta">
-                        <span>{entry.displayName || entry.username}</span>
-                        <span className="model-provider-meta-dot" aria-hidden>
-                          ·
-                        </span>
-                        <span>{entry.serverUrl}</span>
-                      </div>
-                    </div>
-                    <div className="model-provider-row-actions">
-                      {!isCurrent ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void setCurrent(entry.key)}
-                        >
-                          {t("settings.org.setAsCurrent")}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void signOut(entry.key)}
-                        >
-                          {t("settings.org.logout")}
-                        </Button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </section>
+          {orgs.length === 0 ? (
+            <div className="model-provider-empty">
+              <div className="model-provider-empty-icon" aria-hidden>
+                <IconUser size={18} />
+              </div>
+              <div className="model-provider-empty-title">
+                {t("settings.org.emptyOrgTitle")}
+              </div>
+              <div className="model-provider-empty-desc">
+                {t("settings.org.emptyOrgDesc")}
+              </div>
+              <Button variant="primary" onClick={openLogin}>
+                <span className="model-config-btn-inner">
+                  <IconPlus size={14} />
+                  <span>{t("settings.org.loginOrg")}</span>
+                </span>
+              </Button>
+            </div>
+          ) : (
+            <ul className="model-provider-list">{orgs.map((org) => accountRow(org))}</ul>
+          )}
+        </div>
+      </section>
 
       {mustChange && connected ? (
         <section className="settings-card-block">
@@ -282,7 +438,7 @@ export function OrgSettingsPage() {
           >
             <div className="org-login-head">
               <h3 id="org-login-title" className="settings-card-heading">
-                {t("settings.org.loginOrg")}
+                {editingKey ? t("settings.org.editLoginTitle") : t("settings.org.loginOrg")}
               </h3>
             </div>
             <div className="org-login-body">
@@ -327,7 +483,7 @@ export function OrgSettingsPage() {
               <Button
                 variant="primary"
                 disabled={busy || !serverUrl.trim() || !username.trim() || !password}
-                onClick={() => void login()}
+                onClick={() => void submitLogin()}
               >
                 {busy ? t("settings.org.loggingIn") : t("settings.org.login")}
               </Button>

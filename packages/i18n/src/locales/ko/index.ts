@@ -532,6 +532,16 @@ export const ko = {
   settings: {
     orgTitle: "조직",
     org: {
+      defaultsTitle: "기본값",
+      defaultOrg: "기본 조직",
+      changeOrg: "변경",
+      accountsTitle: "계정 관리",
+      editLoginTitle: "로그인 정보 편집",
+      editLogin: "로그인 정보 편집",
+      removeAccount: "계정 삭제",
+      removeArmed: "삭제하려면 다시 클릭",
+      toggleAccount: "{{name}} 사용",
+      disabledBadge: "사용 안 함",
       currentOrg: "현재 조직",
       loginOrg: "조직 로그인",
       setAsCurrent: "현재로 설정",

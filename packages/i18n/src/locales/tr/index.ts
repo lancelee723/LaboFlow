@@ -532,6 +532,16 @@ export const tr = {
   settings: {
     orgTitle: "Organizasyon",
     org: {
+      defaultsTitle: "Varsayılanlar",
+      defaultOrg: "Varsayılan organizasyon",
+      changeOrg: "Değiştir",
+      accountsTitle: "Hesaplar",
+      editLoginTitle: "Giriş bilgisini düzenle",
+      editLogin: "Giriş bilgisini düzenle",
+      removeAccount: "Hesabı kaldır",
+      removeArmed: "Kaldırmak için tekrar tıklayın",
+      toggleAccount: "{{name}} etkinleştir",
+      disabledBadge: "Devre dışı",
       currentOrg: "Mevcut organizasyon",
       loginOrg: "Organizasyona giriş",
       setAsCurrent: "Mevcut yap",

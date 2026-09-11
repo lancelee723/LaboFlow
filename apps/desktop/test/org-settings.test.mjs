@@ -92,4 +92,31 @@ test("phase 3: org provider sync and live quota panel", async () => {
   // Threshold colors per PRD 4.2.4: exhausted → error, near → warning.
   assert.match(usagePage, /is-\$\{tone\}/);
   assert.match(usagePage, /worst >= 1 \? "error" : worst >= 0\.8 \? "warning"/);
+
+test("phase 3b: account management mirrors the model-config IA", async () => {
+  const page = await readFile(
+    new URL("../src/components/settings/OrgSettingsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  const protocol = await readFile(
+    new URL("../../../packages/shared/src/protocol.ts", import.meta.url),
+    "utf8",
+  );
+  // 默认项: default-org row with the 更改 picker over enabled sessions.
+  assert.match(page, /settings\.org\.defaultsTitle/);
+  assert.match(page, /settings\.org\.defaultOrg/);
+  assert.match(page, /settings\.org\.changeOrg/);
+  assert.match(page, /AnchoredMenu/);
+  // 账户管理: top-right 登录组织 + per-account edit/remove/enable toggle.
+  assert.match(page, /settings\.org\.accountsTitle/);
+  assert.match(page, /settings\.org\.loginOrg/);
+  assert.match(page, /settings\.org\.editLogin/);
+  assert.match(page, /settings\.org\.removeAccount/);
+  assert.match(page, /CapabilityToggle/);
+  assert.match(page, /orgRemoveSession/);
+  assert.match(page, /orgSetSessionEnabled/);
+  assert.match(protocol, /orgRemoveSession: "pi-desktop\/org\/removeSession"/);
+  assert.match(protocol, /orgSetSessionEnabled: "pi-desktop\/org\/setSessionEnabled"/);
+});
+
 });

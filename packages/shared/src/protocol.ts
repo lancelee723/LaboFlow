@@ -174,6 +174,8 @@ export const IPC = {
     orgChangePassword: "pi-desktop/org/changePassword",
     orgQuotaRemaining: "pi-desktop/org/quotaRemaining",
     orgSetCurrent: "pi-desktop/org/setCurrent",
+    orgRemoveSession: "pi-desktop/org/removeSession",
+    orgSetSessionEnabled: "pi-desktop/org/setSessionEnabled",
     subagentList: "pi-desktop/subagent/list",
     subagentCatalog: "pi-desktop/subagent/catalog",
     subagentCreate: "pi-desktop/subagent/create",

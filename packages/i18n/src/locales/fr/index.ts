@@ -521,6 +521,16 @@ export const fr = {
   "settings": {
     "orgTitle": "Organisation",
     "org": {
+      defaultsTitle: "Valeurs par défaut",
+      defaultOrg: "Organisation par défaut",
+      changeOrg: "Changer",
+      accountsTitle: "Comptes",
+      editLoginTitle: "Modifier les informations de connexion",
+      editLogin: "Modifier les informations de connexion",
+      removeAccount: "Supprimer le compte",
+      removeArmed: "Cliquez à nouveau pour supprimer",
+      toggleAccount: "Activer {{name}}",
+      disabledBadge: "Désactivé",
       currentOrg: "Organisation actuelle",
       loginOrg: "Se connecter à une organisation",
       setAsCurrent: "Définir comme actuelle",
