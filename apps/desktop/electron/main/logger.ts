@@ -24,6 +24,8 @@ export type LogCategory =
   | "provider"
   | "persistence"
   | "updater"
+  | "kb"
+  | "expert"
   | "diagnostics"
   | "runtime"
   | "timing"

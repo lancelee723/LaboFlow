@@ -1897,11 +1897,19 @@ export type TokenUsageHistoryItem = {
   turnCount: number;
 };
 
+/** Per-model daily series for the usage trend chart (modelId "unknown" = turns
+ * recorded before model attribution existed). */
+export type TokenUsageModelSeries = {
+  modelId: string;
+  items: TokenUsageHistoryItem[];
+};
+
 export type TokenUsageHistoryResult = {
   bucket: TokenUsageBucket;
   rangeStart: number;
   rangeEnd: number;
   items: TokenUsageHistoryItem[];
+  models?: TokenUsageModelSeries[];
   totals: {
     inputTokens: number;
     outputTokens: number;
@@ -2059,4 +2067,28 @@ export interface ExpertTeamProgress {
   sessionId?: string;
   type: ExpertTeamProgressType;
   payload: Record<string, unknown>;
+}
+
+/** Module 05: knowledge-base delivery + web-URL entries. */
+
+export interface KbServerDelivery {
+  kind: "mcp" | "web";
+  name: string;
+  /** mcp only */
+  transport?: "stdio" | "http";
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  apiKey?: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+export interface KbUrlEntry {
+  id: string;
+  name: string;
+  url: string;
+  source: "user" | "org";
+  orgId?: string;
 }

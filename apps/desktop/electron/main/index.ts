@@ -40,6 +40,7 @@ import {
 } from "./headless-agent-driver";
 import { ExpertService } from "./expert-service";
 import { TeamRunner } from "./team-runner";
+import { KbService } from "./kb-service";
 import { listInstalledFonts } from "./system-fonts";
 import {
   applyNetworkProxyFromAppSettings,
@@ -4716,6 +4717,11 @@ async function getOneShotProvider(): Promise<{
   }
 }
 
+const kbService = new KbService({
+  getHost: () => host,
+  getLogger: () => logger,
+});
+
 const teamRunner = new TeamRunner({
   getLogger: () => logger,
   getDriver: () => headlessAgentDriver,
@@ -7060,12 +7066,22 @@ function registerIpc() {
 
   handle(IPC.invoke.orgLogin, async (input: { serverUrl: string; username: string; password: string }) => {
     const status = await orgService.login(input);
-    if (status.state === "connected") await syncOrgProvider();
+    if (status.state === "connected") {
+      await syncOrgProvider();
+      await applyOrgKbDelivery().catch((error) =>
+        logger.app("kb", "warn", "org kb delivery failed", { data: String(error) }),
+      );
+    }
     return status;
   });
   handle(IPC.invoke.orgStatus, async () => {
     const status = await orgService.status();
-    if (status.state === "connected") await syncOrgProvider();
+    if (status.state === "connected") {
+      await syncOrgProvider();
+      await applyOrgKbDelivery().catch((error) =>
+        logger.app("kb", "warn", "org kb delivery failed", { data: String(error) }),
+      );
+    }
     return status;
   });
   handle(IPC.invoke.orgChangePassword, (input: { currentPassword: string; newPassword: string }) =>
@@ -7090,6 +7106,7 @@ function registerIpc() {
     else {
       await removeOrgProvider();
       orgHub.disconnectAll();
+      await kbService.disableOrgServers().catch(() => undefined);
     }
     return status;
   });
@@ -7945,6 +7962,21 @@ function registerIpc() {
     return res;
   });
 
+  /** Org-provided knowledge-base entries land in the MCP registry (T55.6). */
+  async function applyOrgKbDelivery(): Promise<void> {
+    const bootstrap = orgService.getBootstrap() as {
+      org?: { id?: string };
+      kbServers?: import("@pi-desktop/shared").KbServerDelivery[];
+    } | null;
+    const orgId = String(bootstrap?.org?.id ?? "").trim();
+    const items = bootstrap?.kbServers ?? [];
+    if (!orgId || items.length === 0) return;
+    const result = await kbService.applyOrgDelivery(orgId, items);
+    logger.app("kb", "info", "org kb delivery applied", {
+      data: { applied: result.applied, removed: result.removed },
+    });
+  }
+
   // Expert center (module 01)
   handle(IPC.invoke.expertList, async () => expertService.list());
   handle(
@@ -8021,6 +8053,22 @@ function registerIpc() {
         index: Number(req?.index ?? -1),
       }),
   );
+
+  // Knowledge base (module 05)
+  handle(IPC.invoke.kbListUrls, async () => kbService.listUrls());
+  handle(
+    IPC.invoke.kbSaveUrl,
+    async (req: { name: string; url: string }) => kbService.saveUrl(req ?? {}),
+  );
+  handle(IPC.invoke.kbDeleteUrl, async (req: { id: string }) =>
+    kbService.deleteUrl(String(req?.id ?? "").trim()),
+  );
+  handle(
+    IPC.invoke.kbApplyOrgDelivery,
+    async (req: { orgId: string; items: import("@pi-desktop/shared").KbServerDelivery[] }) =>
+      kbService.applyOrgDelivery(String(req?.orgId ?? "").trim(), req?.items ?? []),
+  );
+  handle(IPC.invoke.kbDisableOrgServers, async () => kbService.disableOrgServers());
 
   handle(IPC.invoke.promptEnhance, async (req: PromptEnhancementRequest) => {
     if (!host) throw new Error("backend unavailable");
