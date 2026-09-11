@@ -46,6 +46,7 @@ import { createSpaceClient, createSpaceIpcHost } from "./space-client";
 import { createChannelCredentialStore } from "./channels/credential-store";
 import { createFeishuAdapterFactory } from "./channels/feishu";
 import { createWecomAdapterFactory } from "./channels/wecom";
+import { createWechatMpAdapterFactory } from "./channels/wechat-mp";
 import { listInstalledFonts } from "./system-fonts";
 import {
   applyNetworkProxyFromAppSettings,
@@ -4751,12 +4752,28 @@ const kbService = new KbService({
 // that pass the allowlist dispatch through the headless driver and the
 // result is sent back over the channel adapter.
 let spaceHost: ReturnType<typeof createSpaceIpcHost> | undefined;
+/** Org-session accessors for channel adapters that need them (wechat_mp),
+ * assigned once registerIpc() constructs the org services. */
+const orgChannelContext: {
+  tokenProvider?: () => Promise<string>;
+  serverUrl?: () => string | undefined;
+} = {};
 const channelHost = createChannelRegistryHost({
   getLogger: () => logger,
   getDriver: () => headlessAgentDriver,
   adapters: {
     feishu: createFeishuAdapterFactory(),
     wecom: createWecomAdapterFactory(),
+    wechat_mp: createWechatMpAdapterFactory({
+      tokenProvider: async () => {
+        const provider = orgChannelContext.tokenProvider;
+        if (!provider) {
+          throw new Error("ORG_SESSION_REQUIRED: 公众号通道需要先登录组织");
+        }
+        return provider();
+      },
+      serverUrl: () => orgChannelContext.serverUrl?.(),
+    }),
   },
   credentialStore: createChannelCredentialStore(),
   broadcast: (event) => sendToRenderer(IPC.event.channelState, event),
@@ -7048,6 +7065,12 @@ function registerIpc() {
       return (await host.call(method, params)) as T;
     },
   });
+  orgChannelContext.tokenProvider = async () => {
+    const token = await orgService.getAccessToken();
+    if (!token) throw new Error("ORG_SESSION_REQUIRED: 公众号通道需要先登录组织");
+    return token;
+  };
+  orgChannelContext.serverUrl = () => orgService.getServerUrl();
 
   // Phase 3: register the "org-provided" provider from the bootstrap payload
   // (gateway URL + freshly issued virtual key + assigned channel models) so
