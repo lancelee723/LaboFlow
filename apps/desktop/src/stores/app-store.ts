@@ -859,7 +859,7 @@ export type AppState = {
   toasts: ToastItem[];
   notifications: AppNotification[];
   unreadNotificationCount: number;
-  page: "chat" | "pulls" | "scheduled" | "plugins" | "workspaces" | "settings";
+  page: "chat" | "pulls" | "scheduled" | "experts" | "plugins" | "workspaces" | "settings";
   /** Tab ids come from the shared settings index so nav, search, and the
    * page cannot drift apart. */
   settingsTab: SettingsTabId;
@@ -2167,6 +2167,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     if (!sessionId) throw new Error("No active session");
     if (get().pendingPlans[sessionId]?.status === "pending") return false;
+    // @专家指派 (module 01, T51.5): a prompt addressed to `@专家名` starts an
+    // independent expert session instead of the normal agent turn. The expert
+    // posts its completion card back into this session asynchronously.
+    const expertDispatch = await matchExpertMention(content);
+    if (expertDispatch) {
+      try {
+        await api.invokeExpert({
+          sessionId,
+          expertId: expertDispatch.expertId,
+          task: expertDispatch.task,
+        });
+      } catch (e) {
+        get().showToast(
+          e instanceof Error ? e.message : i18n.t("expert.dispatchFailed"),
+          { variant: "error" },
+        );
+        return false;
+      }
+      get().showToast(
+        i18n.t("expert.dispatched", { expert: expertDispatch.name }),
+        { variant: "success" },
+      );
+      return true;
+    }
     if (get().runningSessions[sessionId]) {
       get().enqueuePrompt(content, draft, sessionId);
       return true;
@@ -4702,4 +4726,61 @@ export async function materializeDraftSession(
     if (activeId) return activeId;
   }
   return persistSessionAndSelect({ intent });
+}
+
+// --- @专家 mention resolution (module 01, T51.5) -----------------------------
+
+const EXPERT_MENTION_CACHE_TTL_MS = 60_000;
+let expertMentionCache: {
+  names: Map<string, string>;
+  fetchedAt: number;
+} | null = null;
+
+export interface ExpertMentionMatch {
+  expertId: string;
+  name: string;
+  task: string;
+}
+
+/**
+ * Resolve a leading `@专家名` against the expert list (fetched at most once
+ * per TTL). Returns null when the prompt is not an expert mention — including
+ * when the name is unknown — so a regular prompt that merely starts with "@"
+ * still reaches the agent untouched.
+ */
+export async function matchExpertMention(
+  content: string,
+): Promise<ExpertMentionMatch | null> {
+  const match = /^@(\S+)\s*([\s\S]*)$/.exec(content);
+  if (!match) return null;
+  const name = match[1];
+  const task = match[2].trim();
+  if (!task) return null;
+  const now = Date.now();
+  if (
+    !expertMentionCache ||
+    now - expertMentionCache.fetchedAt > EXPERT_MENTION_CACHE_TTL_MS
+  ) {
+    let experts;
+    try {
+      experts = await api.listExperts();
+    } catch {
+      // Expert center unavailable: treat the prompt as plain text.
+      return null;
+    }
+    const names = new Map<string, string>();
+    for (const expert of experts) {
+      // A disabled expert must not hijack prompts addressed to its name.
+      if (expert.enabled !== false) names.set(expert.name, expert.id);
+    }
+    expertMentionCache = { names, fetchedAt: now };
+  }
+  const expertId = expertMentionCache.names.get(name);
+  if (!expertId) return null;
+  return { expertId, name, task };
+}
+
+/** Test hook: drop the cached @专家 list so the next mention re-resolves. */
+export function resetExpertMentionCacheForTests(): void {
+  expertMentionCache = null;
 }

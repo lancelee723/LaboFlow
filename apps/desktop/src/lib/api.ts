@@ -120,6 +120,64 @@ export interface ModelConfigImportCandidate {
   hasSecret: boolean;
 }
 
+// --- Expert center (module 01) ----------------------------------------------
+
+/** One row of the expert center list (presets merged with user documents). */
+export interface ExpertListItem {
+  id: string;
+  name: string;
+  description: string;
+  industry?: string;
+  tags: string[];
+  examples: string[];
+  skills: string[];
+  mcpServers: string[];
+  model?: string;
+  thinkingLevel?: string;
+  budgetTokens?: number;
+  enabled: boolean;
+  source: "preset" | "user";
+}
+
+/** Create/update payload; a personal doc with the same name shadows a preset. */
+export interface ExpertSaveInput {
+  name: string;
+  description?: string;
+  industry?: string;
+  tags?: string[];
+  examples?: string[];
+  skills?: string[];
+  mcpServers?: string[];
+  model?: string;
+  thinkingLevel?: string;
+  budgetTokens?: number;
+  body?: string;
+}
+
+/** One row of the expert-team list (presets merged with user teams). */
+export interface ExpertTeamListItem {
+  id: string;
+  name: string;
+  description: string;
+  members: string[];
+  leaderStyle: string;
+  integration: string;
+  budgetTokens?: number;
+  enabled: boolean;
+  source: "preset" | "user";
+}
+
+/** Create/update payload for a user-owned team. */
+export interface ExpertTeamSaveInput {
+  name: string;
+  description?: string;
+  members?: string[];
+  leaderStyle?: string;
+  integration?: string;
+  budgetTokens?: number;
+  body?: string;
+}
+
 declare global {
   interface Window {
     piDesktop?: {
@@ -492,6 +550,40 @@ export const api = {
       IPC.invoke.scheduledRun,
       id,
     ),
+
+  // --- Expert center (module 01) --------------------------------------------
+  listExperts: () => invoke<ExpertListItem[]>(IPC.invoke.expertList),
+  /** The record plus the persona body, for the editor. */
+  getExpert: (id: string) =>
+    invoke<{ expert: ExpertListItem | null; body: string | null }>(
+      IPC.invoke.expertGet,
+      { id },
+    ),
+  saveExpert: (input: ExpertSaveInput) =>
+    invoke<ExpertListItem>(IPC.invoke.expertSave, input),
+  deleteExpert: (id: string) => invoke<boolean>(IPC.invoke.expertDelete, { id }),
+  toggleExpert: (id: string, enabled: boolean) =>
+    invoke<boolean>(IPC.invoke.expertToggle, { id, enabled }),
+  /** Starts an independent expert session; the card lands in `sessionId`. */
+  invokeExpert: (input: { sessionId?: string; expertId: string; task: string }) =>
+    invoke<{ sessionId: string }>(IPC.invoke.expertInvoke, input),
+  listExpertTeams: () => invoke<ExpertTeamListItem[]>(IPC.invoke.expertTeamsList),
+  /** The team record plus the leader body, for the editor. */
+  getExpertTeam: (id: string) =>
+    invoke<{ team: (ExpertTeamListItem & { body?: string }) | null; body: string | null }>(
+      IPC.invoke.expertTeamGet,
+      { id },
+    ),
+  saveExpertTeam: (input: ExpertTeamSaveInput) =>
+    invoke<{ team: Record<string, unknown> }>(IPC.invoke.expertTeamSave, input),
+  deleteExpertTeam: (id: string) =>
+    invoke<boolean>(IPC.invoke.expertTeamDelete, { id }),
+  /** Starts a star-topology team run; the delivery card lands in `sessionId`. */
+  invokeExpertTeam: (input: { sessionId?: string; teamId: string; task: string }) =>
+    invoke<{ runId: string }>(IPC.invoke.expertTeamInvoke, input),
+  /** Re-run one failed member (by plan subtask index), then re-integrate. */
+  retryTeamMember: (input: { runId: string; index: number }) =>
+    invoke<boolean>(IPC.invoke.expertTeamRetryMember, input),
   replaceSessionMessages: (sessionId: string, messages: UiMessage[]) =>
     invoke(IPC.invoke.sessionReplaceMessages, { sessionId, messages }),
   saveSessionRevision: (input: {
@@ -1038,5 +1130,16 @@ export const api = {
   onPluginLauncherShown: (listener: () => void) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.pluginLauncherShown, () => listener());
+  },
+  /** Live expert-team orchestration progress (plan, dispatch, members). */
+  onExpertTeamRun: (
+    listener: (event: import("@pi-desktop/shared").ExpertTeamProgress) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.expertTeamRun, (payload) =>
+      listener(
+        (payload ?? {}) as import("@pi-desktop/shared").ExpertTeamProgress,
+      ),
+    );
   },
 };

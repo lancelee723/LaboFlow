@@ -85,6 +85,7 @@ import {
   IconSidebar,
   IconSettings,
   IconUsers,
+  IconSparkles,
   IconStar,
   IconX,
 } from "./icons";
@@ -1906,6 +1907,14 @@ export function Sidebar({
         >
           <IconClock size={15} />
           <span>{t("nav.automation")}</span>
+        </button>
+        <button
+          type="button"
+          data-action="quick-experts"
+          onClick={() => setPage("experts")}
+        >
+          <IconSparkles size={15} />
+          <span>{t("nav.experts")}</span>
         </button>
         <button
           type="button"
