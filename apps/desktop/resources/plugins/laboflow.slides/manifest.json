@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "id": "laboflow.slides",
+  "name": "Slides (L1)",
+  "version": "1.0.0",
+  "description": "Consulting-grade slide drafting: outline planning and editable PPTX export (pptxgenjs baseline). The fast engine of the PPT assistant.",
+  "author": "LaboFlow",
+  "main": "main.js",
+  "contributes": {
+    "agentTools": [
+      {
+        "name": "slides_plan",
+        "description": "Draft a structured slide-deck outline from a topic or source notes. Returns a normalized outline (pages with layout, title, bullets/notes) for user review BEFORE any deck is generated. Input: { topic, audience?, pageCount?, pages? } where pages may carry draft page titles/points from the conversation.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "topic": { "type": "string", "description": "Deck subject and core message" },
+            "audience": { "type": "string", "description": "Who will see this deck (e.g. client C-suite)" },
+            "pageCount": { "type": "number", "description": "Target page count (default 10)" },
+            "outline": { "type": "object", "description": "Optional pre-drafted outline to normalize instead of drafting" }
+          },
+          "required": ["topic"]
+        }
+      },
+      {
+        "name": "slides_export",
+        "description": "Export a confirmed outline as an editable .pptx file (PowerPoint/WPS/LibreOffice compatible; every element is a native text box or table). Input: { deckTitle, pages: [{ layout, title, bullets?, data?, quote?, speakerNotes? }], theme? }. Returns the written file path.",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "deckTitle": { "type": "string" },
+            "fileName": { "type": "string", "description": "Output file name without extension (default: sanitized deckTitle)" },
+            "theme": {
+              "type": "object",
+              "properties": {
+                "accent": { "type": "string", "description": "Accent hex color, default 1F4E79 (consulting blue)" },
+                "font": { "type": "string", "description": "Font family, default PingFang SC / Microsoft YaHei stack" }
+              }
+            },
+            "pages": {
+              "type": "array",
+              "description": "Confirmed outline pages, in order",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "layout": { "type": "string", "enum": ["title", "bullets", "data", "matrix", "compare", "timeline", "quote", "end"] },
+                  "title": { "type": "string", "description": "Action title — a full sentence judgment, not a noun phrase" },
+                  "subtitle": { "type": "string" },
+                  "bullets": { "type": "array", "items": { "type": "string" } },
+                  "columns": { "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string" }, "rows": { "type": "array", "items": { "type": "string" } } } } },
+                  "matrix": { "type": "array", "items": { "type": "object", "properties": { "quadrant": { "type": "string" }, "points": { "type": "array", "items": { "type": "string" } } } } },
+                  "milestones": { "type": "array", "items": { "type": "object", "properties": { "when": { "type": "string" }, "what": { "type": "string" } } } },
+                  "quote": { "type": "string" },
+                  "attribution": { "type": "string" },
+                  "data": { "type": "object", "description": "For layout=data: { metrics: [{label, value, note?}] }" },
+                  "speakerNotes": { "type": "string" }
+                },
+                "required": ["layout", "title"]
+              }
+            }
+          },
+          "required": ["deckTitle", "pages"]
+        }
+      }
+    ],
+    "skills": ["./skills/slides.md"],
+    "settings": [
+      {
+        "key": "accentColor",
+        "type": "string",
+        "default": "1F4E79",
+        "title": "Accent color (hex)",
+        "description": "Theme accent for exported decks"
+      },
+      {
+        "key": "outputDir",
+        "type": "string",
+        "default": "slides",
+        "title": "Output folder (workspace-relative)",
+        "description": "Where .pptx files are written inside the workspace"
+      }
+    ]
+  },
+  "permissions": ["agent.tool.register", "workspace.read", "fs.write"],
+  "engines": {
+    "piDesktop": ">=0.8.0"
+  },
+  "enabledByDefault": true
+}
