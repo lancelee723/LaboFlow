@@ -1,5 +1,6 @@
 /** Admin console API client — token from localStorage (admin login). */
-const BASE = (import.meta as { env?: { VITE_API?: string } }).env?.VITE_API ?? '';
+// Dev: '' 相对路径 + vite 代理(/api → LABOFLOW_API)。VITE_API 仍可覆盖。
+const BASE = (import.meta as { env?: { VITE_API?: string } }).env?.VITE_API ?? '/api';
 
 export interface LoginResponse {
   tokens: { accessToken: string; refreshToken: string };
