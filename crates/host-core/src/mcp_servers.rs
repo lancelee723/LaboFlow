@@ -43,6 +43,12 @@ pub struct McpServerRecord {
     pub enabled: bool,
     #[serde(default)]
     pub scope: ActivationScope,
+    /// `user` (implicit) or `org` — org servers come from /org/bootstrap,
+    /// don't count against the user's server cap and are read-only in the UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -56,6 +62,10 @@ struct McpConfig {
     label: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    org_id: Option<String>,
     transport: String,
     #[serde(default)]
     command: Option<String>,
@@ -84,6 +94,9 @@ pub struct McpServerInput {
     pub url: Option<String>,
     pub headers: Option<BTreeMap<String, String>>,
     pub enabled: Option<bool>,
+    /// `org` only: set by the org bootstrap path; renderer saves stay `user`.
+    pub source: Option<String>,
+    pub org_id: Option<String>,
     /// Kept for protocol compatibility; capability state is app-local instead.
     #[allow(dead_code)]
     pub scope: Option<ActivationScope>,
@@ -231,6 +244,8 @@ impl McpServerRegistry {
             records.push(McpServerRecord {
                 id: config.id,
                 label: config.label,
+                source: config.source,
+                org_id: config.org_id,
                 level: Some(level.as_str().to_string()),
                 project_path: owner_project_path.clone(),
                 path: Some(path.to_string_lossy().to_string()),
@@ -401,6 +416,25 @@ impl McpServerRegistry {
             bail!("MCP_INVALID: a server with this name already exists at this level");
         }
         let previous_same_transport = current.filter(|record| record.transport == transport);
+        let input_source = input
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if let Some(source) = &input_source {
+            if source != "user" && source != "org" {
+                bail!("MCP_INVALID: source must be user or org");
+            }
+        }
+        let effective_source = input_source
+            .or_else(|| current.and_then(|record| record.source.clone()))
+            .unwrap_or_else(|| "user".to_string());
+        if current.map(|record| record.source.as_deref()) == Some(Some("org"))
+            && effective_source != "org"
+        {
+            bail!("MCP_INVALID: an org-provided server is read-only here");
+        }
         let mut config = McpConfig {
             id: input.id.trim().to_string(),
             label,
@@ -410,6 +444,10 @@ impl McpServerRegistry {
                 .filter(|value| !value.is_empty())
                 .or_else(|| current.and_then(|record| record.description.clone())),
             transport,
+            source: Some(effective_source.clone()),
+            org_id: input
+                .org_id
+                .or_else(|| current.and_then(|record| record.org_id.clone())),
             ..Default::default()
         };
         if config.transport == "stdio" {
@@ -444,7 +482,11 @@ impl McpServerRegistry {
                 .unwrap_or_default();
         }
         Self::validate_config(&config)?;
-        if same_level.len() >= MAX_SERVERS && existing.is_none() {
+        let user_server_count = same_level
+            .iter()
+            .filter(|record| record.source.as_deref() != Some("org"))
+            .count();
+        if user_server_count >= MAX_SERVERS && existing.is_none() && effective_source != "org" {
             bail!("MCP_INVALID: at most {MAX_SERVERS} MCP servers");
         }
         let directory = capability_dir(level, project_path.as_deref(), "servers")?;
@@ -584,6 +626,8 @@ mod tests {
     #[test]
     fn disabled_project_server_shadows_global_server() {
         let global = McpServerRecord {
+            source: None,
+            org_id: None,
             id: "files".into(),
             label: "Files".into(),
             level: Some("global".into()),
