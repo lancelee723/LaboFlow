@@ -189,6 +189,117 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       );`,
     ],
   },
+  {
+    version: 4,
+    name: 'p5-team-spaces',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS spaces (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        archived_at TIMESTAMPTZ,                 -- 归档=只读旗标
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_spaces_team ON spaces(team_id);`,
+      `CREATE TABLE IF NOT EXISTS space_members (
+        space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        perm TEXT NOT NULL DEFAULT 'viewer',     -- viewer | contributor | manager
+        invited_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (space_id, user_id)
+      );`,
+      `CREATE TABLE IF NOT EXISTS space_nodes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+        parent_id UUID REFERENCES space_nodes(id) ON DELETE CASCADE,  -- 根=NULL
+        type TEXT NOT NULL,                      -- folder | md | csv | html | file
+        name TEXT NOT NULL,
+        sort_key INTEGER NOT NULL DEFAULT 0,
+        deleted_at TIMESTAMPTZ,                  -- 回收站=软删
+        deleted_by UUID,
+        created_by UUID,
+        updated_by UUID,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_space_nodes_space ON space_nodes(space_id);`,
+      `CREATE TABLE IF NOT EXISTS space_node_overrides (
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        subject_id UUID NOT NULL,                -- user 或 team id
+        perm TEXT NOT NULL,                      -- viewer | contributor | manager | none（显式 deny）
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (node_id, subject_id)
+      );`,
+      `CREATE TABLE IF NOT EXISTS space_docs (
+        node_id UUID PRIMARY KEY REFERENCES space_nodes(id) ON DELETE CASCADE,
+        current_version INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE TABLE IF NOT EXISTS space_doc_versions (
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        author_id UUID,
+        source TEXT NOT NULL DEFAULT 'human',    -- human | ai-accept | agent-direct
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (node_id, version)           -- 20 版滚动删除在应用层（插入时）
+      );`,
+      `CREATE TABLE IF NOT EXISTS comments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        anchor JSONB,                            -- SPEC §2 锚定模型
+        author_id UUID NOT NULL,
+        body TEXT NOT NULL,
+        parent_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'open',     -- open | resolved
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_comments_node ON comments(node_id);`,
+      `CREATE TABLE IF NOT EXISTS revision_suggestions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        anchor JSONB,
+        original_text TEXT NOT NULL,
+        revised_text TEXT NOT NULL,
+        rationale TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | rejected
+        requested_by UUID NOT NULL,
+        produced_by TEXT NOT NULL DEFAULT 'user', -- user | agent
+        model TEXT,
+        accepted_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        decided_at TIMESTAMPTZ
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_revision_suggestions_node ON revision_suggestions(node_id);`,
+      // per-space seq：bigserial 无法按空间隔离 → composite PK + 事务内 MAX(seq)+1
+      `CREATE TABLE IF NOT EXISTS space_events (
+        space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+        seq BIGINT NOT NULL,
+        type TEXT NOT NULL,                      -- node.* | doc.version | comment.* | revision.* | member.* …
+        payload JSONB NOT NULL DEFAULT '{}',
+        actor_id UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (space_id, seq)
+      );`,
+      `CREATE TABLE IF NOT EXISTS invite_links (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,         -- sha256(token)，明文只在创建瞬间返回
+        perm TEXT NOT NULL DEFAULT 'viewer',
+        access TEXT NOT NULL DEFAULT 'apply',    -- apply | view
+        expires_at TIMESTAMPTZ,
+        max_uses INTEGER,
+        uses INTEGER NOT NULL DEFAULT 0,
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {

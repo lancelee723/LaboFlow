@@ -2162,3 +2162,76 @@ export interface ChannelCapabilities {
   card: boolean;
   replyWindowMs?: number;
 }
+
+/** Module 02: Team Spaces (T52.1-3 server slice; SPEC §2/§3.2). */
+
+export type SpacePerm = "viewer" | "contributor" | "manager";
+
+export type SpaceNodeType = "folder" | "md" | "csv" | "html" | "file";
+
+export type SpaceDocSource = "human" | "ai-accept" | "agent-direct";
+
+/** 文档树节点（GET /spaces/:id/tree 平铺输出，父先于子）。perm = 有效档位（含节点覆盖后的）。 */
+export interface SpaceNode {
+  id: string;
+  spaceId: string;
+  parentId: string | null;
+  type: SpaceNodeType;
+  name: string;
+  sortKey: number;
+  perm: SpacePerm | "none";
+  createdBy: string | null;
+  updatedBy: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+/** MD/CSV 正文（服务端权威 + 版本链）。version=0 表示尚无版本（content 为空）。 */
+export interface SpaceDoc {
+  nodeId: string;
+  version: number;
+  content: string;
+  sha256: string | null;
+  authorId: string | null;
+  source: SpaceDocSource | null;
+  createdAt: string | null;
+  currentVersion: number;
+}
+
+export interface SpaceComment {
+  id: string;
+  nodeId: string;
+  /** SPEC §2 锚定 {kind, paraIndex, textPrefix, textHash} / html block id / csv (row,col)。 */
+  anchor: Record<string, unknown> | null;
+  authorId: string;
+  body: string;
+  parentId: string | null;
+  status: "open" | "resolved";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RevisionSuggestion {
+  id: string;
+  nodeId: string;
+  anchor: Record<string, unknown> | null;
+  originalText: string;
+  revisedText: string;
+  rationale: string;
+  status: "pending" | "accepted" | "rejected";
+  requestedBy: string;
+  producedBy: "user" | "agent";
+  model: string | null;
+  acceptedBy: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+/** space_events 行（WS hub 推流帧与活动流共用；断线重连按 since=seq 增量拉取）。 */
+export interface SpaceEventPayload {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  actorId: string | null;
+  createdAt: string;
+}

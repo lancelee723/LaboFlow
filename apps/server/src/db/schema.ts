@@ -226,3 +226,133 @@ export const orgKbServers = pgTable(
 );
 
 export type OrgKbServer = typeof orgKbServers.$inferSelect;
+
+
+// ---------------------------------------------------------------------------
+// Module 02 团队空间 (T52.1-3, SPEC §2)：spaces / 节点树 / 文档版本 / 评论 /
+// 修订建议 / 事件推流 / 邀请链接。enum-ish 列沿用 text + app-level guards。
+// ---------------------------------------------------------------------------
+
+export const spaces = pgTable('spaces', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  teamId: uuid('team_id').notNull(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const spaceMembers = pgTable(
+  'space_members',
+  {
+    spaceId: uuid('space_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    perm: text('perm').notNull().default('viewer'), // viewer | contributor | manager
+    invitedBy: uuid('invited_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.userId] })],
+);
+
+export const spaceNodes = pgTable('space_nodes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  spaceId: uuid('space_id').notNull(),
+  parentId: uuid('parent_id'), // 根节点为 NULL（自引用 FK 在迁移里加，schema 端不做循环引用）
+  type: text('type').notNull(), // folder | md | csv | html | file
+  name: text('name').notNull(),
+  sortKey: integer('sort_key').notNull().default(0),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }), // 回收站=软删
+  deletedBy: uuid('deleted_by'),
+  createdBy: uuid('created_by'),
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 节点级权限覆盖（subject = user 或 team id）；含显式 none 档（隐藏节点）。 */
+export const spaceNodeOverrides = pgTable(
+  'space_node_overrides',
+  {
+    nodeId: uuid('node_id').notNull(),
+    subjectId: uuid('subject_id').notNull(),
+    perm: text('perm').notNull(), // viewer | contributor | manager | none
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.subjectId] })],
+);
+
+export const spaceDocs = pgTable('space_docs', {
+  nodeId: uuid('node_id').primaryKey(), // md/csv 节点（html 走 y-websocket 快照，file 走卷存储）
+  currentVersion: integer('current_version').notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const spaceDocVersions = pgTable(
+  'space_doc_versions',
+  {
+    nodeId: uuid('node_id').notNull(),
+    version: integer('version').notNull(),
+    content: text('content').notNull(),
+    sha256: text('sha256').notNull(),
+    authorId: uuid('author_id'),
+    source: text('source').notNull().default('human'), // human | ai-accept | agent-direct
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
+);
+
+export const comments = pgTable('comments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  nodeId: uuid('node_id').notNull(),
+  anchor: jsonb('anchor'), // SPEC §2 锚定 {kind, paraIndex, textPrefix, textHash} / html block id / csv (row,col)
+  authorId: uuid('author_id').notNull(),
+  body: text('body').notNull(),
+  parentId: uuid('parent_id'), // 线程回复
+  status: text('status').notNull().default('open'), // open | resolved
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const revisionSuggestions = pgTable('revision_suggestions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  nodeId: uuid('node_id').notNull(),
+  anchor: jsonb('anchor'),
+  originalText: text('original_text').notNull(),
+  revisedText: text('revised_text').notNull(),
+  rationale: text('rationale').notNull().default(''),
+  status: text('status').notNull().default('pending'), // pending | accepted | rejected
+  requestedBy: uuid('requested_by').notNull(),
+  producedBy: text('produced_by').notNull().default('user'), // user | agent
+  model: text('model'),
+  acceptedBy: uuid('accepted_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+});
+
+/** 推流与活动流共用。per-space seq：composite PK + 事务内 MAX(seq)+1 自增。 */
+export const spaceEvents = pgTable(
+  'space_events',
+  {
+    spaceId: uuid('space_id').notNull(),
+    seq: bigint('seq', { mode: 'number' }).notNull(),
+    type: text('type').notNull(), // space.* | node.* | doc.version | comment.* | revision.* | member.* | invite.*
+    payload: jsonb('payload').notNull().default({}),
+    actorId: uuid('actor_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.spaceId, t.seq] })],
+);
+
+export const inviteLinks = pgTable('invite_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  spaceId: uuid('space_id').notNull(),
+  tokenHash: text('token_hash').notNull().unique(), // sha256(token)——明文只在创建瞬间返回一次
+  perm: text('perm').notNull().default('viewer'),
+  access: text('access').notNull().default('apply'), // apply | view
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  maxUses: integer('max_uses'),
+  uses: integer('uses').notNull().default(0),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

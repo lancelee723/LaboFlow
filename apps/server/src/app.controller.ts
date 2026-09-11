@@ -20,6 +20,7 @@ import { canWorkspace } from './workspaces/workspace-rules.js';
 import { DeliverableService, OrgLibraryService, DeliverableError } from './workspaces/library.service.js';
 import { KbServerService, KbError, type KbPatchInput } from './kb/kb.service.js';
 import { SecretBox } from './kb/secret-box.js';
+import { SpaceService, SpaceError } from './spaces/spaces.service.js';
 import { SERVER_VERSION } from './index.js';
 
 /**
@@ -36,6 +37,7 @@ export interface ServerDeps {
   deliverables: DeliverableService;
   library: OrgLibraryService;
   kb: KbServerService;
+  spaces: SpaceService;
 }
 
 type Actor = { userId: string; role: Role; teamId: string | null };
@@ -488,6 +490,221 @@ class CoreController {
     }
   }
 
+  // ----- Module 02 团队空间 (T52.1-3)：权限判定在 SpaceService（space-rules 纯函数） -----
+  /** 统一错误映射：SpaceError.status + 可读 message + 机器可读 code（409 EVERSION/EANCHOR 等）。 */
+  private space<T>(p: Promise<T>): Promise<T> {
+    return p.catch((err: unknown) => {
+      if (err instanceof SpaceError) throw new HttpException({ code: err.code, message: err.message }, err.status);
+      throw err;
+    });
+  }
+
+  /** 团队管理员以上可建空间（镜像 workspace.create 语义）。 */
+  @Post('spaces')
+  @HttpCode(200)
+  async createSpace(@Req() req: FastifyRequest, @Body() body: { teamId?: string; name?: string; description?: string }) {
+    const actor = requireActor(req);
+    const teamId = body.teamId ? String(body.teamId) : actor.teamId;
+    if (!can('workspace.create', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined, targetTeamId: teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可创建空间', 403);
+    }
+    return this.space(this.deps.spaces.createSpace({ userId: actor.userId, teamId: actor.teamId }, {
+      teamId: String(teamId ?? ''), name: String(body.name ?? ''), description: body.description,
+    }));
+  }
+
+  @Get('spaces')
+  async listMySpaces(@Req() req: FastifyRequest) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.listMySpaces(actor.userId));
+  }
+
+  @Patch('spaces/:id')
+  async updateSpace(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: { name?: string; archived?: boolean }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.updateSpace(id, { userId: actor.userId, teamId: actor.teamId }, body));
+  }
+
+  @Post('spaces/:id/members')
+  @HttpCode(200)
+  async addSpaceMember(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: { userId?: string; perm?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.addMember(id, { userId: actor.userId, teamId: actor.teamId }, {
+      userId: String(body.userId ?? ''), perm: String(body.perm ?? 'viewer'),
+    }));
+  }
+
+  @Get('spaces/:id/members')
+  async listSpaceMembers(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.listMembers(id, { userId: actor.userId, teamId: actor.teamId }));
+  }
+
+  @Patch('spaces/:id/members/:uid')
+  async updateSpaceMember(@Req() req: FastifyRequest, @Param('id') id: string, @Param('uid') uid: string, @Body() body: { perm?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.updateMember(id, { userId: actor.userId, teamId: actor.teamId }, uid, {
+      perm: String(body.perm ?? 'viewer'),
+    }));
+  }
+
+  @Delete('spaces/:id/members/:uid')
+  async removeSpaceMember(@Req() req: FastifyRequest, @Param('id') id: string, @Param('uid') uid: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.removeMember(id, { userId: actor.userId, teamId: actor.teamId }, uid));
+  }
+
+  @Post('spaces/:id/nodes')
+  @HttpCode(200)
+  async createSpaceNode(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: { parentId?: string | null; type?: string; name?: string; sortKey?: number }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.createNode(id, { userId: actor.userId, teamId: actor.teamId }, {
+      parentId: body.parentId ?? null, type: String(body.type ?? ''), name: String(body.name ?? ''), sortKey: body.sortKey,
+    }));
+  }
+
+  @Get('spaces/:id/tree')
+  async spaceTree(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.tree(id, { userId: actor.userId, teamId: actor.teamId }));
+  }
+
+  @Patch('spaces/:id/nodes/:nid')
+  async updateSpaceNode(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Body() body: { name?: string; parentId?: string | null; sortKey?: number }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.updateNode(id, { userId: actor.userId, teamId: actor.teamId }, nid, body));
+  }
+
+  /** 软删 → 回收站（子树随父隐藏）。 */
+  @Delete('spaces/:id/nodes/:nid')
+  async deleteSpaceNode(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.deleteNode(id, { userId: actor.userId, teamId: actor.teamId }, nid));
+  }
+
+  @Post('spaces/:id/nodes/:nid/restore')
+  @HttpCode(200)
+  async restoreSpaceNode(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.restoreNode(id, { userId: actor.userId, teamId: actor.teamId }, nid));
+  }
+
+  /** 节点级覆盖（T52.2）：none=显式 deny（隐藏）；manager 专用。 */
+  @Patch('spaces/:id/nodes/:nid/overrides/:subjectId')
+  async setNodeOverride(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Param('subjectId') subjectId: string, @Body() body: { perm?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.setNodeOverride(id, { userId: actor.userId, teamId: actor.teamId }, nid, subjectId, {
+      perm: String(body.perm ?? ''),
+    }));
+  }
+
+  @Delete('spaces/:id/nodes/:nid/overrides/:subjectId')
+  async clearNodeOverride(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Param('subjectId') subjectId: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.clearNodeOverride(id, { userId: actor.userId, teamId: actor.teamId }, nid, subjectId));
+  }
+
+  @Get('spaces/:id/nodes/:nid/doc')
+  async getSpaceDoc(@Req() req: FastifyRequest & { query: Record<string, string> }, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    const v = (req.query as { version?: string }).version;
+    const version = v !== undefined && v !== '' ? Number(v) : undefined;
+    return this.space(this.deps.spaces.getDoc(id, { userId: actor.userId, teamId: actor.teamId }, nid, Number.isFinite(version) ? version : undefined));
+  }
+
+  /** 乐观锁保存：{content, baseVersion}；冲突 409 EVERSION。 */
+  @Put('spaces/:id/nodes/:nid/doc')
+  async putSpaceDoc(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Body() body: { content?: string; baseVersion?: number; source?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.saveDoc(id, { userId: actor.userId, teamId: actor.teamId }, nid, {
+      content: String(body.content ?? ''), baseVersion: Number(body.baseVersion ?? 0), source: body.source,
+    }));
+  }
+
+  @Get('spaces/:id/nodes/:nid/comments')
+  async listComments(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.listComments(id, { userId: actor.userId, teamId: actor.teamId }, nid));
+  }
+
+  @Post('spaces/:id/nodes/:nid/comments')
+  @HttpCode(200)
+  async createComment(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Body() body: { body?: string; anchor?: unknown }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.createComment(id, { userId: actor.userId, teamId: actor.teamId }, nid, {
+      body: String(body.body ?? ''), anchor: body.anchor,
+    }));
+  }
+
+  @Post('spaces/:id/nodes/:nid/comments/:cid/reply')
+  @HttpCode(200)
+  async replyComment(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Param('cid') cid: string, @Body() body: { body?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.replyComment(id, { userId: actor.userId, teamId: actor.teamId }, nid, cid, {
+      body: String(body.body ?? ''),
+    }));
+  }
+
+  @Post('spaces/:id/nodes/:nid/comments/:cid/resolve')
+  @HttpCode(200)
+  async resolveComment(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Param('cid') cid: string, @Body() body: { status?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.resolveComment(id, { userId: actor.userId, teamId: actor.teamId }, nid, cid, {
+      status: body.status ?? 'resolved',
+    }));
+  }
+
+  @Get('spaces/:id/nodes/:nid/revisions')
+  async listRevisions(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.listRevisions(id, { userId: actor.userId, teamId: actor.teamId }, nid));
+  }
+
+  @Post('spaces/:id/nodes/:nid/revisions')
+  @HttpCode(200)
+  async createRevision(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Body() body: {
+    anchor?: unknown; originalText?: string; revisedText?: string; rationale?: string; producedBy?: string; model?: string;
+  }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.createRevision(id, { userId: actor.userId, teamId: actor.teamId }, nid, {
+      anchor: body.anchor, originalText: String(body.originalText ?? ''), revisedText: String(body.revisedText ?? ''),
+      rationale: body.rationale, producedBy: body.producedBy, model: body.model,
+    }));
+  }
+
+  /** 接受=事务内重读正文做锚定替换（原文不匹配 409 EANCHOR），提交 source='ai-accept' 新版本。 */
+  @Post('spaces/:id/nodes/:nid/revisions/:rid/decide')
+  @HttpCode(200)
+  async decideRevision(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Param('rid') rid: string, @Body() body: { decision?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.decideRevision(id, { userId: actor.userId, teamId: actor.teamId }, nid, rid, {
+      decision: String(body.decision ?? ''),
+    }));
+  }
+
+  /** 推流增量拉取（WS hub 复用同一游标语义），ordered asc、capped 200。 */
+  @Get('spaces/:id/events')
+  async spaceEvents(@Req() req: FastifyRequest & { query: Record<string, string> }, @Param('id') id: string) {
+    const actor = requireActor(req);
+    const since = Number((req.query as { since?: string }).since ?? -1);
+    return this.space(this.deps.spaces.listEvents(id, { userId: actor.userId, teamId: actor.teamId }, Number.isFinite(since) ? since : -1));
+  }
+
+  /** 邀请链接：token 明文仅此一次返回，服务端只存 sha256（SPEC §4）。 */
+  @Post('spaces/:id/invites')
+  @HttpCode(200)
+  async createInvite(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: { perm?: string; access?: string; expiresInDays?: number; maxUses?: number | null }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.createInvite(id, { userId: actor.userId, teamId: actor.teamId }, body));
+  }
+
+  @Post('invites/redeem')
+  @HttpCode(200)
+  async redeemInvite(@Req() req: FastifyRequest, @Body() body: { token?: string }) {
+    const actor = requireActor(req);
+    return this.space(this.deps.spaces.redeemInvite({ userId: actor.userId, teamId: actor.teamId }, { token: String(body.token ?? '') }));
+  }
+
   // ----- T2.6 workspaces & shared sessions -----
   @Post('workspaces')
   async createWorkspace(@Req() req: FastifyRequest, @Body() body: { teamId?: string; name?: string; description?: string }) {
@@ -706,9 +923,10 @@ export async function bootstrap(options: {
   const pool = new Pool({ connectionString: options.databaseUrl, max: 5 });
   const db = drizzle(pool);
   await migrate(db);
+  const auth = new AuthService(db, options.jwtSecret);
   const deps: ServerDeps = {
     db,
-    auth: new AuthService(db, options.jwtSecret),
+    auth,
     gateway: new GatewayService({ db, upstreamFetch: options.upstreamFetch }),
     workspaces: new WorkspaceService(db),
     deliverables: new DeliverableService(db, options.storageDir ?? './storage'),
@@ -717,6 +935,7 @@ export async function bootstrap(options: {
       options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
       options.jwtSecret,
     )),
+    spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail)),
   };
 
   @Controller()
