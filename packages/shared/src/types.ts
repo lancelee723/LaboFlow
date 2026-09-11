@@ -1658,6 +1658,10 @@ export type ComposerPastedFile = {
 export type AppVersionInfo = {
   name: string;
   version: string;
+  /** Marketing display name ("LaboFlow Desktop"); `name` stays the process identity. */
+  displayName?: string;
+  /** Product version codename ("Alpha-1.0.0"); `version` stays the build semver. */
+  displayVersion?: string;
   protocolVersion: number;
   hostProtocolVersion?: number;
   hostVersion?: string;
@@ -2023,3 +2027,36 @@ export type OrgQuotaRemaining = {
   generatedAt?: string;
 };
 
+/** Module 01: expert / expert-team shared renderer-main types. */
+
+export interface ExpertInvocation {
+  /** Session that requested the dispatch (receives the completion card). */
+  sessionId?: string;
+  expertId: string;
+  task: string;
+}
+
+export interface TeamPlanSubtask {
+  expert: string;
+  brief: string;
+  dependsOn: number[];
+}
+
+export interface TeamPlan {
+  subtasks: TeamPlanSubtask[];
+  riskNotes?: string;
+}
+
+export type ExpertTeamProgressType =
+  | "plan"
+  | "dispatch"
+  | "member"
+  | "integrated"
+  | "failed";
+
+export interface ExpertTeamProgress {
+  runId: string;
+  sessionId?: string;
+  type: ExpertTeamProgressType;
+  payload: Record<string, unknown>;
+}

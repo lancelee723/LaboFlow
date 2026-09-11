@@ -3,6 +3,12 @@ export const SCHEMA_VERSION = 13 as const;
 export const APP_ID = "com.laboflow.app";
 export const APP_NAME = "LaboFlow";
 export const APP_VERSION = "0.14.5";
+/** Official product name shown to users (About page); APP_NAME stays the
+ * process/userData identity so existing installations keep their data. */
+export const APP_DISPLAY_NAME = "LaboFlow Desktop";
+/** Product version codename shown to users; APP_VERSION stays the build semver
+ * the updater compares against. */
+export const APP_DISPLAY_VERSION = "Alpha-1.0.0";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -110,6 +116,19 @@ export const IPC = {
     scheduledUpdate: "pi-desktop/scheduled/update",
     scheduledDelete: "pi-desktop/scheduled/delete",
     scheduledRun: "pi-desktop/scheduled/run",
+    expertList: "pi-desktop/expert/list",
+    expertGet: "pi-desktop/expert/get",
+    expertSave: "pi-desktop/expert/save",
+    expertDelete: "pi-desktop/expert/delete",
+    expertToggle: "pi-desktop/expert/toggle",
+    expertInvoke: "pi-desktop/expert/invoke",
+    expertTeamsList: "pi-desktop/expertTeams/list",
+    expertTeamGet: "pi-desktop/expertTeams/get",
+    expertTeamSave: "pi-desktop/expertTeams/save",
+    expertTeamDelete: "pi-desktop/expertTeams/delete",
+    expertTeamInvoke: "pi-desktop/expertTeams/invoke",
+    expertTeamConfirmPlan: "pi-desktop/expertTeams/confirmPlan",
+    expertTeamRetryMember: "pi-desktop/expertTeams/retryMember",
     toolResolvePermission: "pi-desktop/tool/resolvePermission",
     askToolResolve: "pi-desktop/agent/askTool/resolve",
     plansPending: "pi-desktop/plans/pending",
@@ -255,6 +274,7 @@ export const IPC = {
     notificationActivated: "pi-desktop/notification/event/activated",
     plansChanged: "pi-desktop/plans/event/changed",
     providersOauth: "pi-desktop/providers/oauth/event",
+    expertTeamRun: "pi-desktop/expert/event/teamRun",
     updatesState: "pi-desktop/updates/event/state",
   },
 } as const;

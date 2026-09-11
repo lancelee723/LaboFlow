@@ -43,6 +43,8 @@ export interface HeadlessRunResult {
   status: HeadlessRunStatus;
   errorCode?: string;
   finalText: string;
+  /** Turn token usage when the event stream reported it (team budgets). */
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
 }
 
 export interface HeadlessRunHandle {
@@ -88,7 +90,11 @@ export interface HeadlessDriverDeps {
   consumeTurnSettlement(
     sessionId: string,
     turnId: string,
-  ): { status: HeadlessRunStatus; errorCode?: string } | undefined;
+  ): {
+    status: HeadlessRunStatus;
+    errorCode?: string;
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  } | undefined;
   activeTurns: Map<string, any>;
   activeTurnUsages: Map<string, any>;
   sendToRenderer(channel: string, payload: unknown): void;
@@ -395,6 +401,7 @@ export function createHeadlessAgentDriver(
           turnId,
           status: settled.status,
           ...(settled.errorCode ? { errorCode: settled.errorCode } : {}),
+          ...(settled.usage ? { usage: settled.usage } : {}),
           finalText: lastAssistantText(detail?.session?.messages),
         };
         deps.logger.app("session", "info", "headless run settled", {

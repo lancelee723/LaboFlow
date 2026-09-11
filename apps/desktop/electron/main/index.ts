@@ -38,6 +38,8 @@ import {
   beginDurableTurnAndPrompt,
   createHeadlessAgentDriver,
 } from "./headless-agent-driver";
+import { ExpertService } from "./expert-service";
+import { TeamRunner } from "./team-runner";
 import { listInstalledFonts } from "./system-fonts";
 import {
   applyNetworkProxyFromAppSettings,
@@ -48,6 +50,8 @@ import {
   APP_ID,
   APP_NAME,
   APP_VERSION,
+  APP_DISPLAY_NAME,
+  APP_DISPLAY_VERSION,
   APP_MENU_COMMANDS,
   assertFeedbackIssueUrl,
   buildBugReportUrl,
@@ -2268,7 +2272,11 @@ const turnSettlements = new Map<string, Set<() => void>>();
 /** Settlement outcome per turn, consumed by the headless driver (T53.1). */
 const turnSettlementResults = new Map<
   string,
-  { status: "completed" | "aborted" | "error"; errorCode?: string }
+  {
+    status: "completed" | "aborted" | "error";
+    errorCode?: string;
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  }
 >();
 const turnFinalizations = new Map<string, Promise<void>>();
 /** sessionId -> last assistant usage recorded for active turn */
@@ -2309,7 +2317,11 @@ function planSubmissionTurnKey(sessionId: string, turnId: string) {
 function consumeTurnSettlement(
   sessionId: string,
   turnId: string,
-): { status: "completed" | "aborted" | "error"; errorCode?: string } | undefined {
+): {
+  status: "completed" | "aborted" | "error";
+  errorCode?: string;
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+} | undefined {
   const key = planSubmissionTurnKey(sessionId, turnId);
   const value = turnSettlementResults.get(key);
   if (value) turnSettlementResults.delete(key);
@@ -4640,6 +4652,106 @@ const headlessAgentDriver = createHeadlessAgentDriver({
   logger,
 });
 
+async function postSessionCard(
+  sessionId: string,
+  message: {
+    id: string;
+    role: "assistant";
+    content: string;
+    createdAt: string;
+    status: "complete";
+    kind?: string;
+  },
+): Promise<void> {
+  if (!host) throw new Error("backend unavailable");
+  await host.call("session.appendMessage", { sessionId, message });
+  sendToRenderer(IPC.event.agentMessage, {
+    sessionId,
+    ts: Date.now(),
+    event: { type: "message_start", message },
+  } satisfies AgentEventEnvelope);
+  sendToRenderer(IPC.event.agentMessage, {
+    sessionId,
+    ts: Date.now(),
+    event: { type: "message_end", message },
+  } satisfies AgentEventEnvelope);
+}
+
+// Expert center (module 01): experts are independent agents — @指派 and team
+// members run on background sessions via the headless driver, results land
+// back in the requesting session as completion cards.
+const expertService = new ExpertService({
+  getHost: () => host,
+  getLogger: () => logger,
+  getDriver: () => headlessAgentDriver,
+  broadcast: (event) => sendToRenderer(IPC.event.expertTeamRun, event),
+  postSessionCard,
+});
+
+async function getOneShotProvider(): Promise<{
+  provider: RuntimeProviderConfig;
+  thinkingLevel: ThinkingLevel;
+} | null> {
+  if (!host || !sidecar) return null;
+  try {
+    const settings = await host.call<any>("settings.get");
+    const launch = await resolveAgentRuntimeLaunch(
+      `team-leader:${crypto.randomUUID()}`,
+      {},
+      settings,
+      { mode: "agent" },
+    );
+    const provider = {
+      ...launch.sidecarParams.provider,
+      ...(launch.sidecarParams.provider.authKind === OAUTH_AUTH_KIND
+        ? { resolveAuth: () => vendorOAuth.resolveAuth(launch.providerId) }
+        : {}),
+    } as RuntimeProviderConfig;
+    return {
+      provider,
+      thinkingLevel: launch.sidecarParams.thinkingLevel as ThinkingLevel,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const teamRunner = new TeamRunner({
+  getLogger: () => logger,
+  getDriver: () => headlessAgentDriver,
+  getOneShotProvider,
+  resolveTeam: async (teamId) => {
+    const teams = await expertService.listTeams();
+    const team = teams.find((item) => item.id === teamId || item.name === teamId);
+    if (!team) return null;
+    const read = await host!
+      .call<{ team: Record<string, unknown> | null; body: string | null }>(
+        "expertTeams.read",
+        { id: team.id },
+      )
+      .catch(() => ({ team: null, body: null }));
+    return {
+      name: team.name,
+      description: team.description,
+      members: team.members,
+      leaderStyle: team.leaderStyle,
+      integration: team.integration,
+      budgetTokens: team.budgetTokens,
+      body: read.body ?? "",
+    };
+  },
+  resolvePersona: (id) => expertService.resolvePersona(id),
+  broadcast: (event) => sendToRenderer(IPC.event.expertTeamRun, event),
+  postSessionCard,
+  getProjectPath: async (sessionId) => {
+    if (!sessionId || !host) return undefined;
+    const detail = await host
+      .call<{ session?: { projectPath?: string } }>("session.get", { id: sessionId })
+      .catch(() => undefined);
+    return detail?.session?.projectPath;
+  },
+});
+
 function wireSidecar(s: AgentSidecar) {
   s.onNotification((method, params) => {
     if (method === "agent.event") {
@@ -4972,12 +5084,13 @@ function finishTurn(
       ? planSubmissionTurnIds.has(turnKey)
       : false;
 
+    let turnUsage: MessageUsage | undefined;
     try {
       if (host && turnId) {
         const createNotification =
           options.createNotification ??
           (!wasPlanSubmission && shouldCreateTaskNotification(sessionId));
-        const turnUsage = activeTurnUsages.get(sessionId);
+        turnUsage = activeTurnUsages.get(sessionId);
         activeTurnUsages.delete(sessionId);
         try {
           const result = await host.call<{
@@ -5039,7 +5152,17 @@ function finishTurn(
       }
       if (turnKey) {
         planSubmissionTurnIds.delete(turnKey);
-        turnSettlementResults.set(turnKey, { status, errorCode });
+        turnSettlementResults.set(turnKey, {
+          status,
+          errorCode,
+          usage: turnUsage
+            ? {
+                inputTokens: turnUsage.inputTokens,
+                outputTokens: turnUsage.outputTokens,
+                totalTokens: turnUsage.totalTokens,
+              }
+            : undefined,
+        });
         if (turnSettlementResults.size > 200) {
           const oldest = turnSettlementResults.keys().next().value;
           if (oldest !== undefined) turnSettlementResults.delete(oldest);
@@ -5618,6 +5741,11 @@ async function bootBackends() {
   }
   await startSidecar();
 
+  // Refresh the models.dev catalog in the background so model limits (e.g. a
+  // newly released model's real context window) converge without waiting for
+  // the settings button. Failure is silent: the bundled snapshot stays loaded.
+  void modelsDevCatalog.refresh().catch(() => undefined);
+
   // Keep plugin host services wired to live workspace / app metadata.
   plugins.setServices({
     getWorkspacePath: () => {
@@ -5750,6 +5878,8 @@ function registerIpc() {
     return {
       name: APP_NAME,
       version: APP_VERSION,
+      displayName: APP_DISPLAY_NAME,
+      displayVersion: APP_DISPLAY_VERSION,
       protocolVersion: PROTOCOL_VERSION,
       hostProtocolVersion: hostVersion?.protocolVersion,
       hostVersion: hostVersion?.version,
@@ -7814,6 +7944,83 @@ function registerIpc() {
       });
     return res;
   });
+
+  // Expert center (module 01)
+  handle(IPC.invoke.expertList, async () => expertService.list());
+  handle(
+    IPC.invoke.expertGet,
+    async (req: { id: string }) => expertService.get(String(req?.id ?? "").trim()),
+  );
+  handle(IPC.invoke.expertSave, async (input: Record<string, unknown>) =>
+    expertService.save(input ?? {}),
+  );
+  handle(IPC.invoke.expertDelete, async (req: { id: string }) =>
+    expertService.delete(String(req?.id ?? "").trim()),
+  );
+  handle(
+    IPC.invoke.expertToggle,
+    async (req: { id: string; enabled: boolean }) =>
+      expertService.toggle(String(req?.id ?? "").trim(), req?.enabled === true),
+  );
+  handle(
+    IPC.invoke.expertInvoke,
+    async (req: { sessionId?: string; expertId: string; task: string }) =>
+      expertService.invoke({
+        sessionId: req?.sessionId,
+        expertId: String(req?.expertId ?? "").trim(),
+        task: String(req?.task ?? "").trim(),
+      }),
+  );
+  handle(IPC.invoke.expertTeamsList, async () => expertService.listTeams());
+  handle(
+    IPC.invoke.expertTeamGet,
+    async (req: { id: string }) => {
+      if (!host) throw new Error("host unavailable");
+      return host.call("expertTeams.read", { id: String(req?.id ?? "").trim() });
+    },
+  );
+  handle(IPC.invoke.expertTeamSave, async (input: Record<string, unknown>) => {
+    if (!host) throw new Error("host unavailable");
+    const name = String(input?.name ?? "").trim();
+    if (!name) throw new Error("EXPERT_INVALID: name is required");
+    const payload = {
+      name,
+      description: input.description,
+      members: input.members,
+      leaderStyle: input.leaderStyle,
+      integration: input.integration,
+      budgetTokens: input.budgetTokens,
+      body: input.body,
+    };
+    const existing = await host.call<{ teams: Array<{ id: string; name: string }> }>(
+      "expertTeams.list",
+    );
+    const isUpdate = existing.teams.some((team) => team.name === name);
+    return isUpdate
+      ? host.call("expertTeams.update", { id: name, team: payload })
+      : host.call("expertTeams.create", { team: payload });
+  });
+  handle(IPC.invoke.expertTeamDelete, async (req: { id: string }) => {
+    if (!host) throw new Error("host unavailable");
+    return host.call("expertTeams.remove", { id: String(req?.id ?? "").trim() });
+  });
+  handle(
+    IPC.invoke.expertTeamInvoke,
+    async (req: { sessionId?: string; teamId: string; task: string }) =>
+      teamRunner.invoke({
+        sessionId: req?.sessionId,
+        teamId: String(req?.teamId ?? "").trim(),
+        task: String(req?.task ?? "").trim(),
+      }),
+  );
+  handle(
+    IPC.invoke.expertTeamRetryMember,
+    async (req: { runId: string; index: number }) =>
+      teamRunner.retryMember({
+        runId: String(req?.runId ?? "").trim(),
+        index: Number(req?.index ?? -1),
+      }),
+  );
 
   handle(IPC.invoke.promptEnhance, async (req: PromptEnhancementRequest) => {
     if (!host) throw new Error("backend unavailable");
