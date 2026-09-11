@@ -319,6 +319,33 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       );`,
     ],
   },
+  {
+    version: 6,
+    name: 'p5-wechat-mp-relay',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS wechat_mp_bots (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id TEXT NOT NULL DEFAULT 'default',  -- 单租户：一次部署 = 一个组织
+        name TEXT NOT NULL,
+        app_id TEXT NOT NULL,                    -- 公众号 AppID（回调 ToUserName 匹配键）
+        app_secret_enc TEXT NOT NULL,            -- AES-256-GCM 密文（kb/secret-box.ts）
+        encoding_aes_key_enc TEXT,               -- 安全模式 EncodingAESKey 密文；NULL=明文模式
+        token TEXT NOT NULL,                     -- 回调验签令牌（验签材料，非机密）
+        allow_user_ids JSONB NOT NULL DEFAULT '[]', -- 绑定接收/发送的桌面用户
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (org_id, app_id)
+      );`,
+      `CREATE TABLE IF NOT EXISTS wechat_mp_pending (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        bot_id UUID NOT NULL REFERENCES wechat_mp_bots(id) ON DELETE CASCADE,
+        payload JSONB NOT NULL,                  -- 消息元数据（SPEC §2.2 bot_pending：≤24h、取走即删）
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_wechat_mp_pending_bot ON wechat_mp_pending(bot_id, created_at);`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {

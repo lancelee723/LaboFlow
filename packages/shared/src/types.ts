@@ -2095,9 +2095,9 @@ export interface KbUrlEntry {
   orgId?: string;
 }
 
-/** Module 04: IM channels (feishu / wecom intelligent bots). */
+/** Module 04: IM channels (feishu / wecom intelligent bots / wechat_mp 公众号中继). */
 
-export type ChannelProvider = "feishu" | "wecom";
+export type ChannelProvider = "feishu" | "wecom" | "wechat_mp";
 
 export type ChannelAccountScope = "p2p" | "group" | "both";
 

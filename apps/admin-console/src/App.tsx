@@ -7,6 +7,7 @@ import { WorkspacesPage } from './pages/Workspaces.js';
 import { ChannelsPage } from './pages/Channels.js';
 import { KnowledgeBasePage } from './pages/KnowledgeBase.js';
 import { ExpertPacksPage } from './pages/ExpertPacks.js';
+import { WeChatMpPage } from './pages/WeChatMp.js';
 import { QuotaPage } from './pages/Quota.js';
 import { LibraryPage } from './pages/Library.js';
 import { AuditPage } from './pages/Audit.js';
@@ -25,6 +26,7 @@ const PAGES = [
   { id: 'channels', label: '模型渠道', render: () => <ChannelsPage /> },
   { id: 'kb', label: '知识库', render: () => <KnowledgeBasePage /> },
   { id: 'experts', label: '专家库', render: () => <ExpertPacksPage /> },
+  { id: 'wechatmp', label: '公众号通道', render: () => <WeChatMpPage /> },
   { id: 'quota', label: '配额管理', render: () => <QuotaPage /> },
   { id: 'library', label: '组织资产', render: () => <LibraryPage /> },
   { id: 'audit', label: '审计日志', render: () => <AuditPage /> },

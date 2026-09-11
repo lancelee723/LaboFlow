@@ -384,3 +384,44 @@ export const inviteLinks = pgTable('invite_links', {
   createdBy: uuid('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+
+// ---------------------------------------------------------------------------
+// Module 04 微信公众号中继 (T54.7-9, FR-IM-11/12/13, SPEC §2.2/§3.4)：
+// wechat_mp_bots = 公众号凭证 + 桌面绑定（app_secret/EncodingAESKey 经
+// SecretBox AES-256-GCM 静态加密，表只存密文）；wechat_mp_pending = 离线暂存
+// （≤24h 清理、轮询取走即删；在线走服务端内存热队列不落库）。
+// ---------------------------------------------------------------------------
+
+export const wechatMpBots = pgTable(
+  'wechat_mp_bots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: text('org_id').notNull().default('default'), // 单租户：一次部署 = 一个组织（rbac.ts 同语义）
+    name: text('name').notNull(),
+    appId: text('app_id').notNull(), // 公众号 AppID（回调 XML ToUserName 匹配键）
+    appSecretEnc: text('app_secret_enc').notNull(), // AES-256-GCM 密文（kb/secret-box.ts）
+    encodingAesKeyEnc: text('encoding_aes_key_enc'), // 安全模式 AESKey 密文；NULL=明文模式
+    token: text('token').notNull(), // 回调验签令牌（验签材料，非机密，原文存储）
+    allowUserIds: jsonb('allow_user_ids').notNull().default([]), // 绑定接收/发送的桌面用户
+    enabled: boolean('enabled').notNull().default(true),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uniq_wechat_mp_bot_app').on(t.orgId, t.appId)],
+);
+
+export type WechatMpBot = typeof wechatMpBots.$inferSelect;
+
+export const wechatMpPending = pgTable(
+  'wechat_mp_pending',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    botId: uuid('bot_id')
+      .notNull()
+      .references(() => wechatMpBots.id, { onDelete: 'cascade' }),
+    payload: jsonb('payload').notNull(), // {botId, appId, fromUser, msgType, content, msgId, createTime, receivedAt}（元数据，无附件密文体）
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_wechat_mp_pending_bot').on(t.botId, t.createdAt)],
+);

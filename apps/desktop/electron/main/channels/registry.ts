@@ -59,7 +59,8 @@ export interface ChannelRegistryDeps {
   /** Agent execution engine (createHeadlessAgentDriver in index.ts). */
   getDriver(): ChannelDriver | null;
   getLogger(): ChannelLogger;
-  adapters: Record<ChannelProvider, ChannelAdapterFactory>;
+  /** Adapter factories per provider; partial so new providers (wechat_mp) can register without touching index.ts all at once. */
+  adapters: Partial<Record<ChannelProvider, ChannelAdapterFactory>>;
   /** Secret holder (createChannelCredentialStore from credential-store.ts). */
   credentialStore: ChannelCredentialStore;
   /** Module 03 hook: fired after a message passes scope + allowlist. */
@@ -194,7 +195,7 @@ export class ChannelRegistry {
   }
 
   async save(input: ChannelAccountSaveInput): Promise<ChannelAccountView> {
-    if (input.provider !== "feishu" && input.provider !== "wecom") {
+    if (input.provider !== "feishu" && input.provider !== "wecom" && input.provider !== "wechat_mp") {
       throw new Error(`unsupported channel provider: ${String(input.provider)}`);
     }
     const existing = input.id ? this.accounts.get(input.id) : undefined;
@@ -438,7 +439,7 @@ export interface ChannelRegistryHostDeps {
   getLogger(): ChannelLogger;
   getDriver(): ChannelDriver | null;
   /** Adapter factories for every supported provider (main wires the real ones). */
-  adapters: Record<ChannelProvider, ChannelAdapterFactory>;
+  adapters: Partial<Record<ChannelProvider, ChannelAdapterFactory>>;
   /** Secret holder — pass `createChannelCredentialStore()` here. */
   credentialStore: ChannelCredentialStore;
   /** Renderer broadcast (wired to `IPC.event.channelState` via sendToRenderer). */

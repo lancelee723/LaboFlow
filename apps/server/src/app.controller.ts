@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, HttpException, HttpCode, Module, SetMetadata } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, HttpException, HttpCode, Module, SetMetadata } from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import websocketPlugin from '@fastify/websocket';
 import { AuthGuard } from './auth/auth.guard.js';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
-import type { FastifyRequest, FastifyInstance } from 'fastify';
+import type { FastifyRequest, FastifyInstance, FastifyReply } from 'fastify';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { migrate } from './db/migrate.js';
@@ -22,6 +22,8 @@ import { KbServerService, KbError, type KbPatchInput } from './kb/kb.service.js'
 import { SecretBox } from './kb/secret-box.js';
 import { ExpertPackService, ExpertPackError } from './experts/expert-packs.service.js';
 import { SpaceService, SpaceError } from './spaces/spaces.service.js';
+import { WechatMpService, WechatMpError, type WechatMpUpsertInput } from './wechat/wechat-mp.service.js';
+import type { WechatFetchLike } from './wechat/wechat-mp.client.js';
 import { SERVER_VERSION } from './index.js';
 
 /**
@@ -40,6 +42,7 @@ export interface ServerDeps {
   kb: KbServerService;
   expertPacks: ExpertPackService;
   spaces: SpaceService;
+  wechatMp: WechatMpService;
 }
 
 type Actor = { userId: string; role: Role; teamId: string | null };
@@ -768,6 +771,128 @@ class CoreController {
     return this.space(this.deps.spaces.redeemInvite({ userId: actor.userId, teamId: actor.teamId }, { token: String(body.token ?? '') }));
   }
 
+  // ----- Module 04 微信公众号中继 (T54.7-9, FR-IM-11/12/13, SPEC §2.2/§3.4) -----
+  /** 统一错误映射：WechatMpError.status + 可读 message + 机器可读 code（镜像 space()）。 */
+  private wechat<T>(p: Promise<T>): Promise<T> {
+    return p.catch((err: unknown) => {
+      if (err instanceof WechatMpError) throw new HttpException({ code: err.code, message: err.message }, err.status);
+      throw err;
+    });
+  }
+
+  /**
+   * URL 验证（微信「服务器配置」提交时调用）：echostr+timestamp+nonce+token →
+   * SHA1 排序拼接比对 → 原样返回 echostr（纯文本）。任一启用 bot 的 token
+   * 命中即通过。必须挂在 JWT 鉴权之前（isPublic）。
+   */
+  @Get('bots/webhook/wechat')
+  @SetMetadata('isPublic', true)
+  async wechatMpVerify(@Req() req: FastifyRequest & { query?: Record<string, string> }, @Res() reply: FastifyReply): Promise<void> {
+    const q = req.query ?? {};
+    const echo = await this.wechat(this.deps.wechatMp.verifyUrlChallenge(q));
+    reply.header('content-type', 'text/plain; charset=utf-8');
+    if (echo === null) {
+      reply.code(403).send('verification failed');
+      return;
+    }
+    reply.send(echo);
+  }
+
+  /**
+   * 消息回调（XML，明文/安全模式）：验签 → AES-256-CBC 解密 → MsgId 去重 →
+   * 路由到绑定桌面客户端（在线=内存热队列 / 离线=wechat_mp_pending ≤24h）。
+   * 恒 200 'success' 快速 ACK（5s 限制）；「任务已开始」/最终结果经客服消息
+   * 异步送达（用户消息开启 48h/5 条窗口，见 WechatMpService 类注释）。
+   */
+  @Post('bots/webhook/wechat')
+  @SetMetadata('isPublic', true)
+  async wechatMpIngest(@Req() req: FastifyRequest & { query?: Record<string, string>; body?: unknown }, @Res() reply: FastifyReply): Promise<void> {
+    const q = req.query ?? {};
+    const result = await this.wechat(
+      this.deps.wechatMp.handleIngest({
+        body: typeof req.body === 'string' ? req.body : '',
+        signature: q.signature,
+        msgSignature: q.msg_signature,
+        timestamp: q.timestamp,
+        nonce: q.nonce,
+      }),
+    );
+    reply.header('content-type', 'text/plain; charset=utf-8');
+    reply.code(result.status).send(result.reply);
+  }
+
+  /** 公众号接入 CRUD（sys_admin，channel.manage）：凭证只存密文，DTO 只回尾 4 位。 */
+  @Post('org/wechat-mp/bots')
+  @HttpCode(200)
+  async createWechatMpBot(@Req() req: FastifyRequest, @Body() body: WechatMpUpsertInput) {
+    const actor = requireActor(req);
+    if (!can('channel.manage', { actorRole: actor.role })) throw new HttpException('仅系统管理员可管理公众号接入', 403);
+    try {
+      const dto = await this.deps.wechatMp.create(body, actor.userId);
+      await this.deps.auth.audit(actor.userId, 'wechatMp.bot.create', dto.name, { id: dto.id, appId: dto.appId });
+      return dto;
+    } catch (err) {
+      if (err instanceof WechatMpError) throw new HttpException({ code: err.code, message: err.message }, err.status);
+      throw err;
+    }
+  }
+
+  @Get('org/wechat-mp/bots')
+  async listWechatMpBots(@Req() req: FastifyRequest) {
+    const actor = requireActor(req);
+    if (!can('channel.manage', { actorRole: actor.role })) throw new HttpException('仅系统管理员可查看公众号接入', 403);
+    return this.deps.wechatMp.list();
+  }
+
+  @Patch('org/wechat-mp/bots/:id')
+  @HttpCode(200)
+  async updateWechatMpBot(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: WechatMpUpsertInput) {
+    const actor = requireActor(req);
+    if (!can('channel.manage', { actorRole: actor.role })) throw new HttpException('仅系统管理员可管理公众号接入', 403);
+    try {
+      const dto = await this.deps.wechatMp.update(id, body);
+      await this.deps.auth.audit(actor.userId, 'wechatMp.bot.update', dto.name, {
+        id: dto.id,
+        fields: Object.keys(body ?? {}).filter((k) => k !== 'appSecret' && k !== 'encodingAesKey'), // 凭证明文不入审计
+        secretRotated: Boolean(body?.appSecret),
+        aesKeyRotated: Boolean(body?.encodingAesKey),
+      });
+      return dto;
+    } catch (err) {
+      if (err instanceof WechatMpError) throw new HttpException({ code: err.code, message: err.message }, err.status);
+      throw err;
+    }
+  }
+
+  @Delete('org/wechat-mp/bots/:id')
+  async deleteWechatMpBot(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    if (!can('channel.manage', { actorRole: actor.role })) throw new HttpException('仅系统管理员可管理公众号接入', 403);
+    try {
+      const removed = await this.deps.wechatMp.remove(id);
+      await this.deps.auth.audit(actor.userId, 'wechatMp.bot.delete', removed.name, { id });
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof WechatMpError) throw new HttpException({ code: err.code, message: err.message }, err.status);
+      throw err;
+    }
+  }
+
+  /** 客户端配对轮询（JWT）：返回并清除该用户可取的暂存消息；5s 一次（v1 轮询传输）。 */
+  @Get('org/wechat-mp/pending')
+  async wechatMpPending(@Req() req: FastifyRequest) {
+    const actor = requireActor(req);
+    return this.wechat(this.deps.wechatMp.pollPending(actor));
+  }
+
+  /** 出站客服消息（JWT，绑定用户）：{botId|appId, toUser(openid), text}；>2048B 服务端分片。 */
+  @Post('org/wechat-mp/send')
+  @HttpCode(200)
+  async wechatMpSend(@Req() req: FastifyRequest, @Body() body: { botId?: string; appId?: string; toUser?: string; text?: string }) {
+    const actor = requireActor(req);
+    return this.wechat(this.deps.wechatMp.send(actor, body));
+  }
+
   // ----- T2.6 workspaces & shared sessions -----
   @Post('workspaces')
   async createWorkspace(@Req() req: FastifyRequest, @Body() body: { teamId?: string; name?: string; description?: string }) {
@@ -982,6 +1107,8 @@ export async function bootstrap(options: {
   storageDir?: string;
   /** AES-256-GCM master key material for secrets at rest (kb servers); falls back to SERVER_ENCRYPTION_KEY, then derives from jwtSecret */
   serverEncryptionKey?: string;
+  /** Module 04: injectable fetch for the WeChat MP outbound client (tests). */
+  wechatFetch?: WechatFetchLike;
 }): Promise<{ app: INestApplication; deps: ServerDeps; port: number }> {
   const pool = new Pool({ connectionString: options.databaseUrl, max: 5 });
   const db = drizzle(pool);
@@ -1000,6 +1127,10 @@ export async function bootstrap(options: {
     )),
     expertPacks: new ExpertPackService(db),
     spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail)),
+    wechatMp: new WechatMpService(db, SecretBox.forServer(
+      options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
+      options.jwtSecret,
+    ), options.wechatFetch ? { fetchImpl: options.wechatFetch } : {}),
   };
 
   @Controller()
@@ -1022,6 +1153,13 @@ export async function bootstrap(options: {
   // frames → server: {type: 'heartbeat'}
   const fastify = app.getHttpAdapter().getInstance();
   await fastify.register(websocketPlugin);
+  // Module 04 (FR-IM-11): 微信回调 POST text/application XML —— 注册字符串解析器，
+  // 否则 Fastify 对未识别 content-type 直接 415；转发原始 XML 给中继服务。
+  for (const xmlType of ['text/xml', 'application/xml']) {
+    fastify.addContentTypeParser(xmlType, { parseAs: 'string' }, (_req: unknown, body: unknown, done: (err: Error | null, body?: unknown) => void) => {
+      done(null, typeof body === 'string' ? body : String(body ?? ''));
+    });
+  }
   fastify.get('/ws/:workspaceId/:sessionId', { websocket: true }, (conn: { close: (code: number, reason: string) => void; send: (s: string) => void; on: (ev: string, cb: (raw?: Buffer) => void) => void }, req: { params?: Record<string, string>; query?: Record<string, string>; __actor?: string }) => {
     const params = req.params ?? {};
     const query = req.query ?? {};
