@@ -7108,6 +7108,7 @@ function registerIpc() {
     const status = await orgService.login(input);
     if (status.state === "connected") {
       await syncOrgProvider();
+      applyOrgExpertPacks();
       await applyOrgKbDelivery().catch((error) =>
         logger.app("kb", "warn", "org kb delivery failed", { data: String(error) }),
       );
@@ -7118,6 +7119,7 @@ function registerIpc() {
     const status = await orgService.status();
     if (status.state === "connected") {
       await syncOrgProvider();
+      applyOrgExpertPacks();
       await applyOrgKbDelivery().catch((error) =>
         logger.app("kb", "warn", "org kb delivery failed", { data: String(error) }),
       );
@@ -7146,6 +7148,7 @@ function registerIpc() {
     else {
       await removeOrgProvider();
       orgHub.disconnectAll();
+      expertService.setOrgPacks([]);
       await kbService.disableOrgServers().catch(() => undefined);
     }
     return status;
@@ -8003,6 +8006,14 @@ function registerIpc() {
   });
 
   /** Org-provided knowledge-base entries land in the MCP registry (T55.6). */
+  /** Org expert/team packs ride the bootstrap cache (T51.8, in-memory). */
+  function applyOrgExpertPacks(): void {
+    const bootstrap = orgService.getBootstrap() as {
+      expertPacks?: Array<{ kind: "expert" | "team"; name: string; payload: Record<string, unknown>; version: number }>;
+    } | null;
+    expertService.setOrgPacks(bootstrap?.expertPacks ?? []);
+  }
+
   async function applyOrgKbDelivery(): Promise<void> {
     const bootstrap = orgService.getBootstrap() as {
       org?: { id?: string };

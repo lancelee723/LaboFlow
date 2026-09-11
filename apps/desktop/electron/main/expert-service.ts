@@ -35,7 +35,7 @@ export interface ExpertListItem {
   thinkingLevel?: string;
   budgetTokens?: number;
   enabled: boolean;
-  source: "preset" | "user";
+  source: "preset" | "user" | "org";
 }
 
 export interface ExpertTeamListItem {
@@ -47,7 +47,7 @@ export interface ExpertTeamListItem {
   integration: string;
   budgetTokens?: number;
   enabled: boolean;
-  source: "preset" | "user";
+  source: "preset" | "user" | "org";
 }
 
 export interface ExpertDriver {
@@ -162,8 +162,23 @@ function parsePresetDocument(
   return { description, body, front };
 }
 
+export interface OrgExpertPack {
+  kind: "expert" | "team";
+  name: string;
+  payload: Record<string, unknown>;
+  version: number;
+}
+
 export class ExpertService {
+  private orgPacks: OrgExpertPack[] = [];
+
   constructor(private readonly deps: ExpertServiceDeps) {}
+
+  /** Org delivery (T51.8): packs ride the bootstrap cache — in-memory only,
+   * so a personal expert with the same name keeps local priority (FR-E-19). */
+  setOrgPacks(packs: OrgExpertPack[]): void {
+    this.orgPacks = Array.isArray(packs) ? packs : [];
+  }
 
   private host() {
     const host = this.deps.getHost();
@@ -213,7 +228,25 @@ export class ExpertService {
       enabled: expert.enabled,
       source: "user",
     }));
-    return [...presets, ...userItems];
+    const taken = new Set([...presets, ...userItems].map((item) => item.name));
+    const orgItems: ExpertListItem[] = this.orgPacks
+      .filter((pack) => pack.kind === "expert" && !taken.has(pack.name))
+      .map((pack) => ({
+        id: pack.name,
+        name: pack.name,
+        description: String(pack.payload.description ?? ""),
+        industry: pack.payload.industry as string | undefined,
+        tags: (pack.payload.tags as string[] | undefined) ?? [],
+        examples: (pack.payload.examples as string[] | undefined) ?? [],
+        skills: (pack.payload.skills as string[] | undefined) ?? [],
+        mcpServers: (pack.payload.mcpServers as string[] | undefined) ?? [],
+        model: pack.payload.model as string | undefined,
+        thinkingLevel: pack.payload.thinkingLevel as string | undefined,
+        budgetTokens: pack.payload.budgetTokens as number | undefined,
+        enabled: true,
+        source: "org",
+      }));
+    return [...presets, ...userItems, ...orgItems];
   }
 
   async get(id: string): Promise<{ expert: ExpertListItem | null; body: string | null }> {
@@ -243,6 +276,33 @@ export class ExpertService {
         },
         body: user.body,
       };
+    }
+    const orgPack = this.orgPacks.find(
+      (pack) => pack.kind === "expert" && pack.name === id,
+    );
+    if (orgPack) {
+      const payload = orgPack.payload;
+      const body = String(payload.body ?? "");
+      if (body.trim()) {
+        return {
+          expert: {
+            id: orgPack.name,
+            name: orgPack.name,
+            description: String(payload.description ?? ""),
+            industry: payload.industry as string | undefined,
+            tags: (payload.tags as string[] | undefined) ?? [],
+            examples: (payload.examples as string[] | undefined) ?? [],
+            skills: (payload.skills as string[] | undefined) ?? [],
+            mcpServers: (payload.mcpServers as string[] | undefined) ?? [],
+            model: payload.model as string | undefined,
+            thinkingLevel: payload.thinkingLevel as string | undefined,
+            budgetTokens: payload.budgetTokens as number | undefined,
+            enabled: true,
+            source: "org",
+          },
+          body,
+        };
+      }
     }
     const preset = BUILTIN_PRESETS.find((item) => item.name === id);
     if (!preset) return { expert: null, body: null };
@@ -358,7 +418,21 @@ export class ExpertService {
       enabled: team.enabled,
       source: "user",
     }));
-    return [...presets, ...userItems];
+    const takenTeams = new Set([...presets, ...userItems].map((item) => item.name));
+    const orgTeamItems: ExpertTeamListItem[] = this.orgPacks
+      .filter((pack) => pack.kind === "team" && !takenTeams.has(pack.name))
+      .map((pack) => ({
+        id: pack.name,
+        name: pack.name,
+        description: String(pack.payload.description ?? ""),
+        members: (pack.payload.members as string[] | undefined) ?? [],
+        leaderStyle: (pack.payload.leaderStyle as string | undefined) ?? "fine",
+        integration: (pack.payload.integration as string | undefined) ?? "moderator",
+        budgetTokens: pack.payload.budgetTokens as number | undefined,
+        enabled: true,
+        source: "org" as const,
+      }));
+    return [...presets, ...userItems, ...orgTeamItems];
   }
 
   /** Resolve an expert's persona (user document first, preset fallback). */
