@@ -612,6 +612,9 @@ export type AgentRuntimeOptions = {
   provider: RuntimeProviderConfig;
   thinkingLevel: ThinkingLevel;
   systemPrompt?: string;
+  /** Persona overlay (expert identity) prepended ahead of the harness prompt.
+   * Unlike `systemPrompt` (full replacement) it keeps the default guidance. */
+  personaPrompt?: string;
   /** Session-bound workspace root used for path-scoped instruction requests. */
   projectPath?: string;
   /** Instructions resolved from the session's workspace. */
@@ -656,6 +659,7 @@ export type RuntimeMatchConfig = {
   mode: Mode;
   provider: RuntimeProviderConfig;
   thinkingLevel: ThinkingLevel;
+  personaPrompt?: string;
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   projectInstructions?: ProjectInstructions;
@@ -1184,6 +1188,7 @@ export class DesktopAgentRuntime {
   private host: HostClient;
   private onEvent: (envelope: AgentEventEnvelope) => void;
   private baseSystemPrompt: string;
+  private personaPrompt?: string;
   private planningState: PlanningState;
   private pendingPlanId?: string;
   private currentAssistant?: UiMessage;
@@ -1404,7 +1409,11 @@ Delegation rules:
       // the instruction chain so the user's own AGENTS.md keeps the last word.
       ...(skillsPrompt ? [skillsPrompt] : []),
     ].join("\n\n");
-    this.baseSystemPrompt = opts.systemPrompt ?? defaultSystemPrompt;
+    this.personaPrompt = opts.personaPrompt;
+    this.baseSystemPrompt = [
+      ...(opts.personaPrompt ? [opts.personaPrompt] : []),
+      opts.systemPrompt ?? defaultSystemPrompt,
+    ].join("\n\n");
     this.agent = new Agent({
       streamFn: (m, context, options) => {
         this.setAgentActivity({ phase: "waiting-model", since: Date.now() });
@@ -1670,7 +1679,10 @@ Delegation rules:
       // bodies are part of the `Task` tool's behavior, so unlike skills they
       // are compared in full.
       safeJson(this.subagents) === safeJson(config.subagents ?? []) &&
-      safeJson(this.subagentProviders) === safeJson(config.subagentProviders ?? {})
+      safeJson(this.subagentProviders) === safeJson(config.subagentProviders ?? {}) &&
+      // A persona change (expert switch) must retire the runtime so the next
+      // prompt composes the new identity instead of reusing the stale one.
+      (this.personaPrompt ?? "") === (config.personaPrompt ?? "")
     );
   }
 

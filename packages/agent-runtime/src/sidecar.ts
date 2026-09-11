@@ -90,6 +90,8 @@ function testRuntimeIdentity(sessionId: string) {
 type RuntimeParams = {
   sessionId: string;
   mode?: Mode;
+  /** Persona overlay forwarded to the runtime (module 01 experts). */
+  personaPrompt?: string;
   /** Durable host turn ID for the prompt currently being executed. */
   turnId?: string;
   thinkingLevel?: ThinkingLevel;
@@ -315,6 +317,7 @@ async function runtimeFor(
   }
   const reusable = existing?.matches({
     mode,
+    personaPrompt: params.personaPrompt,
     provider,
     thinkingLevel,
     pluginTools,
@@ -365,6 +368,7 @@ async function runtimeFor(
     host: hostProxy as any,
     sessionId,
     mode,
+    personaPrompt: params.personaPrompt,
     turnId: params.turnId,
     provider,
     commandShell: params.commandShell,

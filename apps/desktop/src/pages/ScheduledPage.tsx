@@ -11,7 +11,6 @@ export function ScheduledPage() {
   const showToast = useAppStore((s) => s.showToast);
   const selectSession = useAppStore((s) => s.selectSession);
   const setPage = useAppStore((s) => s.setPage);
-  const sendPrompt = useAppStore((s) => s.sendPrompt);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -145,17 +144,18 @@ export function ScheduledPage() {
                   <Button
                     size="sm"
                     variant="primary"
-                    onClick={async () => {
-                      try {
-                        const res = await api.runScheduled(task.id);
-                        await selectSession(res.sessionId);
-                        setPage("chat");
-                        await sendPrompt(res.prompt);
-                        await refresh();
-                      } catch (e) {
-                        showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
-                      }
-                    }}
+                      onClick={async () => {
+                        try {
+                          // Main drives the run itself (T53.1 headless driver);
+                          // the renderer just opens the session to watch it.
+                          const res = await api.runScheduled(task.id);
+                          await selectSession(res.sessionId);
+                          setPage("chat");
+                          await refresh();
+                        } catch (e) {
+                          showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
+                        }
+                      }}
                   >
                     {t("scheduled.runNow")}
                   </Button>

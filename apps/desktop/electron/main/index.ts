@@ -34,6 +34,10 @@ import {
 } from "node:fs/promises";
 import AdmZip from "adm-zip";
 import { ClawhubClient } from "./clawhub";
+import {
+  beginDurableTurnAndPrompt,
+  createHeadlessAgentDriver,
+} from "./headless-agent-driver";
 import { listInstalledFonts } from "./system-fonts";
 import {
   applyNetworkProxyFromAppSettings,
@@ -1441,6 +1445,8 @@ async function resolveAgentRuntimeLaunch(
     providerId?: string;
     modelId?: string;
     thinkingLevel?: ThinkingLevel;
+    /** Persona overlay (module 01 experts) prepended to the harness prompt. */
+    personaPrompt?: string;
   } = {},
 ) {
   if (!host) throw new Error("host unavailable");
@@ -1692,6 +1698,9 @@ async function resolveAgentRuntimeLaunch(
       mode: normalizeMode(
         overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent",
       ),
+      ...(overrides.personaPrompt
+        ? { personaPrompt: overrides.personaPrompt }
+        : {}),
       ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
       thinkingLevel,
       commandShell,
@@ -2256,6 +2265,11 @@ const pendingExecutionFinishes = new Map<
 const inFlightExecutionFinishes = new Set<string>();
 let approvedExecutionDrain: Promise<void> | null = null;
 const turnSettlements = new Map<string, Set<() => void>>();
+/** Settlement outcome per turn, consumed by the headless driver (T53.1). */
+const turnSettlementResults = new Map<
+  string,
+  { status: "completed" | "aborted" | "error"; errorCode?: string }
+>();
 const turnFinalizations = new Map<string, Promise<void>>();
 /** sessionId -> last assistant usage recorded for active turn */
 const activeTurnUsages = new Map<string, MessageUsage>();
@@ -2290,6 +2304,16 @@ function activeToolCallKey(sessionId: string, toolCallId: string) {
 
 function planSubmissionTurnKey(sessionId: string, turnId: string) {
   return `${sessionId}:${turnId}`;
+}
+
+function consumeTurnSettlement(
+  sessionId: string,
+  turnId: string,
+): { status: "completed" | "aborted" | "error"; errorCode?: string } | undefined {
+  const key = planSubmissionTurnKey(sessionId, turnId);
+  const value = turnSettlementResults.get(key);
+  if (value) turnSettlementResults.delete(key);
+  return value;
 }
 
 function waitForTurnSettlement(sessionId: string, turnId: string): Promise<void> {
@@ -4599,6 +4623,23 @@ const planUiProbe = createPlanUiProbe({
   logger,
 });
 
+// HeadlessAgentDriver (T53.1): main-process agent execution shared by
+// scheduled tasks, IM-triggered prompts (module 04) and background expert
+// dispatch (module 01). Same durable-turn lifecycle as the interactive path.
+const headlessAgentDriver = createHeadlessAgentDriver({
+  getHost: () => host,
+  getSidecar: () => sidecar,
+  resolveLaunch: resolveAgentRuntimeLaunch,
+  finishTurn,
+  waitForTurnSettlement,
+  consumeTurnSettlement,
+  activeTurns,
+  activeTurnUsages,
+  sendToRenderer,
+  agentMessageEvent: IPC.event.agentMessage,
+  logger,
+});
+
 function wireSidecar(s: AgentSidecar) {
   s.onNotification((method, params) => {
     if (method === "agent.event") {
@@ -4998,6 +5039,11 @@ function finishTurn(
       }
       if (turnKey) {
         planSubmissionTurnIds.delete(turnKey);
+        turnSettlementResults.set(turnKey, { status, errorCode });
+        if (turnSettlementResults.size > 200) {
+          const oldest = turnSettlementResults.keys().next().value;
+          if (oldest !== undefined) turnSettlementResults.delete(oldest);
+        }
         const waiters = turnSettlements.get(turnKey);
         if (waiters) {
           turnSettlements.delete(turnKey);
@@ -7207,7 +7253,7 @@ function registerIpc() {
    * composer inserts a normal file-reference chip, so the model reads it
    * through the same attachment path as imported files.
    */
-  handle(
+  handleWithEvent(
     IPC.invoke.composerAttachSession,
     async (
       event,
@@ -7731,15 +7777,41 @@ function registerIpc() {
   });
   handle(IPC.invoke.scheduledRun, async (id: string) => {
     if (!host) throw new Error("host unavailable");
+    const hostRef = host;
     const res = await host.call<{
       sessionId: string;
       prompt: string;
       task: unknown;
       runId: string;
     }>("scheduled.run", { id });
-    // The renderer sends the prompt through the normal agent path; remember
-    // the run so agent_end can close it via scheduled.finishRun.
+    // Remember the run so agent_end can close it via scheduled.finishRun, then
+    // drive the prompt from main (T53.1): execution no longer depends on the
+    // renderer pressing send, so a closed window cannot stall a run.
     scheduledRunsBySession.set(res.sessionId, res.runId);
+    headlessAgentDriver
+      .start({ sessionId: res.sessionId, prompt: res.prompt })
+      .then((run) => {
+        run.completion.catch((error) =>
+          logger.app("session", "warn", "headless completion surface failed", {
+            sessionId: res.sessionId,
+            data: String(error),
+          }),
+        );
+      })
+      .catch(async (error) => {
+        scheduledRunsBySession.delete(res.sessionId);
+        logger.app("session", "warn", "scheduled headless start failed", {
+          sessionId: res.sessionId,
+          data: String(error),
+        });
+        await hostRef
+          .call("scheduled.finishRun", {
+            runId: res.runId,
+            status: "failed",
+            errorCode: (error as { errorCode?: string })?.errorCode,
+          })
+          .catch(() => undefined);
+      });
     return res;
   });
 
@@ -7980,19 +8052,6 @@ function registerIpc() {
     );
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 
-    // Open a durable turn row, then persist the user message under it.
-    const turn = await host.call<{ turnId?: string }>("session.beginTurn", {
-      sessionId: req.sessionId,
-      providerId: launch.providerId,
-      modelId: launch.modelId,
-    });
-    const durableTurnId = String(turn?.turnId ?? "").trim();
-    if (!durableTurnId) {
-      throw new Error("session.beginTurn returned no turn");
-    }
-    activeTurns.set(req.sessionId, durableTurnId);
-    activeTurnUsages.delete(req.sessionId);
-
     // Slash template expansion (D123, ADR 0024): templates expand before
     // persistence so reseed replays exactly what the model saw; the typed
     // form rides along as `command` for transcript display. Builtin/plugin
@@ -8042,7 +8101,8 @@ function registerIpc() {
       preparedAttachments,
     );
 
-    // Persist user message
+    // Persist the user message and start the turn through the shared
+    // durable-turn core (same lifecycle as headless runs, T53.1).
     const revisionMeta = (req as any).__revisionMeta as
       | {
           rootUserId?: string;
@@ -8070,66 +8130,39 @@ function registerIpc() {
           }
         : {}),
     };
-    try {
-      await host.call("session.appendMessage", {
+    const result = await beginDurableTurnAndPrompt(
+      {
+        getHost: () => host,
+        getSidecar: () => sidecar,
+        finishTurn,
+        activeTurns,
+        activeTurnUsages,
+        sendToRenderer,
+        agentMessageEvent: IPC.event.agentMessage,
+        logger,
+        waitForTurnSettlement,
+        consumeTurnSettlement,
+        resolveLaunch: resolveAgentRuntimeLaunch,
+      },
+      {
         sessionId: req.sessionId,
-        message: userMessage,
-        turnId: durableTurnId,
-      });
-    } catch (error) {
-      await finishTurn(
-        req.sessionId,
-        "error",
-        (error as { data?: { errorCode?: string }; errorCode?: string })?.data
-          ?.errorCode ??
-          (error as { errorCode?: string })?.errorCode,
-      );
-      throw error;
-    }
-    sendToRenderer(IPC.event.agentMessage, {
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_start", message: userMessage },
-    } satisfies AgentEventEnvelope);
-    sendToRenderer(IPC.event.agentMessage, {
-      sessionId: req.sessionId,
-      ts: Date.now(),
-      event: { type: "message_end", message: userMessage },
-    } satisfies AgentEventEnvelope);
-
-    let result: { accepted: boolean; turnId: string };
-    try {
-      result = await sidecar.call<{ accepted: boolean; turnId: string }>(
-        "agent.prompt",
-        {
-          ...launch.sidecarParams,
-          // The host-created durable turn is the approval identity used by
-          // Rust. The runtime must not replace it with a provider-local UUID.
-          turnId: durableTurnId,
-          content: modelContent,
-          attachments: preparedAttachments
-            .filter((attachment) => attachment.inlineData)
-            .map((attachment) => ({
-              path: attachment.message.ref,
-              name: attachment.message.name,
-              kind: attachment.message.kind,
-              mimeType: attachment.message.mimeType,
-              size: attachment.message.size,
-              data: attachment.inlineData,
-            })),
-          userMessageId: userMessage.id,
-        },
-      );
-    } catch (e) {
-      await finishTurn(req.sessionId, "error", (e as any)?.errorCode);
-      throw e;
-    }
-    logger.app("session", "info", "prompt accepted", {
-      sessionId: req.sessionId,
-      turnId: result.turnId,
-      data: { providerId: launch.providerId, modelId: launch.modelId },
-    });
-    return result;
+        launch,
+        modelContent,
+        userMessage,
+        echoToRenderer: true,
+        attachments: preparedAttachments
+          .filter((attachment) => attachment.inlineData)
+          .map((attachment) => ({
+            path: attachment.message.ref,
+            name: attachment.message.name,
+            kind: attachment.message.kind,
+            mimeType: attachment.message.mimeType,
+            size: attachment.message.size,
+            data: attachment.inlineData,
+          })),
+      },
+    );
+    return { accepted: result.accepted, turnId: result.turnId };
   });
 
   handle(IPC.invoke.agentCompact, async (req: { sessionId: string }) => {
