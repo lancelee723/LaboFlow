@@ -41,7 +41,7 @@ import {
   readComposerDraft,
   writeComposerDraft,
 } from "../lib/composer-draft-cache";
-import { api } from "../lib/api";
+import { api, type ExpertListItem } from "../lib/api";
 import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
@@ -684,6 +684,8 @@ export function Composer({
   const [plusContextMode, setPlusContextMode] = useState(false);
   const [contextQuery, setContextQuery] = useState("");
   const [plusSkills, setPlusSkills] = useState<UserSkillRecord[] | null>(null);
+  const [plusExpertMode, setPlusExpertMode] = useState(false);
+  const [plusExperts, setPlusExperts] = useState<ExpertListItem[] | null>(null);
   const plusRef = useRef<HTMLDivElement | null>(null);
 
   /** Recent conversations for the "+" context picker (self excluded). */
@@ -1150,6 +1152,7 @@ export function Composer({
       if (!plusRef.current?.contains(e.target as Node)) {
         setPlusMenuOpen(false);
         setPlusSkillMode(false);
+        setPlusExpertMode(false);
         setPlusContextMode(false);
         setContextQuery("");
       }
@@ -1158,6 +1161,7 @@ export function Composer({
       if (e.key === "Escape") {
         setPlusMenuOpen(false);
         setPlusSkillMode(false);
+        setPlusExpertMode(false);
         setPlusContextMode(false);
         setContextQuery("");
       }
@@ -1185,6 +1189,24 @@ export function Composer({
       cancelled = true;
     };
   }, [plusMenuOpen, plusSkillMode, plusSkills]);
+
+  useEffect(() => {
+    if (!plusMenuOpen || !plusExpertMode || plusExperts) return;
+    let cancelled = false;
+    api
+      .listExperts()
+      .then((result) => {
+        if (!cancelled) {
+          setPlusExperts((result ?? []).filter((expert) => expert.enabled !== false));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPlusExperts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plusMenuOpen, plusExpertMode, plusExperts]);
 
   useEffect(() => {
     if (!modelThinkingOpen) {
@@ -2340,6 +2362,7 @@ export function Composer({
                     setPermissionOpen(false);
                     setModelThinkingOpen(false);
                     setPlusSkillMode(false);
+                    setPlusExpertMode(false);
                     setPlusContextMode(false);
                     setContextQuery("");
                     setPlusMenuOpen((open) => !open);
@@ -2379,6 +2402,36 @@ export function Composer({
                           </div>
                         ) : null}
                       </>
+                    ) : plusExpertMode ? (
+                      <>
+                        {(plusExperts ?? []).map((expert) => (
+                          <button
+                            key={expert.id}
+                            type="button"
+                            role="menuitem"
+                            className="composer-plus-item"
+                            title={expert.description || undefined}
+                            onClick={() => {
+                              setPlusMenuOpen(false);
+                              setPlusExpertMode(false);
+                              insertComposerText(`@${expert.name} `);
+                            }}
+                          >
+                            <IconSparkles size={14} />
+                            <span>{expert.name}</span>
+                          </button>
+                        ))}
+                        {plusExperts && !plusExperts.length ? (
+                          <div className="composer-plus-empty">
+                            {t("chat.noExpertsYet")}
+                          </div>
+                        ) : null}
+                        {!plusExperts ? (
+                          <div className="composer-plus-empty">
+                            {t("chat.expertsLoading")}
+                          </div>
+                        ) : null}
+                      </>
                     ) : !plusSkillMode ? (
                       <>
                         <button
@@ -2415,6 +2468,17 @@ export function Composer({
                         >
                           <IconBookOpen size={14} />
                           <span>{t("chat.pickSkill")}</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="composer-plus-item"
+                          onClick={() => {
+                            setPlusExpertMode(true);
+                          }}
+                        >
+                          <IconSparkles size={14} />
+                          <span>{t("chat.pickExpert")}</span>
                         </button>
                       </>
                     ) : (

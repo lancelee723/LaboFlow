@@ -1,0 +1,2 @@
+aee33e5 fix: table parity lets explicit run colour and weight override the cell default
+v6.3.2 post (aee33e5), vendored 2026-09-12; pruned: references/ai-image-comparison (AI-image route, disabled), templates/sounds (narration, disabled); SPONSORS files KEPT (upstream attribution guard requires them)

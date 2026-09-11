@@ -200,3 +200,29 @@ export const orgSkills = pgTable(
   },
   (t) => [uniqueIndex('uniq_org_skill_version').on(t.name, t.version)],
 );
+
+
+// ---------------------------------------------------------------------------
+// Module 05 知识库接入 (FR-KB-02/10/11, SPEC §2.2): 组织知识库下发条目
+// ---------------------------------------------------------------------------
+export const orgKbServers = pgTable(
+  'org_kb_servers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: text('org_id').notNull().default('default'), // 单租户：一次部署 = 一个组织（rbac.ts 同语义）
+    kind: text('kind').notNull(), // mcp（知识检索 MCP 服务） | web（内嵌浏览网页端）
+    name: text('name').notNull(),
+    transport: text('transport').notNull().default('http'), // stdio | http（仅 kind=mcp；stdio 时 url 存启动命令）
+    url: text('url').notNull().default(''), // mcp: <server>/mcp 端点（stdio=命令行）；web: 网页端入口
+    apiKeyEnc: text('api_key_enc'), // 服务器侧加密存储（AES-256-GCM，密钥见 kb/secret-box.ts）；web 无 key
+    description: text('description').notNull().default(''),
+    scope: text('scope').notNull().default('all'), // all | teams（teamIds 命中的团队可见）
+    teamIds: jsonb('team_ids').notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uniq_org_kb_server_name').on(t.orgId, t.name)],
+);
+
+export type OrgKbServer = typeof orgKbServers.$inferSelect;

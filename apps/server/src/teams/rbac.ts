@@ -19,6 +19,7 @@ export type RbacAction =
   | 'quota.system'
   | 'quota.team'
   | 'library.publish'
+  | 'kb.manage' // 知识库下发条目管理（Module 05，镜像 library.publish）
   | 'audit.viewAll'
   | 'audit.viewTeam';
 
@@ -73,6 +74,8 @@ export function can(action: RbacAction, ctx: Ctx): boolean {
       return actorRole === 'sys_admin' || (actorRole === 'team_admin' && sameTeam);
 
     case 'library.publish':
+    // 知识库下发条目：系统/团队管理员（镜像 library.publish）
+    case 'kb.manage':
       return actorRole === 'sys_admin' || actorRole === 'team_admin';
 
     case 'audit.viewAll':

@@ -12,8 +12,14 @@ import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 
 import { exportDeckToBuffer, normalizeOutline, sanitizeFileName } from "./lib/slides.js";
+import {
+  detectRuntime,
+  ensureRuntime,
+  runVendoredScript,
+} from "./lib/ppt-runtime.js";
 
 let toolsRegistered = false;
+let l2ToolsRegistered = false;
 
 async function resolveOutputPath(fileName) {
   let root = "";
@@ -133,8 +139,162 @@ export function onLoad() {
   });
 }
 
+// ───────────────────────── L2: PPT-Master (vendored skill) ─────────────────────────
+// The vendored skill corpus guides the agent; these tools expose its
+// deterministic Python tail (quality gate → finalize → export) with the
+// isolated venv. PyMuPDF/pandoc routes are DISABLED (AGPL/GPL guard).
+
+const L2_TOOLS = [
+  {
+    name: "ppt_master_status",
+    description:
+      "Report the PPT-Master (L2 精制引擎) Python runtime status: ready / venv-missing / guard-failed with diagnostics. Takes no parameters. Call before L2 generation; if not ready, tell the user to run ppt_master_setup or fall back to slides_export (L1).",
+    risk: "low",
+    schema: { type: "object", properties: {} },
+    execute: async () => {
+      const status = await detectRuntime({ pluginDir: getPluginDir() });
+      return {
+        content: JSON.stringify(status, null, 2),
+        details: status,
+      };
+    },
+  },
+  {
+    name: "ppt_master_setup",
+    description:
+      "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard). Long-running; call only when the user asked to set up the L2 engine or approved the install prompt.",
+    risk: "medium",
+    schema: {
+      "type": "object",
+      "properties": {},
+    },
+    execute: async () => {
+      const status = await ensureRuntime({ pluginDir: getPluginDir() }, (line) =>
+        pi.log?.("info", line),
+      );
+      return {
+        content:
+          status.stage === "ready"
+            ? `L2 运行环境就绪（${status.pythonPath}）`
+            : `L2 运行环境未就绪（${status.stage}）：${status.diag ?? ""}`,
+        details: status,
+      };
+    },
+  },
+  {
+    name: "ppt_quality",
+    description:
+      "Run the vendored SVG quality checker over a deck workspace (blocking gate before export). Input: { deckDir, page? } where deckDir contains the svg_output/ pages (P01.svg…).",
+    risk: "low",
+    schema: {
+      type: "object",
+      properties: {
+        deckDir: { type: "string", description: "Absolute deck workspace directory" },
+      },
+      required: ["deckDir"],
+    },
+    execute: async (args) => runL2Script("scripts/svg_quality_checker.py", args, 5 * 60_000),
+  },
+  {
+    name: "ppt_finalize",
+    description:
+      "Finalize a generated deck: normalize SVGs into svg_final/ and split the speaker-notes markdown. Input: { deckDir, deckTitle? }.",
+    risk: "low",
+    schema: {
+      type: "object",
+      properties: {
+        deckDir: { type: "string" },
+        deckTitle: { type: "string" },
+      },
+      required: ["deckDir"],
+    },
+    execute: async (args) => {
+      const first = await runL2Script("scripts/finalize_svg.py", { deckDir: args?.deckDir }, 10 * 60_000);
+      if (first.error) return first;
+      const second = await runL2Script("scripts/total_md_split.py", { deckDir: args?.deckDir, deckTitle: args?.deckTitle }, 5 * 60_000);
+      return second.error ? second : { content: `${first.content}\n${second.content}` };
+    },
+  },
+  {
+    name: "ppt_export",
+    description:
+      "Convert the finalized SVG deck into a native editable .pptx via the vendored converter (svg_to_pptx.py) and run its postflight report. PDF and PyMuPDF routes are disabled. Input: { deckDir, fileName? }. Call ppt_quality first; the checker must pass.",
+    risk: "medium",
+    schema: {
+      type: "object",
+      properties: {
+        deckDir: { type: "string" },
+        fileName: { type: "string" },
+      },
+      required: ["deckDir"],
+    },
+    execute: async (args) => {
+      const outputName = `${sanitizeFileName(args?.fileName || "deck")}.pptx`;
+      const outputPath = join(await resolveSlidesOutputDir(), outputName);
+      const result = await runL2Script(
+        "scripts/svg_to_pptx.py",
+        { deckDir: args?.deckDir, extra: ["-o", outputPath, "-s", String(args?.deckDir ?? "."), "-f", "ppt169"] },
+        15 * 60_000,
+      );
+      if (result.error) return result;
+      return {
+        content: `${result.content}\n已导出可编辑 PPTX：${outputPath}`,
+        details: { path: outputPath },
+      };
+    },
+  },
+];
+
+function getPluginDir() {
+  // The plugin host loads main.js from <pluginDir>/main.js.
+  return new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+}
+
+async function resolveSlidesOutputDir() {
+  let root = "";
+  try {
+    const workspace = await pi.workspace.get();
+    root = String(workspace?.path ?? "");
+  } catch {
+    root = "";
+  }
+  const settings = await pi.plugin.getSettings().catch(() => ({}));
+  const folder = String(settings?.outputDir ?? "slides").replace(/^\/+|\/+$/g, "") || "slides";
+  return root ? join(root, folder) : join(process.cwd(), folder);
+}
+
+async function runL2Script(scriptRelPath, args, timeoutMs) {
+  const deckDir = String(args?.deckDir ?? "").trim();
+  if (!deckDir) return { error: "deckDir is required" };
+  const scriptArgs = args?.extra ?? [];
+  try {
+    const result = await runVendoredScript(
+      { pluginDir: getPluginDir() },
+      scriptRelPath,
+      scriptArgs,
+      { cwd: deckDir, timeoutMs },
+    );
+    const text = `${result.stdout}${result.stderr}`;
+    if (result.code !== 0) {
+      return { error: `${scriptRelPath} 退出码 ${result.code}：${text.slice(-1500)}` };
+    }
+    return { content: text.slice(-4000) || "ok" };
+  } catch (error) {
+    return { error: error?.message || String(error) };
+  }
+}
+
+function registerL2Tools() {
+  if (l2ToolsRegistered) return;
+  for (const tool of L2_TOOLS) {
+    void pi.agent.registerTool(tool);
+  }
+  l2ToolsRegistered = true;
+}
+
 export function onUnload() {
   toolsRegistered = false;
+  l2ToolsRegistered = false;
 }
 
 // Exposed for host-side smoke checks.

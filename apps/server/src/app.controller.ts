@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, HttpException, HttpCode, Module, SetMetadata } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, HttpException, HttpCode, Module, SetMetadata } from '@nestjs/common';
 import { APP_GUARD, Reflector } from '@nestjs/core';
 import websocketPlugin from '@fastify/websocket';
 import { AuthGuard } from './auth/auth.guard.js';
@@ -18,6 +18,8 @@ import { can, type Role } from './teams/rbac.js';
 import { WorkspaceService, WorkspaceError } from './workspaces/workspace.service.js';
 import { canWorkspace } from './workspaces/workspace-rules.js';
 import { DeliverableService, OrgLibraryService, DeliverableError } from './workspaces/library.service.js';
+import { KbServerService, KbError, type KbPatchInput } from './kb/kb.service.js';
+import { SecretBox } from './kb/secret-box.js';
 import { SERVER_VERSION } from './index.js';
 
 /**
@@ -33,6 +35,7 @@ export interface ServerDeps {
   workspaces: WorkspaceService;
   deliverables: DeliverableService;
   library: OrgLibraryService;
+  kb: KbServerService;
 }
 
 type Actor = { userId: string; role: Role; teamId: string | null };
@@ -395,6 +398,9 @@ class CoreController {
       const [tm] = await this.deps.db.select().from(teamsT).where(eq(teamsT.id, actor.teamId)).limit(1);
       teamName = tm?.name ?? null;
     }
+    // Module 05 知识库下发（FR-KB-02）：enabled 的条目按团队 scope 过滤后交付；
+    // mcp 项含明文 apiKey（TLS 下=交付本身），web 项仅 name/url。
+    const kbServers = await this.deps.kb.deliveryFor(actor.teamId);
     return {
       org: { name: 'LaboFlow Org', teamId: actor.teamId, teamName },
       me: { userId: actor.userId, username: user.username, displayName: user.displayName, role: actor.role },
@@ -403,7 +409,83 @@ class CoreController {
       gateway: { url: gatewayUrl, virtualKey: vkey.plain },
       policyFloor,
       orgSkills: skills,
+      kbServers,
     };
+  }
+
+  // ----- Module 05 知识库下发条目 (FR-KB-02/10/11) -----
+  @Post('org/kb-servers')
+  @HttpCode(200)
+  async createKbServer(@Req() req: FastifyRequest, @Body() body: {
+    kind?: string; name?: string; transport?: string; url?: string; apiKey?: string;
+    description?: string; scope?: string; teamIds?: string[];
+  }) {
+    const actor = requireActor(req);
+    if (!can('kb.manage', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可管理知识库条目', 403);
+    }
+    try {
+      const dto = await this.deps.kb.create({
+        kind: String(body.kind ?? 'mcp'),
+        name: String(body.name ?? ''),
+        transport: body.transport,
+        url: body.url,
+        apiKey: body.apiKey,
+        description: body.description,
+        scope: body.scope,
+        teamIds: body.teamIds,
+      }, actor.userId);
+      await this.deps.auth.audit(actor.userId, 'kb.create', dto.name, { kind: dto.kind, scope: dto.scope, teamIds: dto.teamIds });
+      return dto;
+    } catch (err) {
+      if (err instanceof KbError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  /** 管理台列表（仅 sys_admin）：不含明文 key，keyTail=尾 4 位。 */
+  @Get('org/kb-servers')
+  async listKbServers(@Req() req: FastifyRequest) {
+    requireActor(req);
+    if (!requireSysAdmin(req)) throw new HttpException('仅系统管理员', 403);
+    return this.deps.kb.list();
+  }
+
+  @Patch('org/kb-servers/:id')
+  @HttpCode(200)
+  async updateKbServer(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: KbPatchInput) {
+    const actor = requireActor(req);
+    if (!can('kb.manage', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可管理知识库条目', 403);
+    }
+    try {
+      const dto = await this.deps.kb.update(id, body);
+      await this.deps.auth.audit(actor.userId, 'kb.update', dto.name, {
+        id: dto.id,
+        fields: Object.keys(body ?? {}).filter((k) => k !== 'apiKey'), // key 明文不入审计
+        apiKeyRotated: Boolean(body?.apiKey),
+      });
+      return dto;
+    } catch (err) {
+      if (err instanceof KbError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  @Delete('org/kb-servers/:id')
+  async deleteKbServer(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    if (!can('kb.manage', { actorRole: actor.role, actorTeamId: actor.teamId ?? undefined })) {
+      throw new HttpException('仅系统/团队管理员可管理知识库条目', 403);
+    }
+    try {
+      const removed = await this.deps.kb.remove(id);
+      await this.deps.auth.audit(actor.userId, 'kb.delete', removed.name, { id });
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof KbError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
   }
 
   // ----- T2.6 workspaces & shared sessions -----
@@ -618,6 +700,8 @@ export async function bootstrap(options: {
   upstreamFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** local volume root for deliverables / org skills */
   storageDir?: string;
+  /** AES-256-GCM master key material for secrets at rest (kb servers); falls back to SERVER_ENCRYPTION_KEY, then derives from jwtSecret */
+  serverEncryptionKey?: string;
 }): Promise<{ app: INestApplication; deps: ServerDeps; port: number }> {
   const pool = new Pool({ connectionString: options.databaseUrl, max: 5 });
   const db = drizzle(pool);
@@ -629,6 +713,10 @@ export async function bootstrap(options: {
     workspaces: new WorkspaceService(db),
     deliverables: new DeliverableService(db, options.storageDir ?? './storage'),
     library: new OrgLibraryService(db, options.storageDir ?? './storage'),
+    kb: new KbServerService(db, SecretBox.forServer(
+      options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
+      options.jwtSecret,
+    )),
   };
 
   @Controller()

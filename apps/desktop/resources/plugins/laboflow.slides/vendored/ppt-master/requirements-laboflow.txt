@@ -1,0 +1,20 @@
+# LaboFlow vendored subset of ppt-master requirements (pinned vendor, MIT).
+# REMOVED vs upstream requirements.txt:
+#   - PyMuPDF (AGPL-3.0) — the PDF-source conversion route is DISABLED in
+#     LaboFlow; scripts/source_to_md/pdf_to_md.py must not be invoked.
+#   - pandoc (GPL, system binary) — not shipped; .doc/.odt/.rtf/.tex sources
+#     are unsupported in LaboFlow L2.
+# Core conversion pipeline (SVG → editable PPTX):
+python-pptx>=0.6.21
+XlsxWriter>=3.0.0
+skia-pathops>=0.9.2
+uharfbuzz>=0.50.0
+# Template registration:
+PyYAML>=6.0
+# Document/Excel sources (native pure-Python paths only):
+mammoth>=1.6.0
+markdownify>=0.11.6
+openpyxl>=3.1.0
+# Web source:
+requests>=2.31.0
+beautifulsoup4>=4.12.0

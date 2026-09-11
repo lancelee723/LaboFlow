@@ -5,6 +5,7 @@ import { UsersPage } from './pages/Users.js';
 import { TeamsPage } from './pages/Teams.js';
 import { WorkspacesPage } from './pages/Workspaces.js';
 import { ChannelsPage } from './pages/Channels.js';
+import { KnowledgeBasePage } from './pages/KnowledgeBase.js';
 import { QuotaPage } from './pages/Quota.js';
 import { LibraryPage } from './pages/Library.js';
 import { AuditPage } from './pages/Audit.js';
@@ -21,6 +22,7 @@ const PAGES = [
   { id: 'teams', label: '团队管理', render: () => <TeamsPage /> },
   { id: 'workspaces', label: '工作区', render: () => <WorkspacesPage /> },
   { id: 'channels', label: '模型渠道', render: () => <ChannelsPage /> },
+  { id: 'kb', label: '知识库', render: () => <KnowledgeBasePage /> },
   { id: 'quota', label: '配额管理', render: () => <QuotaPage /> },
   { id: 'library', label: '组织资产', render: () => <LibraryPage /> },
   { id: 'audit', label: '审计日志', render: () => <AuditPage /> },

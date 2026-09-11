@@ -167,6 +167,28 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       );`,
     ],
   },
+  {
+    version: 3,
+    name: 'p5-org-kb-servers',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS org_kb_servers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id TEXT NOT NULL DEFAULT 'default',  -- 单租户：一次部署 = 一个组织
+        kind TEXT NOT NULL,                      -- mcp | web
+        name TEXT NOT NULL,
+        transport TEXT NOT NULL DEFAULT 'http',  -- stdio | http（仅 kind=mcp）
+        url TEXT NOT NULL DEFAULT '',            -- mcp: 端点/启动命令；web: 网页端入口
+        api_key_enc TEXT,                        -- AES-256-GCM 密文（kb/secret-box.ts）
+        description TEXT NOT NULL DEFAULT '',
+        scope TEXT NOT NULL DEFAULT 'all',       -- all | teams
+        team_ids JSONB NOT NULL DEFAULT '[]',
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        created_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (org_id, name)
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {
