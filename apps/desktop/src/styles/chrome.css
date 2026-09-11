@@ -1074,9 +1074,16 @@
   white-space: nowrap;
 }
 
+/* Keycap hint: secondary to the row label (raised keycap, faint text). */
 .sidebar-quick-actions button kbd {
-  font-size: var(--text-2xs);
-  color: var(--ds-text-muted);
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: var(--radius-3xs);
+  background: var(--ds-raised);
+  color: var(--ds-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-3xs);
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 

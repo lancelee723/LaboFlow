@@ -291,7 +291,10 @@ export function Sidebar({
       resolveKeybinding(entry, settings?.keybindings, platform),
       platform,
     );
-    return parts.length ? parts.join("") : null;
+    if (!parts.length) return null;
+    // macOS key glyphs read as a cluster ("⌘ N"); Windows spells modifiers
+    // out and needs the plus ("Ctrl+N").
+    return platform === "darwin" ? parts.join(" ") : parts.join("+");
   };
   const setSettingsAnchor = useAppStore((s) => s.setSettingsAnchor);
   const update = useUpdateState();
