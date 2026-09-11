@@ -121,7 +121,9 @@ export function normalizeOutline(input) {
 const EMU_PER_INCH = 914400;
 
 function buildPptxBuffer(deck, theme = {}) {
-  const PptxGenJS = require("../vendor/pptxgen.bundle.js");
+  // Vendored CJS build; its `require("jszip")` resolves against
+  // vendor/node_modules (the plugin owns its dependency copy).
+  const PptxGenJS = require("../vendor/pptxgen.cjs.js");
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "WIDE", width: 13.33, height: 7.5 });
   pptx.layout = "WIDE";

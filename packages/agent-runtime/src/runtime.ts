@@ -615,6 +615,9 @@ export type AgentRuntimeOptions = {
   /** Persona overlay (expert identity) prepended ahead of the harness prompt.
    * Unlike `systemPrompt` (full replacement) it keeps the default guidance. */
   personaPrompt?: string;
+  /** Behaviour clauses appended after the harness prompt (module 05: KB
+   * citation contract, active only when retrieval tools are in the catalog). */
+  toolGuidanceClauses?: string[];
   /** Session-bound workspace root used for path-scoped instruction requests. */
   projectPath?: string;
   /** Instructions resolved from the session's workspace. */
@@ -660,6 +663,7 @@ export type RuntimeMatchConfig = {
   provider: RuntimeProviderConfig;
   thinkingLevel: ThinkingLevel;
   personaPrompt?: string;
+  toolGuidanceClauses?: string[];
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
   projectInstructions?: ProjectInstructions;
@@ -1189,6 +1193,7 @@ export class DesktopAgentRuntime {
   private onEvent: (envelope: AgentEventEnvelope) => void;
   private baseSystemPrompt: string;
   private personaPrompt?: string;
+  private toolGuidanceClauses?: string[];
   private planningState: PlanningState;
   private pendingPlanId?: string;
   private currentAssistant?: UiMessage;
@@ -1410,9 +1415,11 @@ Delegation rules:
       ...(skillsPrompt ? [skillsPrompt] : []),
     ].join("\n\n");
     this.personaPrompt = opts.personaPrompt;
+    this.toolGuidanceClauses = opts.toolGuidanceClauses;
     this.baseSystemPrompt = [
       ...(opts.personaPrompt ? [opts.personaPrompt] : []),
       opts.systemPrompt ?? defaultSystemPrompt,
+      ...(opts.toolGuidanceClauses ?? []),
     ].join("\n\n");
     this.agent = new Agent({
       streamFn: (m, context, options) => {
@@ -1682,7 +1689,9 @@ Delegation rules:
       safeJson(this.subagentProviders) === safeJson(config.subagentProviders ?? {}) &&
       // A persona change (expert switch) must retire the runtime so the next
       // prompt composes the new identity instead of reusing the stale one.
-      (this.personaPrompt ?? "") === (config.personaPrompt ?? "")
+      (this.personaPrompt ?? "") === (config.personaPrompt ?? "") &&
+      safeJson(this.toolGuidanceClauses ?? []) ===
+        safeJson(config.toolGuidanceClauses ?? [])
     );
   }
 

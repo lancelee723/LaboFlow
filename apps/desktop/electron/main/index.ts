@@ -1694,12 +1694,32 @@ async function resolveAgentRuntimeLaunch(
           : [],
       ),
   );
+  // Knowledge-base citation contract (module 05, T55.2): active only when a
+  // retrieval-shaped MCP tool is in this session's catalog, so ordinary
+  // sessions pay no prompt tax for it.
+  const retrievalToolNames = [
+    ...plugins
+      .getTools()
+      .filter((tool) => pluginActiveInProject(tool.pluginId, projectPath))
+      .map((tool) => `${tool.fullName} ${tool.description ?? ""}`),
+    ...userMcpTools.map((tool) => `${tool.fullName} ${tool.description ?? ""}`),
+  ];
+  const hasRetrievalTools = retrievalToolNames.some((text) =>
+    /mcp__(kb|weknora)|hybrid_search|retriev|knowledge_search|向量|知识库/i.test(text),
+  );
+  const toolGuidanceClauses = hasRetrievalTools
+    ? [
+        "知识库引用契约：本会话带有知识库检索工具。凡是内容取自检索结果的陈述，必须在句末以 [引用:n] 标注对应来源（n 为结果序号）；由检索事实推断但无直接来源的结论，需显式声明「据检索内容推断」。未使用检索工具的常识性内容无需标注。",
+      ]
+    : undefined;
+
   return {
     providerId: provider.id,
     modelId,
     projectPath,
     sidecarParams: {
       sessionId,
+      ...(toolGuidanceClauses ? { toolGuidanceClauses } : {}),
       mode: normalizeMode(
         overrides.mode ?? session.mode ?? settings.defaultMode ?? "agent",
       ),
