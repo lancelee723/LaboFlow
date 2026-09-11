@@ -1149,4 +1149,149 @@ export const api = {
       ),
     );
   },
+
+  // --- Module 02: Team Spaces (T52.4-11; SPEC §3.5) -------------------------
+  listSpaces: () =>
+    invoke<import("@pi-desktop/shared").SpaceDto[]>(IPC.invoke.spaceList),
+  createSpace: (input: { name: string; description?: string; teamId?: string }) =>
+    invoke<{ id: string }>(IPC.invoke.spaceCreate, input),
+  spaceTree: (spaceId: string) =>
+    invoke<import("@pi-desktop/shared").SpaceNode[]>(IPC.invoke.spaceTree, {
+      spaceId,
+    }),
+  spaceNodeCreate: (input: {
+    spaceId: string;
+    parentId: string | null;
+    type: import("@pi-desktop/shared").SpaceNodeType;
+    name: string;
+    sortKey?: number;
+  }) =>
+    invoke<import("@pi-desktop/shared").SpaceNode>(
+      IPC.invoke.spaceNodeCreate,
+      input,
+    ),
+  spaceNodeRename: (input: { spaceId: string; nodeId: string; name: string }) =>
+    invoke<import("@pi-desktop/shared").SpaceNode>(
+      IPC.invoke.spaceNodeRename,
+      input,
+    ),
+  spaceNodeMove: (input: {
+    spaceId: string;
+    nodeId: string;
+    parentId: string | null;
+  }) =>
+    invoke<import("@pi-desktop/shared").SpaceNode>(
+      IPC.invoke.spaceNodeMove,
+      input,
+    ),
+  spaceNodeDelete: (input: { spaceId: string; nodeId: string }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.spaceNodeDelete, input),
+  spaceNodeRestore: (input: { spaceId: string; nodeId: string }) =>
+    invoke<import("@pi-desktop/shared").SpaceNode>(
+      IPC.invoke.spaceNodeRestore,
+      input,
+    ),
+  spaceDocGet: (input: { spaceId: string; nodeId: string; version?: number }) =>
+    invoke<import("@pi-desktop/shared").SpaceDoc>(IPC.invoke.spaceDocGet, input),
+  spaceDocSave: (input: {
+    spaceId: string;
+    nodeId: string;
+    content: string;
+    baseVersion: number;
+    source?: string;
+  }) =>
+    invoke<{
+      nodeId: string;
+      version: number;
+      sha256: string;
+      source?: string;
+      seq?: number;
+    }>(IPC.invoke.spaceDocSave, input),
+  spaceCommentsList: (input: { spaceId: string; nodeId: string }) =>
+    invoke<import("@pi-desktop/shared").SpaceComment[]>(
+      IPC.invoke.spaceCommentsList,
+      input,
+    ),
+  spaceCommentCreate: (input: {
+    spaceId: string;
+    nodeId: string;
+    body: string;
+    anchor?: import("@pi-desktop/shared").SpaceAnchor | null;
+  }) =>
+    invoke<import("@pi-desktop/shared").SpaceComment>(
+      IPC.invoke.spaceCommentsCreate,
+      input,
+    ),
+  spaceCommentReply: (input: {
+    spaceId: string;
+    nodeId: string;
+    commentId: string;
+    body: string;
+  }) =>
+    invoke<import("@pi-desktop/shared").SpaceComment>(
+      IPC.invoke.spaceCommentsReply,
+      input,
+    ),
+  spaceCommentResolve: (input: {
+    spaceId: string;
+    nodeId: string;
+    commentId: string;
+    status: "open" | "resolved";
+  }) =>
+    invoke<import("@pi-desktop/shared").SpaceComment>(
+      IPC.invoke.spaceCommentsResolve,
+      input,
+    ),
+  spaceRevisionsList: (input: { spaceId: string; nodeId: string }) =>
+    invoke<import("@pi-desktop/shared").RevisionSuggestion[]>(
+      IPC.invoke.spaceRevisionsList,
+      input,
+    ),
+  spaceRevisionCreate: (input: {
+    spaceId: string;
+    nodeId: string;
+    anchor?: import("@pi-desktop/shared").SpaceAnchor | null;
+    originalText: string;
+    revisedText: string;
+    rationale?: string;
+    producedBy?: "user" | "agent";
+    model?: string;
+  }) =>
+    invoke<import("@pi-desktop/shared").RevisionSuggestion>(
+      IPC.invoke.spaceRevisionsCreate,
+      input,
+    ),
+  spaceRevisionDecide: (input: {
+    spaceId: string;
+    nodeId: string;
+    suggestionId: string;
+    decision: "accepted" | "rejected";
+  }) =>
+    invoke<import("@pi-desktop/shared").RevisionDecideResult>(
+      IPC.invoke.spaceRevisionsDecide,
+      input,
+    ),
+  spaceReviewByComments: (input: { spaceId: string; nodeId: string }) =>
+    invoke<import("@pi-desktop/shared").RevisionSuggestion[]>(
+      IPC.invoke.spaceRevisionsReviewByComments,
+      input,
+    ),
+  spaceEventsPull: (input: { spaceId: string; since: number }) =>
+    invoke<{
+      events: import("@pi-desktop/shared").SpaceEventPayload[];
+      lastSeq: number;
+    }>(IPC.invoke.spaceEventsPull, input),
+  spaceEventsSubscribe: (spaceId: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.spaceEventsSubscribe, { spaceId }),
+  spaceEventsUnsubscribe: (spaceId: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.spaceEventsUnsubscribe, { spaceId }),
+  /** Live space event frames for the ACTIVE space (main-side poll loop). */
+  onSpaceEvent: (
+    listener: (frame: import("@pi-desktop/shared").SpaceEventFrame) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.spaceEvent, (payload) =>
+      listener((payload ?? {}) as import("@pi-desktop/shared").SpaceEventFrame),
+    );
+  },
 };

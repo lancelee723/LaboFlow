@@ -2236,6 +2236,59 @@ export interface SpaceEventPayload {
   createdAt: string;
 }
 
+// --- Module 02: Team Spaces client slice (T52.4-11; SPEC §3.5 IPC) ---
+// SpaceNode / SpaceDoc / SpaceComment / RevisionSuggestion land with the
+// server slice above; everything here is the renderer-facing contract on top.
+
+/** 空间列表行（GET /spaces）：myPerm = 当前用户在该空间的档位。 */
+export interface SpaceDto {
+  id: string;
+  teamId: string | null;
+  name: string;
+  description: string;
+  archivedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  myPerm: SpacePerm;
+}
+
+export interface SpaceMemberDto {
+  userId: string;
+  username: string;
+  displayName: string | null;
+  perm: SpacePerm;
+  invitedBy: string | null;
+  createdAt: string;
+}
+
+/** SPEC §2 锚定模型。MD=段落文本锚；CSV=(row,col)；HTML=块 id（Yjs 相对路径）。 */
+export type SpaceTextAnchor = {
+  kind: "text";
+  /** 0-based line-block index into the markdown source. */
+  paraIndex: number;
+  textPrefix: string;
+  /** sha256 hex of the exact selected text. */
+  textHash: string;
+};
+export type SpaceCsvAnchor = { kind: "csv"; row: number; col: number };
+export type SpaceHtmlAnchor = { kind: "html"; blockId: string };
+export type SpaceAnchor = SpaceTextAnchor | SpaceCsvAnchor | SpaceHtmlAnchor;
+
+/** 平铺树行（父先于子，GET /spaces/:id/tree）挂上客户端构建的子节点。 */
+export interface SpaceTreeEntry extends SpaceNode {
+  children: SpaceTreeEntry[];
+}
+
+/** 渲染层收到的空间事件帧（IPC.event.spaceEvent；spaceId 由客户端标注）。 */
+export interface SpaceEventFrame extends SpaceEventPayload {
+  spaceId: string;
+}
+
+/** 接受修订建议的返回：appliedVersion 标记接受后提交的正文版本。 */
+export type RevisionDecideResult = RevisionSuggestion & {
+  appliedVersion?: number;
+};
+
 // --- Module 01: Org expert packs (T51.8; SPEC §3.4, FR-E-18/19) ---
 // 服务端发布的组织专家/专家团定义包，经 GET /org/bootstrap 的 expertPacks[]
 // 下发；客户端 OrgService 落为只读定义文件（upsert by name，source=org，

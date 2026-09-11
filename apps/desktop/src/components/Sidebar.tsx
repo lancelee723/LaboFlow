@@ -1997,6 +1997,14 @@ export function Sidebar({
         </button>
         <button
           type="button"
+          data-action="quick-spaces"
+          onClick={() => setPage("spaces")}
+        >
+          <IconFolder size={15} />
+          <span>{t("space.title")}</span>
+        </button>
+        <button
+          type="button"
           data-action="quick-scheduled"
           onClick={() => setPage("scheduled")}
         >

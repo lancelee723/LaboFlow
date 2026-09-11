@@ -267,6 +267,30 @@ export const IPC = {
     channelsConnect: "pi-desktop/channels/connect",
     channelsDisconnect: "pi-desktop/channels/disconnect",
     channelsTest: "pi-desktop/channels/test",
+
+    // --- Module 02: Team Spaces (T52.4-11 client slice; SPEC §3.5) ---
+    spaceList: "pi-desktop/space/list",
+    spaceCreate: "pi-desktop/space/create",
+    spaceTree: "pi-desktop/space/tree",
+    spaceNodeCreate: "pi-desktop/space/node/create",
+    spaceNodeRename: "pi-desktop/space/node/rename",
+    spaceNodeMove: "pi-desktop/space/node/move",
+    spaceNodeDelete: "pi-desktop/space/node/delete",
+    spaceNodeRestore: "pi-desktop/space/node/restore",
+    spaceDocGet: "pi-desktop/space/doc/get",
+    spaceDocSave: "pi-desktop/space/doc/save",
+    spaceCommentsList: "pi-desktop/space/comments/list",
+    spaceCommentsCreate: "pi-desktop/space/comments/create",
+    spaceCommentsReply: "pi-desktop/space/comments/reply",
+    spaceCommentsResolve: "pi-desktop/space/comments/resolve",
+    spaceRevisionsList: "pi-desktop/space/revisions/list",
+    spaceRevisionsCreate: "pi-desktop/space/revisions/create",
+    spaceRevisionsDecide: "pi-desktop/space/revisions/decide",
+    spaceRevisionsReviewByComments:
+      "pi-desktop/space/revisions/reviewByComments",
+    spaceEventsPull: "pi-desktop/space/events/pull",
+    spaceEventsSubscribe: "pi-desktop/space/events/subscribe",
+    spaceEventsUnsubscribe: "pi-desktop/space/events/unsubscribe",
   },
   event: {
     pluginChanged: "pi-desktop/event/pluginChanged",
@@ -288,6 +312,9 @@ export const IPC = {
     expertTeamRun: "pi-desktop/expert/event/teamRun",
     updatesState: "pi-desktop/updates/event/state",
     channelState: "pi-desktop/channel/event/state",
+    /** Module 02: space event frames (per-space poll loop in the main
+     * process; SPEC §3.2 frame types forwarded verbatim). */
+    spaceEvent: "pi-desktop/event/spaceFrame",
   },
 } as const;
 
