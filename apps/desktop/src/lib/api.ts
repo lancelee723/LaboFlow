@@ -689,6 +689,49 @@ export const api = {
       IPC.invoke.orgSetSessionEnabled,
       input,
     ),
+
+  // --- Phase 4 shared workspaces --------------------------------------------
+  orgWsSessions: (wid: string) =>
+    invoke<Array<Record<string, unknown>>>(IPC.invoke.orgWsSessions, { wid }),
+  orgWsCreateSession: (wid: string, title: string) =>
+    invoke<{ id: string }>(IPC.invoke.orgWsCreateSession, { wid, title }),
+  orgWsEntries: (wid: string, sid: string, since: number) =>
+    invoke<Array<Record<string, unknown>>>(
+      IPC.invoke.orgWsEntries,
+      { wid, sid, since },
+    ),
+  orgWsConnect: (wid: string, sid: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.orgWsConnect, { wid, sid }),
+  orgWsDisconnect: (sid: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.orgWsDisconnect, { sid }),
+  orgWsLock: (wid: string, sid: string) =>
+    invoke<Record<string, unknown>>(IPC.invoke.orgWsLock, { wid, sid }),
+  orgWsRelease: (sid: string) =>
+    invoke<{ ok: boolean }>(IPC.invoke.orgWsRelease, { sid }),
+  orgWsSay: (wid: string, sid: string, text: string) =>
+    invoke<{ seq: number }>(IPC.invoke.orgWsSay, { wid, sid, text }),
+  orgWsDeliverables: (wid: string) =>
+    invoke<Array<Record<string, unknown>>>(IPC.invoke.orgWsDeliverables, { wid }),
+  orgWsDeliverableUpload: (input: {
+    wid: string;
+    path: string;
+    title?: string;
+    contentBase64: string;
+    sessionId?: string;
+  }) => invoke<Record<string, unknown>>(IPC.invoke.orgWsDeliverableUpload, input),
+  orgWsDeliverableDownload: (did: string, version?: number) =>
+    invoke<{ contentBase64: string; sha256?: string; versionNo?: number }>(
+      IPC.invoke.orgWsDeliverableDownload,
+      { did, version },
+    ),
+  onOrgWsFrame: (
+    listener: (frame: import("@pi-desktop/shared").OrgWsFrame) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.orgWsFrame, (payload) =>
+      listener((payload ?? {}) as import("@pi-desktop/shared").OrgWsFrame),
+    );
+  },
   /**
    * Level and project must travel with the id: a project skill has no global
    * counterpart to fall back to, so resolving by id alone would miss it.

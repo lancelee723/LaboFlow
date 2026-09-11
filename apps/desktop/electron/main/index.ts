@@ -155,6 +155,7 @@ import {
 
 import { HostProcess } from "./host-process";
 import { OrgService } from "./org-service";
+import { OrgWorkspaceHub } from "./org-workspaces";
 import { attachSessionTranscript } from "./session-attach";
 import {
   shouldCreateTaskNotification as shouldCreateTaskNotificationPolicy,
@@ -6894,12 +6895,26 @@ function registerIpc() {
   handle(IPC.invoke.orgChangePassword, (input: { currentPassword: string; newPassword: string }) =>
     orgService.changePassword(input),
   );
+  // Phase 4 shared-workspace client (declared before the org handlers so
+  // sign-out can drop live streams).
+  const orgHub = new OrgWorkspaceHub({
+    getJson: (path) => orgService.getOrgJson(path),
+    postJson: (path, body) => orgService.postOrgJson(path, body),
+    getToken: () => orgService.getAccessToken(),
+    getUserId: async () => orgService.getMe()?.userId,
+    getServerUrl: async () => orgService.getServerUrl(),
+    emit: (frame) => sendToRenderer(IPC.event.orgWsFrame, frame),
+  });
   handle(IPC.invoke.orgLogout, async () => {
     const status = await orgService.logout();
     // Signing out of the current org: the provider follows whatever org is
-    // current now (and is removed only when no session remains).
+    // current now (and is removed only when no session remains). Live WS
+    // streams die with the session.
     if (status.state === "connected") await syncOrgProvider();
-    else await removeOrgProvider();
+    else {
+      await removeOrgProvider();
+      orgHub.disconnectAll();
+    }
     return status;
   });
   handle(IPC.invoke.orgSetCurrent, async (input: { key: string }) => {
@@ -6908,6 +6923,77 @@ function registerIpc() {
     return status;
   });
   handle(IPC.invoke.orgQuotaRemaining, () => orgService.quotaRemaining());
+  handle(IPC.invoke.orgWsSessions, (input: { wid: string }) =>
+    orgService.getOrgJson(
+      `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions`,
+    ),
+  );
+  handle(
+    IPC.invoke.orgWsCreateSession,
+    (input: { wid: string; title: string }) =>
+      orgService.postOrgJson(
+        `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions`,
+        { title: String(input?.title ?? "共享会话") },
+      ),
+  );
+  handle(
+    IPC.invoke.orgWsEntries,
+    (input: { wid: string; sid: string; since?: number }) =>
+      orgService.getOrgJson(
+        `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions/${encodeURIComponent(String(input?.sid ?? ""))}/entries?since=${Number(input?.since ?? -1)}`,
+      ),
+  );
+  handle(IPC.invoke.orgWsConnect, async (input: { wid: string; sid: string }) => {
+    await orgHub.connect(String(input?.wid ?? ""), String(input?.sid ?? ""));
+    return { ok: true };
+  });
+  handle(IPC.invoke.orgWsDisconnect, async (input: { sid: string }) => {
+    orgHub.disconnect(String(input?.sid ?? ""));
+    return { ok: true };
+  });
+  handle(IPC.invoke.orgWsLock, (input: { wid: string; sid: string }) =>
+    orgService.postOrgJson(
+      `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions/${encodeURIComponent(String(input?.sid ?? ""))}/lock`,
+      {},
+    ),
+  );
+  handle(IPC.invoke.orgWsRelease, async (input: { wid: string; sid: string }) =>
+    orgService.postOrgJson(
+      `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions/${encodeURIComponent(String(input?.sid ?? ""))}/release`,
+      {},
+    ),
+  );
+  handle(
+    IPC.invoke.orgWsSay,
+    async (input: { wid: string; sid: string; text: string }) =>
+      orgHub.say(String(input?.wid ?? ""), String(input?.sid ?? ""), String(input?.text ?? "")),
+  );
+  handle(IPC.invoke.orgWsDeliverables, (input: { wid: string }) =>
+    orgService.getOrgJson(
+      `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/deliverables`,
+    ),
+  );
+  handle(
+    IPC.invoke.orgWsDeliverableUpload,
+    (input: { wid: string; path: string; title?: string; contentBase64: string; sessionId?: string }) =>
+      orgService.postOrgJson(
+        `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/deliverables`,
+        {
+          path: input?.path,
+          title: input?.title ?? input?.path,
+          contentBase64: input?.contentBase64,
+          source: "upload",
+          sessionId: input?.sessionId,
+        },
+      ),
+  );
+  handle(
+    IPC.invoke.orgWsDeliverableDownload,
+    (input: { did: string; version?: number }) =>
+      orgService.getOrgJson(
+        `/deliverables/${encodeURIComponent(String(input?.did ?? ""))}/download${input?.version ? `?version=${input.version}` : ""}`,
+      ),
+  );
   handle(IPC.invoke.orgRemoveSession, (input: { key: string }) =>
     orgService.removeSession(String(input?.key ?? "")),
   );

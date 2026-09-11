@@ -104,6 +104,62 @@ export class WorkspaceService {
     return { seq: target, duplicate: false };
   }
 
+  /** P4: 工作区的共享会话列表（含持锁人与最后序号，供旁观列表用）。 */
+  async listShared(
+    workspaceId: string,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      ownerId: string | null;
+      ownerName: string | null;
+      lockUserId: string | null;
+      lockHolderName: string | null;
+      lastSeq: number;
+      createdAt: string;
+    }>
+  > {
+    const { users } = await import('../db/schema.js');
+    const rows = await this.db
+      .select()
+      .from(sharedSessions)
+      .where(eq(sharedSessions.workspaceId, workspaceId));
+    const nameOf = new Map<string, string>();
+    const ids = [
+      ...new Set(
+        rows
+          .flatMap((r) => [r.ownerId, r.lockUserId])
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (ids.length) {
+      for (const u of await this.db.select().from(users)) {
+        if (ids.includes(u.id)) nameOf.set(u.id, u.displayName || u.username);
+      }
+    }
+    const lastSeqBySession = new Map<string, number>();
+    for (const row of await this.db
+      .select({
+        sessionId: sharedSessionEntries.sessionId,
+        maxSeq: sql<number>`MAX(${sharedSessionEntries.seq})`,
+      })
+      .from(sharedSessionEntries)
+      .where(eq(sharedSessionEntries.sessionId, workspaceId))
+      .groupBy(sharedSessionEntries.sessionId)) {
+      lastSeqBySession.set(row.sessionId, Number(row.maxSeq));
+    }
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      ownerId: r.ownerId,
+      ownerName: r.ownerId ? (nameOf.get(r.ownerId) ?? null) : null,
+      lockUserId: r.lockUserId,
+      lockHolderName: r.lockUserId ? (nameOf.get(r.lockUserId) ?? null) : null,
+      lastSeq: lastSeqBySession.get(r.id) ?? 0,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
   /** 断线增量：since 之后的所有条目（按 seq 升序）。 */
   async entriesSince(sessionId: string, sinceSeq: number): Promise<Array<{ seq: number; entry: unknown; authorId: string | null }>> {
     const rows = await this.db

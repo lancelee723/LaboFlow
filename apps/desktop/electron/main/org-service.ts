@@ -46,6 +46,7 @@ export class OrgService {
   private readonly deps: OrgHostDeps;
   private readonly fetchImpl: OrgFetch;
   private lastBootstrap: OrgBootstrap | null = null;
+  private lastServerUrl: string | undefined;
 
   // Plain field assignment (no parameter properties): keeps this file runnable
   // under Node's type-stripping mode so the multi-org book can be behavior-
@@ -290,6 +291,7 @@ export class OrgService {
     }
     const bootstrap = body as OrgBootstrap;
     this.lastBootstrap = bootstrap;
+    this.lastServerUrl = session.serverUrl;
     const orgName = bootstrap.org?.name;
     // Remember the org name so the picker can label entries without a call.
     const enriched = book.sessions.map((entry) =>
@@ -372,6 +374,47 @@ export class OrgService {
 
   async quotaRemaining(): Promise<unknown> {
     return this.getOrgJson("/quota/remaining");
+  }
+
+  /** Authenticated POST passthrough (JSON body → JSON response). */
+  async postOrgJson(path: string, body: unknown): Promise<unknown> {
+    const session = await this.currentSession();
+    if (!session) throw new Error("ORG_NOT_CONNECTED");
+    const response = await this.fetchImpl(`${session.serverUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.accessToken}`,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (response.status === 401) throw new Error("ORG_EXPIRED");
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+      };
+      const detail = errBody.message ?? errBody.error ?? `HTTP ${response.status}`;
+      throw new Error(`ORG_API_FAILED: ${detail}`);
+    }
+    return response.json().catch(() => ({}));
+  }
+
+  /** The current org session's user id (from the last bootstrap). */
+  getMe(): { userId: string; username: string } | null {
+    const me = this.lastBootstrap?.me;
+    return me ? { userId: me.userId, username: me.username } : null;
+  }
+
+  /** Access token of the current org session (WS auth query param). */
+  async getAccessToken(): Promise<string | null> {
+    const session = await this.currentSession();
+    return session?.accessToken ?? null;
+  }
+
+  /** Origin of the current org server (empty when disconnected). */
+  getServerUrl(): string | undefined {
+    return this.lastServerUrl;
   }
 }
 

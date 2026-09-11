@@ -859,7 +859,7 @@ export type AppState = {
   toasts: ToastItem[];
   notifications: AppNotification[];
   unreadNotificationCount: number;
-  page: "chat" | "pulls" | "scheduled" | "plugins" | "settings";
+  page: "chat" | "pulls" | "scheduled" | "plugins" | "workspaces" | "settings";
   /** Tab ids come from the shared settings index so nav, search, and the
    * page cannot drift apart. */
   settingsTab: SettingsTabId;

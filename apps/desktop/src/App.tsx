@@ -77,6 +77,11 @@ const PullRequestsPage = lazy(() =>
     default: module.PullRequestsPage,
   })),
 );
+const WorkspacesPage = lazy(() =>
+  import("./pages/WorkspacesPage").then((module) => ({
+    default: module.WorkspacesPage,
+  })),
+);
 const ScheduledPage = lazy(() =>
   import("./pages/ScheduledPage").then((module) => ({
     default: module.ScheduledPage,
@@ -1904,6 +1909,10 @@ function AppShell() {
               {page === "pulls" ? (
                 <div className="route-surface route-page">
                   <PullRequestsPage />
+                </div>
+              ) : page === "workspaces" ? (
+                <div className="route-surface route-page">
+                  <WorkspacesPage />
                 </div>
               ) : page === "scheduled" ? (
                 <div className="route-surface route-page">

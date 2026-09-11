@@ -1948,6 +1948,8 @@ export type OrgStatus = {
   /** Every stored org session (multi-org support) and which one is current. */
   orgs?: OrgSessionInfo[];
   currentKey?: string;
+  /** Workspaces from the latest bootstrap (Phase 4 shared workspaces). */
+  workspaces?: OrgWorkspaceInfo[];
 };
 
 export type OrgBootstrap = {
@@ -1967,6 +1969,52 @@ export type OrgQuotaEntry = {
   teamUsed?: number | null;
   selfUsed: number;
   resetAt?: string;
+};
+
+export type OrgWorkspacePerm = "viewer" | "contributor" | "manager";
+
+export type OrgWorkspaceInfo = {
+  id: string;
+  name: string;
+  teamId?: string | null;
+  perm: OrgWorkspacePerm | string;
+};
+
+export type OrgSharedSession = {
+  id: string;
+  title: string;
+  ownerId?: string | null;
+  ownerName?: string | null;
+  lockUserId?: string | null;
+  lockHolderName?: string | null;
+  lastSeq: number;
+  createdAt?: string;
+};
+
+export type OrgSharedEntry = {
+  seq: number;
+  entry: { kind?: string; text?: string } & Record<string, unknown>;
+  authorId?: string | null;
+};
+
+export type OrgWsFrame = {
+  sessionId: string;
+  type: "entry.appended" | "lock.acquired" | "lock.released" | string;
+  seq?: number;
+  entry?: OrgSharedEntry["entry"];
+  userId?: string;
+  mine?: boolean;
+  reason?: string;
+};
+
+export type OrgDeliverable = {
+  id: string;
+  path: string;
+  title: string;
+  currentVersion: number;
+  source?: string;
+  uploaderId?: string | null;
+  createdAt?: string;
 };
 
 export type OrgQuotaRemaining = {

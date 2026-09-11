@@ -84,6 +84,7 @@ import {
   IconSearch,
   IconSidebar,
   IconSettings,
+  IconUsers,
   IconStar,
   IconX,
 } from "./icons";
@@ -1889,6 +1890,14 @@ export function Sidebar({
           {shortcutHint("openSearch") ? (
             <kbd>{shortcutHint("openSearch")}</kbd>
           ) : null}
+        </button>
+        <button
+          type="button"
+          data-action="quick-workspaces"
+          onClick={() => setPage("workspaces")}
+        >
+          <IconUsers size={15} />
+          <span>{t("nav.workspaces")}</span>
         </button>
         <button
           type="button"

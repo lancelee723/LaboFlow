@@ -431,6 +431,14 @@ class CoreController {
     return this.deps.workspaces.createSharedSession(id, actor.userId, String(body.title ?? '共享会话'));
   }
 
+  /** P4 共享工作区: 会话列表（含持锁人显示名与 lastSeq，供旁观/增量同步）。 */
+  @Get('workspaces/:id/sessions')
+  async listShared(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    await this.deps.workspaces.assertCan(id, actor.userId, 'view');
+    return this.deps.workspaces.listShared(id);
+  }
+
   @Post('workspaces/:id/sessions/:sid/lock')
   async lock(@Req() req: FastifyRequest, @Param('id') id: string, @Param('sid') sid: string) {
     const actor = requireActor(req);

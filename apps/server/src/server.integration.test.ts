@@ -204,6 +204,32 @@ describe('P2 server integration (T2.1–T2.5)', () => {
     void quotaCounters;
   });
 
+  it('P4: shared session list exposes holder name and lastSeq', async () => {
+    if (!pgAvailable) return;
+    const created = await api('POST', '/workspaces', { name: 'P4-WS' }, adminToken);
+    expect(created.status).toBe(200);
+    const wid = String(created.json.id);
+    const session = await api('POST', `/workspaces/${wid}/sessions`, { title: '客户A-测算' }, adminToken);
+    expect(session.status).toBe(200);
+    const sid = String(session.json.id);
+    // append two entries as admin (lock required → acquire first)
+    await api('POST', `/workspaces/${wid}/sessions/${sid}/lock`, {}, adminToken);
+    await api('POST', `/workspaces/${wid}/sessions/${sid}/entries`, { entry: { kind: 'say', text: '第一条' } }, adminToken);
+    await api('POST', `/workspaces/${wid}/sessions/${sid}/entries`, { entry: { kind: 'say', text: '第二条' } }, adminToken);
+    const list = await api('GET', `/workspaces/${wid}/sessions`, undefined, adminToken);
+    expect(list.status).toBe(200);
+    const rows = list.json as unknown as Array<{ id: string; title: string; lockHolderName: string | null; lastSeq: number }>;
+    const row = rows.find((r) => r.id === sid);
+    expect(row).toBeTruthy();
+    expect(row!.title).toBe('客户A-测算');
+    expect(row!.lockHolderName).toBe('系统管理员');
+    expect(row!.lastSeq).toBe(2);
+    // member with workspace membership? admin is owner — entries pull works
+    const entries = await api('GET', `/workspaces/${wid}/sessions/${sid}/entries?since=-1`, undefined, adminToken);
+    expect(entries.status).toBe(200);
+    expect((entries.json as unknown as unknown[]).length).toBe(2);
+  });
+
   it('quota remaining: live limits × counters (团队+本人, resetAt) — P3', async () => {
     if (!pgAvailable) return;
     // 团队日会话配额已在前面用例创建：{kind:'sessions', limit:50, period:'daily'}
