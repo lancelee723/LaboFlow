@@ -25,13 +25,14 @@ import {
   IconSettings,
   IconSliders,
   IconSparkles,
+  IconGraduationCap,
 } from "./icons";
 
 /** Navigable pages surfaced by the global search alongside sessions. */
 const PAGE_ENTRIES = [
   { page: "pulls", labelKey: "pulls.title", icon: IconPullRequest },
   { page: "scheduled", labelKey: "scheduled.title", icon: IconClock },
-  { page: "experts", labelKey: "expert.title", icon: IconSparkles },
+  { page: "experts", labelKey: "expert.title", icon: IconGraduationCap },
   { page: "plugins", labelKey: "nav.plugins", icon: IconAt },
 ] as const;
 

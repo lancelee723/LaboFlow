@@ -88,6 +88,7 @@ import {
   IconSettings,
   IconUsers,
   IconSparkles,
+  IconGraduationCap,
   IconStar,
   IconX,
 } from "./icons";
@@ -641,13 +642,19 @@ export function Sidebar({
   const updateReady =
     update?.status === "available" || update?.status === "downloaded";
   const appVersion = update?.currentVersion || version?.version || "";
+  // The chip shows the product's display version ("Alpha-1.0.0", published by
+  // appGetVersion) rather than the build semver — the semver stays the
+  // updater's currency, not the user-facing label.
+  const displayVersion = version?.displayVersion?.trim();
   const buildLabel = updateReady
     ? `v${update?.availableVersion ?? appVersion}`
     : update?.status === "checking"
       ? t("updates.checking")
-      : appVersion
-        ? `v${appVersion}`
-        : t("nav.buildUnknown");
+      : displayVersion
+        ? displayVersion
+        : appVersion
+          ? `v${appVersion}`
+          : t("nav.buildUnknown");
   const buildTitle = updateReady
     ? t("updates.available", { version: update?.availableVersion ?? "" })
     : t("nav.checkForUpdates");
@@ -1574,6 +1581,18 @@ export function Sidebar({
             <IconNewSession size={14} />
             <span>{t("nav.newTemporarySession")}</span>
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-action="quick-summon-expert"
+            onClick={() => {
+              closeMenus(false);
+              setPage("experts");
+            }}
+          >
+            <IconGraduationCap size={14} />
+            <span>{t("expert.menuSummon")}</span>
+          </button>
           {openProjects.map((project) => (
             <button
               key={project.path}
@@ -2010,14 +2029,6 @@ export function Sidebar({
         >
           <IconClock size={15} />
           <span>{t("nav.automation")}</span>
-        </button>
-        <button
-          type="button"
-          data-action="quick-experts"
-          onClick={() => setPage("experts")}
-        >
-          <IconSparkles size={15} />
-          <span>{t("nav.experts")}</span>
         </button>
         <button
           type="button"

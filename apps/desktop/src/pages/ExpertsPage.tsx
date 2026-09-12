@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ExpertTeamProgress } from "@pi-desktop/shared";
+import type {
+  ExpertTeamProgress,
+  ProviderPublic,
+  ThinkingLevel,
+  UserSkillRecord,
+} from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
 import { api, type ExpertListItem, type ExpertTeamListItem } from "../lib/api";
-import { Badge, Button, Field, Input, Panel, Select, Textarea } from "../components/ui";
-import { IconBot, IconPlus, IconSearch, IconSparkles, IconUser, IconUsers, IconX } from "../components/icons";
+import { THINKING_LEVELS } from "@pi-desktop/shared";
+import { Badge, Button, Field, Input, Panel, Select, Textarea, cx } from "../components/ui";
+import { IconGraduationCap, IconPlus, IconSearch, IconUser, IconUsers, IconX } from "../components/icons";
 
 type ExpertTab = "center" | "mine" | "teams";
 
 /** Industry filter chips: the fixed catalog first, then anything else in data. */
 const FIXED_INDUSTRIES = ["通用", "战略与组织", "金融", "先进制造", "TMT", "医疗健康"];
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const LEADER_STYLES = ["fine", "coarse"] as const;
 const INTEGRATION_MODES = ["moderator", "summary", "sections"] as const;
 const MAX_TEAM_MEMBERS = 6;
@@ -21,11 +26,12 @@ interface ExpertFormState {
   industry: string;
   tags: string;
   examples: string;
-  skills: string;
+  /** Multi-select from the user's skill list (4a). */
+  skills: string[];
   mcpServers: string;
+  /** `providerId/modelId` from the provider list; empty = same as session. */
   model: string;
-  thinkingLevel: string;
-  budgetTokens: string;
+  thinkingLevel: ThinkingLevel | "";
   body: string;
 }
 
@@ -40,6 +46,15 @@ interface TeamFormState {
 }
 
 /** One live/expired team run tracked from the expertTeamRun event stream. */
+interface TeamRunStage {
+  index: number;
+  total: number;
+  name: string;
+  round?: number;
+  maxRounds?: number;
+  expert?: string;
+}
+
 interface TeamRunView {
   runId: string;
   teamName: string;
@@ -47,7 +62,13 @@ interface TeamRunView {
   members: Array<{ expert: string; status: string }>;
   totalTokens: number;
   budgetTokens?: number;
+  stage?: TeamRunStage;
   updatedAt: number;
+}
+
+interface ModelOption {
+  value: string;
+  label: string;
 }
 
 const EMPTY_EXPERT_FORM: ExpertFormState = {
@@ -56,11 +77,10 @@ const EMPTY_EXPERT_FORM: ExpertFormState = {
   industry: "",
   tags: "",
   examples: "",
-  skills: "",
+  skills: [],
   mcpServers: "",
   model: "",
   thinkingLevel: "",
-  budgetTokens: "200000",
   body: "",
 };
 
@@ -87,6 +107,22 @@ function asString(value: unknown): string | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Enabled providers with a usable credential, flattened to model options. */
+function modelOptionsFrom(providers: ProviderPublic[]): ModelOption[] {
+  const options: ModelOption[] = [];
+  for (const provider of providers) {
+    if (!provider.enabled) continue;
+    if (!(provider.hasSecret || provider.hasOauth || provider.authKind === "none")) continue;
+    for (const model of provider.models ?? []) {
+      options.push({
+        value: `${provider.id}/${model.id}`,
+        label: `${provider.name} · ${model.id}`,
+      });
+    }
+  }
+  return options;
 }
 
 export function ExpertsPage() {
@@ -132,6 +168,10 @@ export function ExpertsPage() {
   // Live team runs (专家团 tab)
   const [runs, setRuns] = useState<Record<string, TeamRunView>>({});
 
+  // Picker sources (4a): the model and skill lists come from LaboFlow itself.
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  const [skillOptions, setSkillOptions] = useState<UserSkillRecord[]>([]);
+
   const refresh = async () => {
     setLoading(true);
     try {
@@ -145,6 +185,22 @@ export function ExpertsPage() {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Load picker sources once per editor opening; empty lists degrade to hints. */
+  const loadPickerSources = async () => {
+    try {
+      const { providers } = await api.listProviders();
+      setModelOptions(modelOptionsFrom(providers ?? []));
+    } catch {
+      setModelOptions([]);
+    }
+    try {
+      const { skills } = await api.listUserSkills();
+      setSkillOptions((skills ?? []).filter((skill) => skill.enabled));
+    } catch {
+      setSkillOptions([]);
     }
   };
 
@@ -169,6 +225,7 @@ export function ExpertsPage() {
               status: asString(member.status) ?? "pending",
             }))
           : prev?.members ?? [];
+        const stageRaw = payload.stage as Record<string, unknown> | undefined;
         const next: TeamRunView = {
           runId: event.runId,
           teamName: asString(payload.team) ?? prev?.teamName ?? "",
@@ -176,6 +233,16 @@ export function ExpertsPage() {
           members,
           totalTokens: asNumber(payload.totalTokens) ?? prev?.totalTokens ?? 0,
           budgetTokens: asNumber(payload.budgetTokens) ?? prev?.budgetTokens,
+          stage: stageRaw
+            ? {
+                index: asNumber(stageRaw.index) ?? 0,
+                total: asNumber(stageRaw.total) ?? 0,
+                name: asString(stageRaw.name) ?? "",
+                round: asNumber(stageRaw.round),
+                maxRounds: asNumber(stageRaw.maxRounds),
+                expert: asString(stageRaw.expert),
+              }
+            : prev?.stage,
           updatedAt: Date.now(),
         };
         return { ...current, [event.runId]: next };
@@ -312,6 +379,7 @@ export function ExpertsPage() {
   };
 
   const openExpertEditor = async (expert: ExpertListItem | null) => {
+    void loadPickerSources();
     if (!expert) {
       setEditingPreset(false);
       setForm(EMPTY_EXPERT_FORM);
@@ -328,11 +396,10 @@ export function ExpertsPage() {
         industry: record.industry ?? "",
         tags: record.tags.join(", "),
         examples: record.examples.join("\n"),
-        skills: record.skills.join(", "),
+        skills: [...record.skills],
         mcpServers: record.mcpServers.join(", "),
         model: record.model ?? "",
-        thinkingLevel: record.thinkingLevel ?? "",
-        budgetTokens: record.budgetTokens != null ? String(record.budgetTokens) : "200000",
+        thinkingLevel: (record.thinkingLevel as ThinkingLevel | undefined) ?? "",
         body: detail.body ?? "",
       });
       setEditorOpen(true);
@@ -345,7 +412,6 @@ export function ExpertsPage() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      const budget = Number(form.budgetTokens);
       await api.saveExpert({
         name: form.name.trim(),
         description: form.description.trim(),
@@ -355,11 +421,10 @@ export function ExpertsPage() {
           .split("\n")
           .map((line) => line.trim())
           .filter(Boolean),
-        skills: splitList(form.skills),
+        skills: form.skills,
         mcpServers: splitList(form.mcpServers),
         ...(form.model.trim() ? { model: form.model.trim() } : {}),
         ...(form.thinkingLevel ? { thinkingLevel: form.thinkingLevel } : {}),
-        ...(Number.isFinite(budget) && budget > 0 ? { budgetTokens: budget } : {}),
         body: form.body,
       });
       setEditorOpen(false);
@@ -392,6 +457,7 @@ export function ExpertsPage() {
   };
 
   const openTeamEditor = (team: ExpertTeamListItem | null) => {
+    void loadPickerSources();
     if (!team) {
       setTeamForm(EMPTY_TEAM_FORM);
       setTeamEditorOpen(true);
@@ -464,7 +530,7 @@ export function ExpertsPage() {
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-bg-hover text-text-secondary">
-            <IconBot size={15} />
+            <IconGraduationCap size={15} />
           </span>
           <span className="min-w-0 truncate text-base-plus font-medium">{expert.name}</span>
         </div>
@@ -488,12 +554,12 @@ export function ExpertsPage() {
             <button
               key={example}
               type="button"
-              className="block w-full truncate rounded-md border border-border-default px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-hover"
+              className="block w-full truncate rounded-md bg-bg-hover px-2 py-1 text-left text-xs text-text-secondary hover:text-text-primary"
               title={example}
               onClick={() => {
-                setInvokeTarget(expert);
                 setInvokeTask(example);
                 setInvokeSessionId(activeSessionId ?? "");
+                setInvokeTarget(expert);
               }}
             >
               {example}
@@ -501,15 +567,10 @@ export function ExpertsPage() {
           ))}
         </div>
       ) : null}
-      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-        <span className="text-xs text-text-muted">{expert.industry}</span>
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={() => openInvoke(expert)}
-        >
-          <IconSparkles size={13} />
-          {t("expert.invoke")}
+      <div className="mt-auto flex justify-end pt-1">
+        <Button size="sm" variant="primary" onClick={() => openInvoke(expert)}>
+          <IconGraduationCap size={13} />
+          {t("expert.summon")}
         </Button>
       </div>
     </Panel>
@@ -607,261 +668,369 @@ export function ExpertsPage() {
     );
   };
 
+  const toggleFormSkill = (name: string, on: boolean) => {
+    setForm((current) => ({
+      ...current,
+      skills: on
+        ? [...current.skills, name]
+        : current.skills.filter((skill) => skill !== name),
+    }));
+  };
+
   const renderExpertEditor = () => {
     if (!editorOpen) return null;
     return (
-      <Panel className="page-card space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-md-plus font-medium">{t("expert.editorTitle")}</div>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={t("common.close")}
-            onClick={() => setEditorOpen(false)}
-          >
-            <IconX size={15} />
-          </button>
-        </div>
-        {editingPreset ? (
-          <div className="rounded-md border border-border-default bg-bg-hover px-3 py-2 text-xs text-text-secondary">
-            {t("expert.presetShadowNote")}
+      <div
+        className="overlay ext-sheet-overlay"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !saving) setEditorOpen(false);
+        }}
+      >
+        <div className="dialog ext-sheet" role="dialog" aria-modal aria-labelledby="expert-sheet-title">
+          <div className="ext-sheet-head">
+            <div>
+              <h3 id="expert-sheet-title" className="ext-sheet-title">
+                {t("expert.editorTitle")}
+              </h3>
+              <p className="ext-sheet-sub">{t("expert.editorSubtitle")}</p>
+            </div>
+            <button
+              type="button"
+              className="ext-sheet-close"
+              aria-label={t("common.close")}
+              onClick={() => setEditorOpen(false)}
+            >
+              <IconX size={14} />
+            </button>
           </div>
-        ) : null}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("expert.fieldName")}>
-            <Input
-              value={form.name}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-            />
-          </Field>
-          <Field label={t("expert.fieldIndustry")}>
-            <Select
-              value={form.industry}
-              onChange={(event) => setForm({ ...form, industry: event.target.value })}
-            >
-              <option value="">{t("expert.industryNone")}</option>
-              {industries.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </Select>
-          </Field>
+
+          <div className="ext-sheet-body">
+            {editingPreset ? (
+              <p className="ext-field-hint">{t("expert.presetShadowNote")}</p>
+            ) : null}
+            <div className="ext-field-pair">
+              <Field label={t("expert.fieldName")}>
+                <Input
+                  value={form.name}
+                  autoFocus={!editingPreset}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </Field>
+              <Field label={t("expert.fieldIndustry")}>
+                <Select
+                  value={form.industry}
+                  onChange={(event) => setForm({ ...form, industry: event.target.value })}
+                >
+                  <option value="">{t("expert.industryNone")}</option>
+                  {industries.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            <Field label={t("expert.fieldDescription")}>
+              <Input
+                value={form.description}
+                onChange={(event) => setForm({ ...form, description: event.target.value })}
+              />
+            </Field>
+
+            <div className="ext-field-pair">
+              <Field label={t("expert.fieldTags")} hint={t("expert.tagsHint")}>
+                <Input
+                  value={form.tags}
+                  onChange={(event) => setForm({ ...form, tags: event.target.value })}
+                />
+              </Field>
+              <Field label={t("expert.fieldMcp")} hint={t("expert.mcpHint")}>
+                <Input
+                  value={form.mcpServers}
+                  onChange={(event) => setForm({ ...form, mcpServers: event.target.value })}
+                />
+              </Field>
+            </div>
+
+            <Field label={t("expert.fieldExamples")} hint={t("expert.examplesHint")}>
+              <Textarea
+                rows={2}
+                value={form.examples}
+                onChange={(event) => setForm({ ...form, examples: event.target.value })}
+              />
+            </Field>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label">{t("expert.fieldSkills")}</div>
+              <p className="ext-field-hint">{t("expert.skillsHint")}</p>
+              {skillOptions.length ? (
+                <div className="ext-tool-pick" role="group" aria-label={t("expert.fieldSkills")}>
+                  {skillOptions.map((skill) => (
+                    <label
+                      key={skill.id}
+                      className={cx("ext-tool-opt", form.skills.includes(skill.id) && "is-on")}
+                      title={skill.description || undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.skills.includes(skill.id)}
+                        onChange={(event) => toggleFormSkill(skill.id, event.target.checked)}
+                      />
+                      <code>{skill.id}</code>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="ext-field-hint">{t("expert.skillsEmpty")}</p>
+              )}
+            </div>
+
+            <div className="ext-field-pair">
+              <Field label={t("expert.fieldModel")} hint={t("expert.modelHint")}>
+                <Select
+                  value={form.model}
+                  onChange={(event) => setForm({ ...form, model: event.target.value })}
+                >
+                  <option value="">{t("expert.modelInherit")}</option>
+                  {modelOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={t("expert.fieldThinking")} hint={t("expert.thinkingHint")}>
+                <Select
+                  value={form.thinkingLevel}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      thinkingLevel: event.target.value as ThinkingLevel | "",
+                    })
+                  }
+                >
+                  <option value="">{t("expert.thinkInherit")}</option>
+                  {THINKING_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {t(`thinkingLevel.${level}`)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label">{t("expert.fieldBody")}</div>
+              <p className="ext-field-hint">{t("expert.bodyHint")}</p>
+              <Textarea
+                className="ext-skill-body"
+                rows={12}
+                spellCheck={false}
+                value={form.body}
+                placeholder={t("expert.fieldBodyPlaceholder")}
+                onChange={(event) => setForm({ ...form, body: event.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="ext-sheet-actions">
+            <span className="ext-sheet-note">{t("expert.sheetNote")}</span>
+            <div className="ext-sheet-actions-end">
+              <Button variant="ghost" onClick={() => setEditorOpen(false)} disabled={saving}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={saving || !form.name.trim()}
+                onClick={() => void submitExpertForm()}
+              >
+                {saving ? t("common.saving") : t("common.save")}
+              </Button>
+            </div>
+          </div>
         </div>
-        <Field label={t("expert.fieldDescription")}>
-          <Input
-            value={form.description}
-            onChange={(event) => setForm({ ...form, description: event.target.value })}
-          />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("expert.fieldTags")}>
-            <Input
-              value={form.tags}
-              onChange={(event) => setForm({ ...form, tags: event.target.value })}
-            />
-          </Field>
-          <Field label={t("expert.fieldSkills")}>
-            <Input
-              value={form.skills}
-              onChange={(event) => setForm({ ...form, skills: event.target.value })}
-            />
-          </Field>
-        </div>
-        <Field label={t("expert.fieldExamples")}>
-          <Textarea
-            rows={2}
-            value={form.examples}
-            onChange={(event) => setForm({ ...form, examples: event.target.value })}
-          />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("expert.fieldMcp")}>
-            <Input
-              value={form.mcpServers}
-              onChange={(event) => setForm({ ...form, mcpServers: event.target.value })}
-            />
-          </Field>
-          <Field label={t("expert.fieldModel")}>
-            <Input
-              value={form.model}
-              placeholder={t("expert.fieldModelPlaceholder")}
-              onChange={(event) => setForm({ ...form, model: event.target.value })}
-            />
-          </Field>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("expert.fieldThinking")}>
-            <Select
-              value={form.thinkingLevel}
-              onChange={(event) => setForm({ ...form, thinkingLevel: event.target.value })}
-            >
-              <option value="">{t("expert.fieldModelPlaceholder")}</option>
-              {THINKING_LEVELS.map((level) => (
-                <option key={level} value={level}>
-                  {t(`expert.think_${level}`)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label={t("expert.fieldBudget")}>
-            <Input
-              type="number"
-              min={1}
-              value={form.budgetTokens}
-              onChange={(event) => setForm({ ...form, budgetTokens: event.target.value })}
-            />
-          </Field>
-        </div>
-        <Field label={t("expert.fieldBody")}>
-          <Textarea
-            rows={10}
-            value={form.body}
-            placeholder={t("expert.fieldBodyPlaceholder")}
-            onChange={(event) => setForm({ ...form, body: event.target.value })}
-          />
-        </Field>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setEditorOpen(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" disabled={saving || !form.name.trim()} onClick={() => void submitExpertForm()}>
-            {saving ? t("common.saving") : t("common.save")}
-          </Button>
-        </div>
-      </Panel>
+      </div>
     );
   };
+
+  const toggleTeamMember = (name: string, on: boolean) => {
+    setTeamForm((current) => {
+      if (!on) {
+        return { ...current, members: current.members.filter((member) => member !== name) };
+      }
+      if (current.members.includes(name) || current.members.length >= MAX_TEAM_MEMBERS) {
+        return current;
+      }
+      return { ...current, members: [...current.members, name] };
+    });
+  };
+
+  const selectableMembers = useMemo(
+    () => experts.filter((expert) => expert.enabled),
+    [experts],
+  );
 
   const renderTeamEditor = () => {
     if (!teamEditorOpen) return null;
     return (
-      <Panel className="page-card space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-md-plus font-medium">{t("expert.teamEditorTitle")}</div>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={t("common.close")}
-            onClick={() => setTeamEditorOpen(false)}
-          >
-            <IconX size={15} />
-          </button>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("expert.fieldName")}>
-            <Input
-              value={teamForm.name}
-              onChange={(event) => setTeamForm({ ...teamForm, name: event.target.value })}
-            />
-          </Field>
-          <Field label={t("expert.fieldBudget")}>
-            <Input
-              type="number"
-              min={1}
-              value={teamForm.budgetTokens}
-              onChange={(event) => setTeamForm({ ...teamForm, budgetTokens: event.target.value })}
-            />
-          </Field>
-        </div>
-        <Field label={t("expert.fieldDescription")}>
-          <Input
-            value={teamForm.description}
-            onChange={(event) => setTeamForm({ ...teamForm, description: event.target.value })}
-          />
-        </Field>
-        <Field
-          label={t("expert.fieldMembers")}
-          hint={t("expert.membersMaxHint", { max: MAX_TEAM_MEMBERS })}
-        >
-          <div className="flex flex-wrap gap-1.5">
-            {experts.map((expert) => {
-              const selected = teamForm.members.includes(expert.name);
-              return (
-                <button
-                  key={expert.id}
-                  type="button"
-                  className={`rounded-full border px-2.5 py-1 text-xs ${
-                    selected
-                      ? "border-accent bg-accent-soft text-text-primary"
-                      : "border-border-default text-text-secondary hover:bg-bg-hover"
-                  } ${!selected && teamForm.members.length >= MAX_TEAM_MEMBERS ? "opacity-50" : ""}`}
-                  onClick={() =>
-                    setTeamForm((current) => {
-                      if (current.members.includes(expert.name)) {
-                        return {
-                          ...current,
-                          members: current.members.filter((name) => name !== expert.name),
-                        };
-                      }
-                      if (current.members.length >= MAX_TEAM_MEMBERS) return current;
-                      return { ...current, members: [...current.members, expert.name] };
+      <div
+        className="overlay ext-sheet-overlay"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !teamSaving) setTeamEditorOpen(false);
+        }}
+      >
+        <div className="dialog ext-sheet" role="dialog" aria-modal aria-labelledby="team-sheet-title">
+          <div className="ext-sheet-head">
+            <div>
+              <h3 id="team-sheet-title" className="ext-sheet-title">
+                {t("expert.teamEditorTitle")}
+              </h3>
+              <p className="ext-sheet-sub">{t("expert.teamEditorSubtitle")}</p>
+            </div>
+            <button
+              type="button"
+              className="ext-sheet-close"
+              aria-label={t("common.close")}
+              onClick={() => setTeamEditorOpen(false)}
+            >
+              <IconX size={14} />
+            </button>
+          </div>
+
+          <div className="ext-sheet-body">
+            <div className="ext-field-pair">
+              <Field label={t("expert.fieldName")}>
+                <Input
+                  value={teamForm.name}
+                  autoFocus
+                  onChange={(event) => setTeamForm({ ...teamForm, name: event.target.value })}
+                />
+              </Field>
+              <Field label={t("expert.fieldBudget")} hint={t("expert.budgetHint")}>
+                <Input
+                  type="number"
+                  min={1}
+                  value={teamForm.budgetTokens}
+                  placeholder={t("expert.budgetPlaceholder")}
+                  onChange={(event) => setTeamForm({ ...teamForm, budgetTokens: event.target.value })}
+                />
+              </Field>
+            </div>
+
+            <Field label={t("expert.fieldDescription")}>
+              <Input
+                value={teamForm.description}
+                onChange={(event) => setTeamForm({ ...teamForm, description: event.target.value })}
+              />
+            </Field>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label ext-field-label-row">
+                <span>{t("expert.fieldMembers")}</span>
+                <span className="ext-byte-count">
+                  {t("expert.membersCount", {
+                    count: teamForm.members.length,
+                    max: MAX_TEAM_MEMBERS,
+                  })}
+                </span>
+              </div>
+              <p className="ext-field-hint">{t("expert.membersMaxHint", { max: MAX_TEAM_MEMBERS })}</p>
+              {selectableMembers.length ? (
+                <div className="ext-tool-pick" role="group" aria-label={t("expert.fieldMembers")}>
+                  {selectableMembers.map((expert) => (
+                    <label
+                      key={expert.id}
+                      className={cx(
+                        "ext-tool-opt",
+                        teamForm.members.includes(expert.name) && "is-on",
+                      )}
+                      title={expert.description || undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={teamForm.members.includes(expert.name)}
+                        onChange={(event) => toggleTeamMember(expert.name, event.target.checked)}
+                      />
+                      <code>{expert.name}</code>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="ext-field-hint">{t("expert.membersEmpty")}</p>
+              )}
+            </div>
+
+            <div className="ext-field-pair">
+              <Field label={t("expert.leaderStyle")}>
+                <Select
+                  value={teamForm.leaderStyle}
+                  onChange={(event) =>
+                    setTeamForm({
+                      ...teamForm,
+                      leaderStyle: event.target.value as TeamFormState["leaderStyle"],
                     })
                   }
                 >
-                  {expert.name}
-                </button>
-              );
-            })}
+                  {LEADER_STYLES.map((style) => (
+                    <option key={style} value={style}>
+                      {t(`expert.leader_${style}`)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={t("expert.integration")}>
+                <Select
+                  value={teamForm.integration}
+                  onChange={(event) =>
+                    setTeamForm({
+                      ...teamForm,
+                      integration: event.target.value as TeamFormState["integration"],
+                    })
+                  }
+                >
+                  {INTEGRATION_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {t(`expert.integration_${mode}`)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label">{t("expert.fieldLeaderBody")}</div>
+              <p className="ext-field-hint">{t("expert.leaderBodyHint")}</p>
+              <Textarea
+                className="ext-skill-body"
+                rows={8}
+                spellCheck={false}
+                value={teamForm.body}
+                placeholder={t("expert.fieldBodyPlaceholder")}
+                onChange={(event) => setTeamForm({ ...teamForm, body: event.target.value })}
+              />
+            </div>
           </div>
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("expert.leaderStyle")}>
-            <Select
-              value={teamForm.leaderStyle}
-              onChange={(event) =>
-                setTeamForm({
-                  ...teamForm,
-                  leaderStyle: event.target.value as TeamFormState["leaderStyle"],
-                })
-              }
-            >
-              {LEADER_STYLES.map((style) => (
-                <option key={style} value={style}>
-                  {t(`expert.leader_${style}`)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label={t("expert.integration")}>
-            <Select
-              value={teamForm.integration}
-              onChange={(event) =>
-                setTeamForm({
-                  ...teamForm,
-                  integration: event.target.value as TeamFormState["integration"],
-                })
-              }
-            >
-              {INTEGRATION_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {t(`expert.integration_${mode}`)}
-                </option>
-              ))}
-            </Select>
-          </Field>
+
+          <div className="ext-sheet-actions">
+            <span className="ext-sheet-note">{t("expert.sheetNote")}</span>
+            <div className="ext-sheet-actions-end">
+              <Button variant="ghost" onClick={() => setTeamEditorOpen(false)} disabled={teamSaving}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={teamSaving || !teamForm.name.trim()}
+                onClick={() => void submitTeamForm()}
+              >
+                {teamSaving ? t("common.saving") : t("common.save")}
+              </Button>
+            </div>
+          </div>
         </div>
-        <Field label={t("expert.fieldLeaderBody")}>
-          <Textarea
-            rows={6}
-            value={teamForm.body}
-            placeholder={t("expert.fieldBodyPlaceholder")}
-            onChange={(event) => setTeamForm({ ...teamForm, body: event.target.value })}
-          />
-        </Field>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setTeamEditorOpen(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={teamSaving || !teamForm.name.trim()}
-            onClick={() => void submitTeamForm()}
-          >
-            {teamSaving ? t("common.saving") : t("common.save")}
-          </Button>
-        </div>
-      </Panel>
+      </div>
     );
   };
 
@@ -910,29 +1079,24 @@ export function ExpertsPage() {
           </Badge>
         ) : null}
       </div>
-      <div className="mt-auto flex items-center justify-end gap-2 pt-1">
+      <div className="mt-auto flex justify-end gap-1 pt-1">
+        <Button size="sm" variant="primary" onClick={() => {
+          setTeamTask(team.members.length ? "" : "");
+          setTeamSessionId(activeSessionId ?? "");
+          setTeamTarget(team);
+        }}>
+          {t("expert.invoke")}
+        </Button>
         {team.source === "user" ? (
           <>
-            <Button size="sm" variant="ghost" onClick={() => void deleteTeam(team)}>
-              {t("expert.delete")}
-            </Button>
             <Button size="sm" variant="secondary" onClick={() => openTeamEditor(team)}>
               {t("expert.edit")}
             </Button>
+            <Button size="sm" variant="ghost" onClick={() => void deleteTeam(team)}>
+              {t("expert.delete")}
+            </Button>
           </>
         ) : null}
-        <Button
-          size="sm"
-          variant="primary"
-          onClick={() => {
-            setTeamTask("");
-            setTeamSessionId(activeSessionId ?? "");
-            setTeamTarget(team);
-          }}
-        >
-          <IconSparkles size={13} />
-          {t("expert.invokeTeam")}
-        </Button>
       </div>
     </Panel>
   );
@@ -943,7 +1107,7 @@ export function ExpertsPage() {
         <div className="page-header">
           <div>
             <h1 className="page-title">{t("expert.title")}</h1>
-            <div className="text-md text-text-secondary">{t("expert.subtitle")}</div>
+            <div className="page-subtitle">{t("expert.subtitle")}</div>
           </div>
           <div className="flex gap-2">
             {tab === "mine" ? (
@@ -978,7 +1142,7 @@ export function ExpertsPage() {
                 className={`dest-filter ${tab === id ? "active" : ""}`}
                 onClick={() => setTab(id)}
               >
-                {id === "center" ? <IconSparkles size={13} /> : null}
+                {id === "center" ? <IconGraduationCap size={13} /> : null}
                 {id === "teams" ? <IconUsers size={13} /> : null}
                 {label}
               </button>
@@ -1022,7 +1186,7 @@ export function ExpertsPage() {
             {centerExperts.length === 0 ? (
               <Panel className="page-card page-empty">
                 <div className="page-empty-icon">
-                  <IconBot size={20} />
+                  <IconGraduationCap size={20} />
                 </div>
                 <div className="text-base-plus font-medium">{t("expert.emptyCenter")}</div>
               </Panel>
@@ -1036,11 +1200,10 @@ export function ExpertsPage() {
 
         {tab === "mine" ? (
           <>
-            {renderExpertEditor()}
             {mineExperts.length === 0 && !editorOpen ? (
               <Panel className="page-card page-empty">
                 <div className="page-empty-icon">
-                  <IconBot size={20} />
+                  <IconGraduationCap size={20} />
                 </div>
                 <div className="text-base-plus font-medium">{t("expert.emptyMine")}</div>
                 <Button className="mt-5" variant="primary" onClick={() => void openExpertEditor(null)}>
@@ -1052,7 +1215,7 @@ export function ExpertsPage() {
                 {mineExperts.map((expert) => (
                   <div key={expert.id} className="dest-row">
                     <div className="dest-row-icon">
-                      <IconBot size={16} />
+                      <IconGraduationCap size={16} />
                     </div>
                     <div className="dest-row-body">
                       <div className="dest-row-title">
@@ -1104,6 +1267,19 @@ export function ExpertsPage() {
                     </div>
                     <Badge tone={phaseTone(run.phase)}>{t(phaseKey(run.phase))}</Badge>
                   </div>
+                  {run.stage ? (
+                    <div className="text-xs text-text-secondary">
+                      {t("expert.stageOf", {
+                        index: run.stage.index,
+                        total: run.stage.total,
+                        name: run.stage.name,
+                        expert: run.stage.expert ?? "",
+                      })}
+                      {run.stage.round && run.stage.maxRounds && run.stage.maxRounds > 1
+                        ? ` · ${t("expert.roundOf", { round: run.stage.round, max: run.stage.maxRounds })}`
+                        : ""}
+                    </div>
+                  ) : null}
                   {run.members.length ? (
                     <div className="flex flex-wrap gap-1">
                       {run.members.map((member, index) => (
@@ -1143,7 +1319,6 @@ export function ExpertsPage() {
                 </Panel>
               );
             })}
-            {renderTeamEditor()}
             {teams.length === 0 && !teamEditorOpen ? (
               <Panel className="page-card page-empty">
                 <div className="page-empty-icon">
@@ -1167,6 +1342,8 @@ export function ExpertsPage() {
         ) : null}
       </div>
       {renderInvokeDialog()}
+      {renderExpertEditor()}
+      {renderTeamEditor()}
     </div>
   );
 }

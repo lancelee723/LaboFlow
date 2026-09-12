@@ -53,8 +53,6 @@ pub struct UserExpertRecord {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_tokens: Option<u64>,
     pub enabled: bool,
     #[serde(default)]
     pub scope: ActivationScope,
@@ -78,7 +76,6 @@ pub struct UserExpertInput {
     pub mcp_servers: Option<Vec<String>>,
     pub model: Option<String>,
     pub thinking_level: Option<String>,
-    pub budget_tokens: Option<u64>,
     pub body: Option<String>,
     pub enabled: Option<bool>,
     #[allow(dead_code)]
@@ -97,6 +94,22 @@ pub struct UserTeamRecord {
     pub leader_style: String,
     #[serde(default)]
     pub integration: String,
+    /// Loop pipeline (pi-agent-loop protocol): ordered stage names joined by
+    /// `|`. Empty = classic leader-decomposition mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<String>,
+    /// `stage=expert` pairs (comma separated) binding each stage to a member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_experts: Option<String>,
+    /// Goal text: presence enables repeat-until-done semantics on stages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
+    /// Fixed pass count for every stage (alternative to `goal`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rounds: Option<u32>,
+    /// Hard cap for goal-mode rounds (default 5, executor side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rounds: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u64>,
     pub enabled: bool,
@@ -118,6 +131,11 @@ pub struct UserTeamInput {
     pub members: Option<Vec<String>>,
     pub leader_style: Option<String>,
     pub integration: Option<String>,
+    pub pipeline: Option<String>,
+    pub stage_experts: Option<String>,
+    pub goal: Option<String>,
+    pub rounds: Option<u32>,
+    pub max_rounds: Option<u32>,
     pub budget_tokens: Option<u64>,
     pub body: Option<String>,
     pub enabled: Option<bool>,
@@ -239,11 +257,6 @@ fn expert_from_front_matter(
             .cloned()
             .filter(|value| !value.trim().is_empty()),
         thinking_level: normalize_thinking(front.get("thinkinglevel").map(String::as_str)),
-        budget_tokens: front
-            .get("budgettokens")
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .map(|value| value.min(MAX_BUDGET_TOKENS)),
         enabled,
         scope: ActivationScope::default(),
         path: path.to_string_lossy().to_string(),
@@ -280,9 +293,6 @@ fn render_expert_document(record: &UserExpertRecord, body: &str) -> String {
     }
     if let Some(level) = &record.thinking_level {
         output.push_str(&format!("thinkingLevel: {level}\n"));
-    }
-    if let Some(budget) = record.budget_tokens {
-        output.push_str(&format!("budgetTokens: {budget}\n"));
     }
     output.push_str("---\n\n");
     output.push_str(body.trim());
@@ -335,6 +345,28 @@ fn team_from_front_matter(
                 .unwrap_or_else(|| "moderator".to_string())
         })
         .unwrap_or_else(|| "moderator".to_string());
+    let pipeline = front
+        .get("pipeline")
+        .map(|value| clip(value, 200))
+        .filter(|value| !value.is_empty());
+    let stage_experts = front
+        .get("stageexperts")
+        .map(|value| clip(value, 500))
+        .filter(|value| !value.is_empty());
+    let goal = front
+        .get("goal")
+        .map(|value| clip(value, MAX_DESCRIPTION_CHARS))
+        .filter(|value| !value.is_empty());
+    let rounds = front
+        .get("rounds")
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| value.min(20));
+    let max_rounds = front
+        .get("maxrounds")
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| value.min(20));
     let enabled = state.enabled(TEAM_KIND, CapabilityLevel::Global, &name, None);
     let updated_at = file_timestamp(path);
     Some(UserTeamRecord {
@@ -344,6 +376,11 @@ fn team_from_front_matter(
         members,
         leader_style,
         integration,
+        pipeline,
+        stage_experts,
+        goal,
+        rounds,
+        max_rounds,
         budget_tokens: front
             .get("budgettokens")
             .and_then(|value| value.trim().parse::<u64>().ok())
@@ -369,6 +406,21 @@ fn render_team_document(record: &UserTeamRecord, body: &str) -> String {
     output.push_str(&format!("members: [{}]\n", record.members.join(", ")));
     output.push_str(&format!("leaderStyle: {}\n", record.leader_style));
     output.push_str(&format!("integration: {}\n", record.integration));
+    if let Some(pipeline) = &record.pipeline {
+        output.push_str(&format!("pipeline: {pipeline}\n"));
+    }
+    if let Some(pairs) = &record.stage_experts {
+        output.push_str(&format!("stageExperts: {pairs}\n"));
+    }
+    if let Some(goal) = &record.goal {
+        output.push_str(&format!("goal: {goal}\n"));
+    }
+    if let Some(rounds) = record.rounds {
+        output.push_str(&format!("rounds: {rounds}\n"));
+    }
+    if let Some(max_rounds) = record.max_rounds {
+        output.push_str(&format!("maxRounds: {max_rounds}\n"));
+    }
     if let Some(budget) = record.budget_tokens {
         output.push_str(&format!("budgetTokens: {budget}\n"));
     }
@@ -502,7 +554,6 @@ impl UserExpertRegistry {
                 .collect(),
             model: input.model.filter(|value| !value.trim().is_empty()),
             thinking_level: normalize_thinking(input.thinking_level.as_deref()),
-            budget_tokens: normalize_budget(input.budget_tokens.as_ref()),
             enabled: input.enabled.unwrap_or(true),
             scope: ActivationScope::default(),
             path: String::new(),
@@ -594,11 +645,6 @@ impl UserExpertRegistry {
             Some(value) if value.trim().is_empty() => None,
             Some(value) => normalize_thinking(Some(value.as_str())),
             None => current.thinking_level,
-        };
-        next.budget_tokens = match input.budget_tokens {
-            Some(0) => None,
-            Some(value) => Some(value.min(MAX_BUDGET_TOKENS)),
-            None => current.budget_tokens,
         };
         next.enabled = input.enabled.unwrap_or(current.enabled);
         next.path = current.path.clone();
@@ -776,6 +822,29 @@ impl UserTeamRegistry {
                     .unwrap_or_else(|| "moderator".to_string())
             })
             .unwrap_or_else(|| "moderator".to_string());
+        let pipeline = input
+            .pipeline
+            .as_deref()
+            .map(|value| clip(value, 200))
+            .filter(|value| !value.is_empty());
+        let stage_experts = input
+            .stage_experts
+            .as_deref()
+            .map(|value| clip(value, 500))
+            .filter(|value| !value.is_empty());
+        let goal = input
+            .goal
+            .as_deref()
+            .map(|value| clip(value, MAX_DESCRIPTION_CHARS))
+            .filter(|value| !value.is_empty());
+        let rounds = input
+            .rounds
+            .filter(|value| *value > 0)
+            .map(|value| value.min(20));
+        let max_rounds = input
+            .max_rounds
+            .filter(|value| *value > 0)
+            .map(|value| value.min(20));
         let record = UserTeamRecord {
             id: name.clone(),
             name,
@@ -783,6 +852,11 @@ impl UserTeamRegistry {
             members,
             leader_style,
             integration,
+            pipeline,
+            stage_experts,
+            goal,
+            rounds,
+            max_rounds,
             budget_tokens: normalize_budget(input.budget_tokens.as_ref()),
             enabled: input.enabled.unwrap_or(true),
             scope: ActivationScope::default(),
@@ -882,6 +956,31 @@ impl UserTeamRegistry {
                     .unwrap_or_else(|| "moderator".to_string())
             })
             .unwrap_or(current.integration);
+        next.pipeline = match input.pipeline {
+            Some(value) if value.trim().is_empty() => None,
+            Some(value) => Some(clip(&value, 200)),
+            None => current.pipeline,
+        };
+        next.stage_experts = match input.stage_experts {
+            Some(value) if value.trim().is_empty() => None,
+            Some(value) => Some(clip(&value, 500)),
+            None => current.stage_experts,
+        };
+        next.goal = match input.goal {
+            Some(value) if value.trim().is_empty() => None,
+            Some(value) => Some(clip(&value, MAX_DESCRIPTION_CHARS)),
+            None => current.goal,
+        };
+        next.rounds = match input.rounds {
+            Some(0) => None,
+            Some(value) => Some(value.min(20)),
+            None => current.rounds,
+        };
+        next.max_rounds = match input.max_rounds {
+            Some(0) => None,
+            Some(value) => Some(value.min(20)),
+            None => current.max_rounds,
+        };
         next.budget_tokens = match input.budget_tokens {
             Some(0) => None,
             Some(value) => Some(value.min(MAX_BUDGET_TOKENS)),
@@ -970,7 +1069,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         fs::write(
             directory.join("战略规划分析师.md"),
-            "---\nname: 战略规划分析师\ndescription: 行业与市场结构分析\nindustry: 战略与组织\ntags: [市场测算, 竞争分析]\nexamples: [测算TAM | 五力分析]\nmcpServers: [weknora]\nbudgetTokens: 150000\n---\n\n你是麦肯锡合伙人视角的分析师。\n",
+            "---\nname: 战略规划分析师\ndescription: 行业与市场结构分析\nindustry: 战略与组织\ntags: [市场测算, 竞争分析]\nexamples: [测算TAM | 五力分析]\nmcpServers: [weknora]\n---\n\n你是麦肯锡合伙人视角的分析师。\n",
         )
         .unwrap();
         let records = experts.list().unwrap();
@@ -981,7 +1080,7 @@ mod tests {
         assert_eq!(record.tags, vec!["市场测算".to_string(), "竞争分析".to_string()]);
         assert_eq!(record.examples, vec!["测算TAM".to_string(), "五力分析".to_string()]);
         assert_eq!(record.mcp_servers, vec!["weknora".to_string()]);
-        assert_eq!(record.budget_tokens, Some(150_000));
+
         assert!(record.enabled);
 
         let (_, body) = experts.read("战略规划分析师").unwrap().unwrap();
@@ -995,12 +1094,10 @@ mod tests {
             .create(UserExpertInput {
                 id: Some("数据分析专家".into()),
                 description: Some("数据清洗与指标测算".into()),
-                budget_tokens: Some(500_000),
                 ..Default::default()
             })
             .unwrap();
         assert_eq!(record.name, "数据分析专家");
-        assert_eq!(record.budget_tokens, Some(500_000));
 
         assert!(experts
             .create(UserExpertInput {

@@ -36,6 +36,7 @@ import {
   FolderOpen,
   FolderPlus,
   Globe2,
+  GraduationCap,
   GitFork,
   GitPullRequestArrow,
   Image,
@@ -205,6 +206,8 @@ export const IconUsers = icon(Users);
 export const IconKey = icon(KeyRound);
 export const IconLogOut = icon(LogOut);
 export const IconSparkles = icon(Sparkles);
+/** 专家中心：博士帽（Expert Center identity glyph）。 */
+export const IconGraduationCap = icon(GraduationCap);
 export const IconListChecks = icon(ListChecks);
 /** Goal mode: an outcome to reach, as opposed to Plan's list of steps. */
 export const IconTarget = icon(Target);

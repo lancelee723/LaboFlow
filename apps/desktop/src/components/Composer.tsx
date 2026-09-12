@@ -74,6 +74,7 @@ import {
   IconChevronRight,
   IconCheck,
   IconBot,
+  IconGraduationCap,
   IconSearch,
   IconListChecks,
   IconSparkles,
@@ -1832,6 +1833,8 @@ export function Composer({
    * Shared "+"-menu attachment pipeline: resolve the owning session, fetch
    * files (native picker or a conversation transcript), turn them into
    * reference chips, and splice the tokens into the draft at the caret.
+   * `override` supplies an explicit draft snapshot + caret for callers that
+   * already mutated the draft (the @ context pick strips its token first).
    */
   const attachFiles = async (
     getFiles: (
@@ -1844,13 +1847,20 @@ export function Composer({
         mimeType?: string;
       }>;
     }>,
+    override?: { text: string; caret: number },
   ) => {
     if (inputBlocked) return;
     const editor = ref.current;
-    const sourceValue = editor ? readEditorValue(editor) : valueRef.current;
-    const { start: selectionStart, end: selectionEnd } = editor
-      ? editorSelectionRange(editor)
-      : { start: sourceValue.length, end: sourceValue.length };
+    const sourceValue = override
+      ? override.text
+      : editor
+        ? readEditorValue(editor)
+        : valueRef.current;
+    const { start: selectionStart, end: selectionEnd } = override
+      ? { start: override.caret, end: override.caret }
+      : editor
+        ? editorSelectionRange(editor)
+        : { start: sourceValue.length, end: sourceValue.length };
     const sourceSessionId = activeSessionId;
     const sourceDraftKey = draftKey;
     const previousReferences = snapshotReferences(sourceSessionId ?? "");
@@ -1914,15 +1924,20 @@ export function Composer({
   };
 
   /** ZCode-style context: attach another conversation's transcript as a file. */
-  const attachSessionContext = async (session: SessionSummary) => {
+  const attachSessionContext = async (
+    session: SessionSummary,
+    override?: { text: string; caret: number },
+  ) => {
     setPlusMenuOpen(false);
     setPlusContextMode(false);
     try {
-      await attachFiles((targetSessionId) =>
-        api.composerAttachSession({
-          sessionId: session.id,
-          targetSessionId,
-        }),
+      await attachFiles(
+        (targetSessionId) =>
+          api.composerAttachSession({
+            sessionId: session.id,
+            targetSessionId,
+          }),
+        override,
       );
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
@@ -2097,6 +2112,16 @@ export function Composer({
     const result = composerAc.accept(index);
     if (!result) return;
     invalidatePromptEnhancement();
+    // A context pick attaches the conversation transcript via the same
+    // pipeline as the "+" menu, splicing its chip at the caret the @ token
+    // just vacated.
+    if (result.contextSession) {
+      void attachSessionContext(result.contextSession, {
+        text: result.value,
+        caret: result.cursor,
+      });
+      return;
+    }
     // File accept strips the @ token (empty insert) and used to store a
     // token-less chip above the textarea. Inline chips only paint when a
     // sentinel is in the draft, so Enter looked like the reference vanished.
@@ -2417,7 +2442,7 @@ export function Composer({
                               insertComposerText(`@${expert.name} `);
                             }}
                           >
-                            <IconSparkles size={14} />
+                            <IconGraduationCap size={14} />
                             <span>{expert.name}</span>
                           </button>
                         ))}
@@ -2477,7 +2502,7 @@ export function Composer({
                             setPlusExpertMode(true);
                           }}
                         >
-                          <IconSparkles size={14} />
+                          <IconGraduationCap size={14} />
                           <span>{t("chat.pickExpert")}</span>
                         </button>
                       </>
@@ -2877,35 +2902,42 @@ export function Composer({
                   </div>
                 ) : null}
               </div>
-              <button
-                type="button"
-                className={`icon-btn composer-enhance-btn${enhancingPrompt ? " is-loading" : ""}`}
-                title={t("chat.enhancePrompt")}
-                aria-label={
-                  enhancingPrompt
-                    ? t("chat.enhancingPrompt")
-                    : t("chat.enhancePrompt")
-                }
-                aria-busy={enhancingPrompt}
-                disabled={
-                  !value.trim() ||
-                  value.trim().startsWith("/") ||
-                  !modelReady ||
-                  sendBlocked ||
-                  activeInlineFileReferences.length > 0 ||
-                  enhancingPrompt
-                }
-                onClick={() => void enhancePrompt()}
+              {/* The tooltip lives on the wrapper so it also shows while the
+                 button is disabled (empty draft) — disabled controls swallow
+                 native titles. */}
+              <span
+                className="composer-enhance-wrap"
+                data-tooltip={t("chat.enhancePromptTooltip")}
               >
-                {enhancingPrompt ? (
-                  <>
-                    <span className="tool-spinner" aria-hidden="true" />
-                    <span>{t("chat.enhancingPrompt")}</span>
-                  </>
-                ) : (
-                  <IconSparkles size={15} aria-hidden="true" />
-                )}
-              </button>
+                <button
+                  type="button"
+                  className={`icon-btn composer-enhance-btn${enhancingPrompt ? " is-loading" : ""}`}
+                  aria-label={
+                    enhancingPrompt
+                      ? t("chat.enhancingPrompt")
+                      : t("chat.enhancePromptTooltip")
+                  }
+                  aria-busy={enhancingPrompt}
+                  disabled={
+                    !value.trim() ||
+                    value.trim().startsWith("/") ||
+                    !modelReady ||
+                    sendBlocked ||
+                    activeInlineFileReferences.length > 0 ||
+                    enhancingPrompt
+                  }
+                  onClick={() => void enhancePrompt()}
+                >
+                  {enhancingPrompt ? (
+                    <>
+                      <span className="tool-spinner" aria-hidden="true" />
+                      <span>{t("chat.enhancingPrompt")}</span>
+                    </>
+                  ) : (
+                    <IconSparkles size={15} aria-hidden="true" />
+                  )}
+                </button>
+              </span>
               {enhancementUndoText !== null ? (
                 <button
                   type="button"

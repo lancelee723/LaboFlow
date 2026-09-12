@@ -4799,6 +4799,11 @@ const teamRunner = new TeamRunner({
       members: team.members,
       leaderStyle: team.leaderStyle,
       integration: team.integration,
+      pipeline: (read.team?.pipeline as string | undefined) ?? undefined,
+      stageExperts: (read.team?.stageExperts as string | undefined) ?? undefined,
+      goal: (read.team?.goal as string | undefined) ?? undefined,
+      rounds: (read.team?.rounds as number | undefined) ?? undefined,
+      maxRounds: (read.team?.maxRounds as number | undefined) ?? undefined,
       budgetTokens: team.budgetTokens,
       body: read.body ?? "",
     };
@@ -7581,6 +7586,32 @@ function registerIpc() {
       return host.call("stats.getTokenUsageHistory", input ?? {});
     },
   );
+
+  /**
+   * The usage stats page is a second view of the Token Insights plugin: the
+   * plugin already aggregates usage live (transcript metadata folded with the
+   * host's completed turns), so the page reads that published fact cube
+   * instead of maintaining its own metering. Read-only; the renderer falls
+   * back to host turn history when the plugin is absent.
+   */
+  handle(IPC.invoke.statsGetTokenInsights, async () => {
+    const data = plugins.readPluginDataJson(
+      "pi.token-insights",
+      "settings.json",
+    ) as { usageFacts?: Record<string, unknown> } | null;
+    const facts = data?.usageFacts;
+    if (!facts || typeof facts !== "object") return { available: false };
+    return {
+      available: true,
+      generatedAt:
+        typeof facts.generatedAt === "number" ? facts.generatedAt : undefined,
+      columns: Array.isArray(facts.columns) ? facts.columns : [],
+      days: Array.isArray(facts.days) ? facts.days : [],
+      models: Array.isArray(facts.models) ? facts.models : [],
+      sources: Array.isArray(facts.sources) ? facts.sources : [],
+      buckets: Array.isArray(facts.buckets) ? facts.buckets : [],
+    };
+  });
 
   handle(
     IPC.invoke.browserNavigate,

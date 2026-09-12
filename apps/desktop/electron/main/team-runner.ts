@@ -43,6 +43,12 @@ export interface TeamRunState {
   integration: string;
   leaderBody: string;
   integrateBody: string;
+  /** Loop pipeline (pi-agent-loop protocol): stage names in order. */
+  pipeline: string[];
+  stageExperts: Record<string, string>;
+  goal?: string;
+  rounds: number;
+  maxRounds: number;
   phase: "planning" | "executing" | "integrating" | "done" | "failed";
   plan: TeamPlan | null;
   rawPlan?: string;
@@ -88,6 +94,11 @@ export interface TeamRunnerDeps {
     members: string[];
     leaderStyle: string;
     integration: string;
+    pipeline?: string;
+    stageExperts?: string;
+    goal?: string;
+    rounds?: number;
+    maxRounds?: number;
     budgetTokens?: number;
     body: string;
   } | null>;
@@ -157,9 +168,12 @@ function clipResult(text: string, maxChars = DEP_RESULT_MAX_CHARS): string {
 const resultsByState = new WeakMap<TeamRunState, Map<number, string>>();
 
 export class TeamRunner {
+  private readonly deps: TeamRunnerDeps;
   private readonly states = new Map<string, TeamRunState>();
 
-  constructor(private readonly deps: TeamRunnerDeps) {}
+  constructor(deps: TeamRunnerDeps) {
+    this.deps = deps;
+  }
 
   getState(runId: string): TeamRunState | undefined {
     return this.states.get(runId);
@@ -201,6 +215,14 @@ export class TeamRunner {
     if (!driver) throw new Error("backend unavailable");
 
     const sections = splitLeaderSections(team.body);
+    const stageExperts: Record<string, string> = {};
+    for (const pair of (team.stageExperts ?? "").split(",")) {
+      const eq = pair.indexOf("=");
+      if (eq <= 0) continue;
+      const stage = pair.slice(0, eq).trim();
+      const expert = pair.slice(eq + 1).trim();
+      if (stage && expert) stageExperts[stage] = expert;
+    }
     const state: TeamRunState = {
       runId: `team-${randomUUID()}`,
       sessionId: request.sessionId,
@@ -211,6 +233,14 @@ export class TeamRunner {
       integration: team.integration,
       leaderBody: sections.plan,
       integrateBody: sections.integrate,
+      pipeline: (team.pipeline ?? "")
+        .split("|")
+        .map((stage) => stage.trim())
+        .filter(Boolean),
+      stageExperts,
+      ...(team.goal ? { goal: team.goal } : {}),
+      rounds: team.rounds ?? 1,
+      maxRounds: team.maxRounds ?? 5,
       phase: "planning",
       plan: null,
       members: [],
@@ -233,9 +263,179 @@ export class TeamRunner {
   }
 
   private async run(state: TeamRunState): Promise<void> {
+    if (state.pipeline.length > 0) {
+      // Loop pipeline mode (pi-agent-loop protocol): named stages in order,
+      // each bound to one member expert; goal mode repeats a stage until the
+      // expert's own [LOOP:DONE] verdict or maxRounds.
+      await this.runPipeline(state);
+      return;
+    }
     await this.plan(state);
     await this.dispatchAll(state);
     await this.integrate(state);
+  }
+
+  /** Parse the expert's loop verdict from its final text (loop_control analog). */
+  private loopVerdict(text: string): "next" | "done" {
+    return /\[LOOP:DONE/i.test(text) ? "done" : "next";
+  }
+
+  private stageExpertFor(state: TeamRunState, stage: string, index: number): string | undefined {
+    return (
+      state.stageExperts[stage] ??
+      state.members.find((member) => member.expert === stage)?.expert ??
+      state.members[index]?.expert
+    );
+  }
+
+  /**
+   * Pipeline mode: named stages in order. Each round is an independent expert
+   * session whose prompt carries the pipeline position (stage i/n, round r),
+   * the stage brief and the previous stage's clipped output. Goal stages
+   * repeat until the expert declares [LOOP:DONE] or maxRounds is hit — the
+   * verdict protocol is the text twin of pi-agent-loop's loop_control tool.
+   */
+  private async runPipeline(state: TeamRunState): Promise<void> {
+    state.phase = "executing";
+    const resultsByState = new Map<number, string>();
+    let previousSummary = "";
+    let pipelineFailed = false;
+    const total = state.pipeline.length;
+    for (let index = 0; index < total; index += 1) {
+      if (pipelineFailed) return;
+      const stage = state.pipeline[index];
+      const expertName = this.stageExpertFor(state, stage, index);
+      if (!expertName) {
+        state.phase = "failed";
+          pipelineFailed = true;
+        this.broadcast(state, "failed", { error: `EXPERT_INVALID: stage "${stage}" has no bound expert` });
+        return;
+      }
+      const persona = await this.deps.resolvePersona(expertName);
+      if (!persona) {
+        state.phase = "failed";
+          pipelineFailed = true;
+        this.broadcast(state, "failed", { error: `EXPERT_INVALID: unknown expert "${expertName}"` });
+        return;
+      }
+      // Budget gate per stage.
+      if (state.budgetTokens != null && state.totalTokens >= state.budgetTokens) {
+        state.phase = "failed";
+          pipelineFailed = true;
+        this.broadcast(state, "failed", { budget: true });
+        return;
+      }
+      const maxRoundsForStage = state.goal ? state.maxRounds : Math.max(1, state.rounds);
+      let stageOutput = "";
+      let previousRoundOutput = "";
+      for (let round = 1; round <= maxRoundsForStage; round += 1) {
+        this.broadcast(state, "member", {
+          stage: { index: index + 1, total, name: stage, round, maxRounds: maxRoundsForStage, expert: expertName },
+        });
+        const header = [
+          `[管线阶段 ${index + 1}/${total}：${stage}${state.goal ? ` · 第 ${round}/${maxRoundsForStage} 轮` : ""}]`,
+          state.goal ? `总体目标：${state.goal}` : "",
+          round > 1
+            ? `上一轮产出：\n${clipResult(previousRoundOutput)}\n\n这是第 ${round} 轮继续。若总体目标已达成，在回复末尾单独一行输出 [LOOP:DONE] 并给理由；否则输出 [LOOP:NEXT] 与本轮完成内容。`
+            : previousSummary
+              ? `上一阶段产物摘要：\n${clipResult(previousSummary)}`
+              : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+        const prompt = [
+          header,
+          "",
+          `任务（${state.teamName}）：`,
+          state.task,
+          "",
+          "你的职责（管线阶段）：",
+          state.members[index]?.brief ?? stage,
+        ]
+          .join("\n")
+          .trim();
+        const driver = this.deps.getDriver()!;
+        const projectPath = await this.deps.getProjectPath(state.sessionId);
+        try {
+          const run = await driver.start({
+            newSession: {
+              title: `${state.teamName}·${stage}${maxRoundsForStage > 1 ? `·R${round}` : ""}`,
+              projectPath,
+              modelId: persona.model,
+              thinkingLevel: persona.thinkingLevel,
+            },
+            prompt,
+            personaPrompt: persona.personaPrompt,
+          });
+          const result = await run.completion;
+          state.totalTokens += result.usage?.totalTokens ?? 0;
+          if (result.status !== "completed" || !result.finalText.trim()) {
+            // A failed round is retried within the cap unless it was aborted.
+            if (result.status === "aborted") {
+              state.phase = "failed";
+          pipelineFailed = true;
+              this.broadcast(state, "failed", { error: "aborted by user", stage: { index: index + 1, name: stage } });
+              return;
+            }
+            if (round === maxRoundsForStage) {
+              state.phase = "failed";
+          pipelineFailed = true;
+              this.broadcast(state, "failed", { error: `stage "${stage}" failed after ${maxRoundsForStage} rounds` });
+              return;
+            }
+            continue;
+          }
+          stageOutput = result.finalText;
+          previousRoundOutput = stageOutput;
+          if (this.loopVerdict(stageOutput) === "done" || !state.goal) break;
+          if (round === maxRoundsForStage) {
+            // Goal cap reached without convergence: never deliver silently.
+            state.phase = "failed";
+            pipelineFailed = true;
+            this.broadcast(state, "failed", {
+              error: `goal not converged after ${maxRoundsForStage} rounds`,
+              stage: { index: index + 1, name: stage },
+            });
+            return;
+          }
+        } catch (error) {
+          state.phase = "failed";
+          pipelineFailed = true;
+          this.broadcast(state, "failed", { error: String(error) });
+          this.deps.getLogger().app("expert", "warn", "pipeline stage failed", {
+            data: { stage, error: String(error) },
+          });
+          return;
+        }
+      }
+      resultsByState.set(index, stageOutput);
+      previousSummary = stageOutput;
+    }
+    // Last stage's output is the delivery; integration runs only when the
+    // team explicitly defines merge instructions beyond the pipeline.
+    state.integratedText = resultsByState.get(total - 1) ?? "";
+    state.phase = "done";
+    this.broadcast(state, "integrated", {
+      integrated: state.integratedText.slice(0, 2000),
+      durationMs: Date.now() - state.startedAt,
+      pipeline: true,
+    });
+    if (state.sessionId) {
+      await this.deps
+        .postSessionCard(state.sessionId, {
+          id: `team-card-${randomUUID()}`,
+          role: "assistant",
+          content: `【${state.teamName} · 管线交付完成】\n\n${state.integratedText}\n\n—— 管线：${state.pipeline.join(" → ")}；消耗 ${state.totalTokens} tokens`,
+          createdAt: new Date().toISOString(),
+          status: "complete",
+          kind: "team-card",
+        })
+        .catch((error) =>
+          this.deps.getLogger().app("expert", "warn", "post team card failed", {
+            data: String(error),
+          }),
+        );
+    }
   }
 
   /** Leader planning; parse failure degrades to whole-task member dispatch. */

@@ -33,7 +33,6 @@ export interface ExpertListItem {
   mcpServers: string[];
   model?: string;
   thinkingLevel?: string;
-  budgetTokens?: number;
   enabled: boolean;
   source: "preset" | "user" | "org";
 }
@@ -106,7 +105,6 @@ interface HostExpertRecord {
   mcpServers?: string[];
   model?: string;
   thinkingLevel?: string;
-  budgetTokens?: number;
   enabled: boolean;
 }
 
@@ -118,7 +116,6 @@ interface PresetFrontMatter {
   mcpServers?: string[];
   model?: string;
   thinkingLevel?: string;
-  budgetTokens?: number;
 }
 
 function parsePresetDocument(
@@ -151,9 +148,6 @@ function parsePresetDocument(
         front.model = value;
       } else if (key === "thinkinglevel") {
         front.thinkingLevel = value;
-      } else if (key === "budgettokens") {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed) && parsed > 0) front.budgetTokens = parsed;
       }
     }
   }
@@ -170,9 +164,12 @@ export interface OrgExpertPack {
 }
 
 export class ExpertService {
+  private readonly deps: ExpertServiceDeps;
   private orgPacks: OrgExpertPack[] = [];
 
-  constructor(private readonly deps: ExpertServiceDeps) {}
+  constructor(deps: ExpertServiceDeps) {
+    this.deps = deps;
+  }
 
   /** Org delivery (T51.8): packs ride the bootstrap cache — in-memory only,
    * so a personal expert with the same name keeps local priority (FR-E-19). */
@@ -209,7 +206,6 @@ export class ExpertService {
       mcpServers: preset.mcpServers,
       model: preset.model,
       thinkingLevel: preset.thinkingLevel,
-      budgetTokens: preset.budgetTokens,
       enabled: true,
       source: "preset",
     }));
@@ -224,7 +220,6 @@ export class ExpertService {
       mcpServers: expert.mcpServers ?? [],
       model: expert.model,
       thinkingLevel: expert.thinkingLevel,
-      budgetTokens: expert.budgetTokens,
       enabled: expert.enabled,
       source: "user",
     }));
@@ -242,7 +237,6 @@ export class ExpertService {
         mcpServers: (pack.payload.mcpServers as string[] | undefined) ?? [],
         model: pack.payload.model as string | undefined,
         thinkingLevel: pack.payload.thinkingLevel as string | undefined,
-        budgetTokens: pack.payload.budgetTokens as number | undefined,
         enabled: true,
         source: "org",
       }));
@@ -270,7 +264,6 @@ export class ExpertService {
           mcpServers: expert.mcpServers ?? [],
           model: expert.model,
           thinkingLevel: expert.thinkingLevel,
-          budgetTokens: expert.budgetTokens,
           enabled: expert.enabled,
           source: "user",
         },
@@ -296,7 +289,6 @@ export class ExpertService {
             mcpServers: (payload.mcpServers as string[] | undefined) ?? [],
             model: payload.model as string | undefined,
             thinkingLevel: payload.thinkingLevel as string | undefined,
-            budgetTokens: payload.budgetTokens as number | undefined,
             enabled: true,
             source: "org",
           },
@@ -318,7 +310,6 @@ export class ExpertService {
         mcpServers: preset.mcpServers,
         model: preset.model,
         thinkingLevel: preset.thinkingLevel,
-        budgetTokens: preset.budgetTokens,
         enabled: true,
         source: "preset",
       },
@@ -346,7 +337,6 @@ export class ExpertService {
       mcpServers: input.mcpServers,
       model: input.model,
       thinkingLevel: input.thinkingLevel,
-      budgetTokens: input.budgetTokens,
       body: input.body,
     };
     const result = isUpdate
@@ -369,7 +359,6 @@ export class ExpertService {
       mcpServers: expert.mcpServers ?? [],
       model: expert.model,
       thinkingLevel: expert.thinkingLevel,
-      budgetTokens: expert.budgetTokens,
       enabled: expert.enabled,
       source: "user",
     };
@@ -391,6 +380,7 @@ export class ExpertService {
         members?: string[];
         leaderStyle?: string;
         integration?: string;
+        budgetTokens?: number;
       }>;
     }>("expertTeams.list");
     const userNames = new Set(teams.map((team) => team.name));
@@ -441,7 +431,6 @@ export class ExpertService {
     personaPrompt: string;
     model?: string;
     thinkingLevel?: string;
-    budgetTokens?: number;
     skills: string[];
     mcpServers: string[];
   } | null> {
@@ -452,7 +441,6 @@ export class ExpertService {
       personaPrompt: resolved.body,
       model: resolved.expert.model,
       thinkingLevel: resolved.expert.thinkingLevel,
-      budgetTokens: resolved.expert.budgetTokens,
       skills: resolved.expert.skills,
       mcpServers: resolved.expert.mcpServers,
     };
@@ -558,7 +546,6 @@ const BUILTIN_PRESETS = BUILTIN_EXPERT_DOCUMENTS.map((preset) => {
     mcpServers: parsed.front.mcpServers ?? [],
     model: parsed.front.model,
     thinkingLevel: parsed.front.thinkingLevel,
-    budgetTokens: parsed.front.budgetTokens,
   };
 });
 
