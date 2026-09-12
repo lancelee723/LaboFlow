@@ -659,10 +659,12 @@ export function AgentExpertsPage() {
             <Button size="sm" variant="primary" onClick={() => openInvoke(expert)}>
               {t("expert.summon")}
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => void openExpertEditor(expert)}>
-              <IconPencil size={13} />
-              {t("expert.edit")}
-            </Button>
+            {String(expert.source) !== "org" ? (
+              <Button size="sm" variant="secondary" onClick={() => void openExpertEditor(expert)}>
+                <IconPencil size={13} />
+                {t("expert.edit")}
+              </Button>
+            ) : null}
             {expert.source === "user" ? (
               <>
                 <Button size="sm" variant="secondary" onClick={() => void toggleExpert(expert)}>
