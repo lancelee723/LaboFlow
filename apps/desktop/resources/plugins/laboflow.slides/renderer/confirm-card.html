@@ -53,39 +53,113 @@
 </style>
 </head>
 <body>
-<h1 data-i18n="title">PPT 设计确认</h1>
+<h1 id="t-title"></h1>
 <div id="meta" class="muted"></div>
-<div id="content"><p class="muted" data-i18n="loading">加载中…</p></div>
+<div id="content"><p class="muted" id="t-loading"></p></div>
 
 <div id="actions" class="row hidden">
-  <button id="btn-confirm" class="primary" data-i18n="confirm">确认方案</button>
-  <button id="btn-waive" data-i18n="quick">快速模式（跳过确认）</button>
-  <input type="text" id="waive-reason" class="hidden" data-i18n-ph="reason" placeholder="填写跳过原因（必填）">
+  <button id="btn-confirm" class="primary"></button>
+  <button id="btn-waive"></button>
+  <input type="text" id="waive-reason" class="hidden">
 </div>
 <div id="toast"></div>
 
 <script>
 const bridge = window.pluginBridge;
+
+// 8 locales matching packages/i18n (en is the source of truth).
 const T = {
-  zh: {
-    title: "PPT 设计确认", loading: "加载中…", nopending: "当前没有待确认的 PPT 设计方案。",
+  "zh-CN": {
+    title: "PPT 设计确认", loading: "加载中…",
+    nopending: "当前没有待确认的 PPT 设计方案。",
     nopendingHint: "当助手提交 Stage-1/Stage-2 设计方案时，确认卡会自动打开；也可在命令面板搜索「确认卡」。",
     stage1: "Stage-1 · 沟通契约与模板选择", stage2: "Stage-2 · 最终设计方向（三选一）",
     confirm: "确认方案", quick: "快速模式（跳过确认）", reason: "填写跳过原因（必填）",
     done: "已提交，可关闭本窗口。", needReason: "请先填写跳过原因。",
-    runtime: "运行时", contract: "沟通契约", directions: "候选方向", raw: "原始推荐 JSON",
+    runtime: "运行时", contract: "沟通契约", raw: "原始推荐 JSON",
+    dirFallback: (i) => `方向 ${i}`, missingRec: "recommendations 缺失，请让助手重新提交。",
+  },
+  "zh-TW": {
+    title: "PPT 設計確認", loading: "載入中…",
+    nopending: "目前沒有待確認的 PPT 設計方案。",
+    nopendingHint: "當助手提交 Stage-1/Stage-2 設計方案時，確認卡會自動開啟；也可在命令面板搜尋「確認卡」。",
+    stage1: "Stage-1 · 溝通契約與範本選擇", stage2: "Stage-2 · 最終設計方向（三選一）",
+    confirm: "確認方案", quick: "快速模式（跳過確認）", reason: "填寫跳過原因（必填）",
+    done: "已提交，可關閉本視窗。", needReason: "請先填寫跳過原因。",
+    runtime: "執行環境", contract: "溝通契約", raw: "原始推薦 JSON",
+    dirFallback: (i) => `方向 ${i}`, missingRec: "recommendations 缺失，請讓助手重新提交。",
   },
   en: {
-    title: "PPT design confirmation", loading: "Loading…", nopending: "No PPT design is waiting for confirmation.",
+    title: "PPT design confirmation", loading: "Loading…",
+    nopending: "No PPT design is waiting for confirmation.",
     nopendingHint: "The card opens automatically when the assistant submits Stage-1/Stage-2; you can also search “confirm card” in the command palette.",
     stage1: "Stage-1 · Communication contract & template", stage2: "Stage-2 · Final design direction (pick one)",
     confirm: "Confirm", quick: "Quick mode (skip confirmation)", reason: "Reason (required to waive)",
     done: "Submitted — you can close this window.", needReason: "Please enter a waive reason first.",
-    runtime: "Runtime", contract: "Contract", directions: "Directions", raw: "Raw recommendations JSON",
+    runtime: "Runtime", contract: "Contract", raw: "Raw recommendations JSON",
+    dirFallback: (i) => `Direction ${i}`, missingRec: "recommendations missing — ask the assistant to resubmit.",
+  },
+  de: {
+    title: "PPT-Design bestätigen", loading: "Wird geladen…",
+    nopending: "Kein PPT-Entwurf wartet auf Bestätigung.",
+    nopendingHint: "Die Karte öffnet sich automatisch, wenn der Assistent Stage-1/Stage-2 einreicht; Sie können auch in der Befehlspalette „confirm card“ suchen.",
+    stage1: "Stage-1 · Kommunikationsvertrag & Vorlage", stage2: "Stage-2 · Finale designrichtung (eine wählen)",
+    confirm: "Bestätigen", quick: "Schnellmodus (Überspringen)", reason: "Grund (erforderlich)",
+    done: "Eingereicht — Sie können das Fenster schließen.", needReason: "Bitte zuerst einen Grund eingeben.",
+    runtime: "Laufzeit", contract: "Vertrag", raw: "Original-Empfehlungen (JSON)",
+    dirFallback: (i) => `Richtung ${i}`, missingRec: "Empfehlungen fehlen — bitten Sie den Assistenten erneut.",
+  },
+  es: {
+    title: "Confirmación de diseño PPT", loading: "Cargando…",
+    nopending: "No hay ningún diseño PPT pendiente de confirmación.",
+    nopendingHint: "La tarjeta se abre automáticamente cuando el asistente envía Stage-1/Stage-2; también puede buscar «confirm card» en la paleta de comandos.",
+    stage1: "Stage-1 · Contrato de comunicación y plantilla", stage2: "Stage-2 · Dirección final de diseño (elige una)",
+    confirm: "Confirmar", quick: "Modo rápido (omitir)", reason: "Motivo (obligatorio)",
+    done: "Enviado — puede cerrar esta ventana.", needReason: "Introduzca primero un motivo.",
+    runtime: "Tiempo de ejecución", contract: "Contrato", raw: "Recomendaciones originales (JSON)",
+    dirFallback: (i) => `Dirección ${i}`, missingRec: "Faltan recomendaciones; pida al asistente que las reenvíe.",
+  },
+  fr: {
+    title: "Confirmation du design PPT", loading: "Chargement…",
+    nopending: "Aucun design PPT en attente de confirmation.",
+    nopendingHint: "La carte s'ouvre automatiquement lorsque l'assistant soumet Stage-1/Stage-2 ; vous pouvez aussi chercher « confirm card » dans la palette de commandes.",
+    stage1: "Stage-1 · Contrat de communication et modèle", stage2: "Stage-2 · Direction de design finale (choisir une)",
+    confirm: "Confirmer", quick: "Mode rapide (ignorer)", reason: "Motif (obligatoire)",
+    done: "Envoyé — vous pouvez fermer cette fenêtre.", needReason: "Veuillez d'abord saisir un motif.",
+    runtime: "Exécution", contract: "Contrat", raw: "Recommandations brutes (JSON)",
+    dirFallback: (i) => `Direction ${i}`, missingRec: "Recommandations manquantes — demandez à l'assistant de les renvoyer.",
+  },
+  ko: {
+    title: "PPT 디자인 확인", loading: "불러오는 중…",
+    nopending: "확인 대기 중인 PPT 디자인이 없습니다.",
+    nopendingHint: "어시스턴트가 Stage-1/Stage-2 디자인을 제출하면 확인 카드가 자동으로 열립니다. 명령 팔레트에서 \"확인 카드\"를 검색할 수도 있습니다.",
+    stage1: "Stage-1 · 커뮤니케이션 계약 및 템플릿", stage2: "Stage-2 · 최종 디자인 방향(하나 선택)",
+    confirm: "확인", quick: "빠른 모드(건너뛰기)", reason: "사유(필수)",
+    done: "제출되었습니다. 이 창을 닫아도 됩니다.", needReason: "먼저 사유를 입력해 주세요.",
+    runtime: "런타임", contract: "계약", raw: "원본 추천 JSON",
+    dirFallback: (i) => `방향 ${i}`, missingRec: "추천 내용이 없습니다. 어시스턴트에게 다시 제출하도록 요청하세요.",
+  },
+  tr: {
+    title: "PPT tasarım onayı", loading: "Yükleniyor…",
+    nopending: "Onay bekleyen PPT tasarımı yok.",
+    nopendingHint: "Asistan Stage-1/Stage-2 tasarımını gönderdiğinde kart otomatik açılır; komut paletinde \"confirm card\" da arayabilirsiniz.",
+    stage1: "Stage-1 · İletişim sözleşmesi ve şablon", stage2: "Stage-2 · Nihai tasarım yönü (birini seçin)",
+    confirm: "Onayla", quick: "Hızlı mod (atla)", reason: "Gerekçe (zorunlu)",
+    done: "Gönderildi — bu pencereyi kapatabilirsiniz.", needReason: "Lütfen önce bir gerekçe girin.",
+    runtime: "Çalışma zamanı", contract: "Sözleşme", raw: "Ham öneriler (JSON)",
+    dirFallback: (i) => `Yön ${i}`, missingRec: "Öneriler eksik — asistandan yeniden göndermesini isteyin.",
   },
 };
-let lang = (navigator.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
-const t = (key) => T[lang][key] ?? key;
+
+function pickLocale() {
+  const raw = (navigator.language || "zh-CN").toLowerCase();
+  if (raw.startsWith("zh")) return raw.includes("tw") || raw.includes("hk") || raw.includes("hant") ? "zh-TW" : "zh-CN";
+  for (const code of ["de", "es", "fr", "ko", "tr", "en"]) {
+    if (raw.startsWith(code)) return code;
+  }
+  return "en";
+}
+let t = T[pickLocale()];
 let pending = null, data = null;
 
 function toast(msg) {
@@ -96,15 +170,18 @@ function toast(msg) {
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 async function init() {
-  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
-  document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  document.getElementById("t-title").textContent = t.title;
+  document.getElementById("t-loading").textContent = t.loading;
+  document.getElementById("btn-confirm").textContent = t.confirm;
+  document.getElementById("btn-waive").textContent = t.quick;
+  document.getElementById("waive-reason").placeholder = t.reason;
   const boot = await bridge.invoke("ppt.getBootstrap");
   pending = boot.pending;
   const meta = document.getElementById("meta");
-  if (boot.runtime) meta.textContent = `${t("runtime")}: ${boot.runtime.stage}`;
+  if (boot.runtime) meta.textContent = `${t.runtime}: ${boot.runtime.stage}`;
   if (!pending) {
     document.getElementById("content").innerHTML =
-      `<p class="muted">${esc(t("nopending"))}</p><p class="muted">${esc(t("nopendingHint"))}</p>`;
+      `<p class="muted">${esc(t.nopending)}</p><p class="muted">${esc(t.nopendingHint)}</p>`;
     return;
   }
   data = await bridge.invoke("ppt.getState", { projectDir: pending.projectDir });
@@ -113,44 +190,44 @@ async function init() {
 
 function kvBlock(obj) {
   if (!obj || typeof obj !== "object") return "";
-  const lines = Object.entries(obj)
+  return Object.entries(obj)
     .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
-    .map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`);
-  return lines.join("");
+    .map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`)
+    .join("");
 }
 
 function render() {
   const stage = pending.stage;
   const rec = data.recommendations?.[stage];
   const parts = [`<div class="muted">${esc(pending.projectDir)}</div>`];
-  parts.push(`<h2>${stage === "stage1" ? t("stage1") : t("stage2")}</h2>`);
+  parts.push(`<h2>${stage === "stage1" ? t.stage1 : t.stage2}</h2>`);
   if (!rec) {
-    parts.push(`<p class="muted">recommendations 缺失，请让助手重新提交。</p>`);
+    parts.push(`<p class="muted">${esc(t.missingRec)}</p>`);
   } else if (stage === "stage1") {
-    parts.push(`<div class="card"><h2 style="margin-top:0">${t("contract")}</h2>${kvBlock(rec)}</div>`);
+    parts.push(`<div class="card"><h2 style="margin-top:0">${t.contract}</h2>${kvBlock(rec)}</div>`);
     if (rec.templates || rec.templateOptions) {
       parts.push(`<pre>${esc(JSON.stringify(rec.templates ?? rec.templateOptions, null, 2))}</pre>`);
     }
   } else {
     const directions = rec.directions ?? rec.options ?? [];
-    parts.push(`<div id="dirs">` + (directions).map((d, i) =>
-      `<div class="card${i === 0 ? " sel" : ""}" data-dir="${i}"><label><input type="radio" name="dir" value="${i}" ${i === 0 ? "checked" : ""}> <b>${esc(d.name ?? d.title ?? `方向 ${i + 1} / Direction ${i + 1}`)}</b></label>${kvBlock(d)}</div>`).join("") + `</div>`);
+    parts.push(`<div id="dirs">` + directions.map((d, i) =>
+      `<div class="card${i === 0 ? " sel" : ""}" data-dir="${i}"><label><input type="radio" name="dir" value="${i}" ${i === 0 ? "checked" : ""}> <b>${esc(d.name ?? d.title ?? t.dirFallback(i + 1))}</b></label>${kvBlock(d)}</div>`).join("") + `</div>`);
   }
-  parts.push(`<details><summary class="muted">${t("raw")}</summary><pre>${esc(JSON.stringify(rec ?? {}, null, 2))}</pre></details>`);
+  parts.push(`<details><summary class="muted">${t.raw}</summary><pre>${esc(JSON.stringify(rec ?? {}, null, 2))}</pre></details>`);
   document.getElementById("content").innerHTML = parts.join("");
   document.getElementById("actions").classList.remove("hidden");
 }
 
 async function submit(waive) {
   const reason = document.getElementById("waive-reason").value.trim();
-  if (waive && !reason) { toast(t("needReason")); document.getElementById("waive-reason").classList.remove("hidden"); return; }
+  if (waive && !reason) { toast(t.needReason); document.getElementById("waive-reason").classList.remove("hidden"); return; }
   document.getElementById("btn-confirm").disabled = true;
   document.getElementById("btn-waive").disabled = true;
   const result = await bridge.invoke("ppt.confirmStage", {
     projectDir: pending.projectDir, stage: pending.stage, waive, waiveReason: reason || null,
   });
   if (result.error) { toast(result.error); document.getElementById("btn-confirm").disabled = false; document.getElementById("btn-waive").disabled = false; return; }
-  document.getElementById("content").innerHTML = `<p>${esc(t("done"))}</p>`;
+  document.getElementById("content").innerHTML = `<p>${esc(t.done)}</p>`;
   document.getElementById("actions").classList.add("hidden");
 }
 

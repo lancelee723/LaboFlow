@@ -32,7 +32,10 @@ export const PPT_SCRIPTS = {
       const sub = safeToken(args.subcommand);
       if (sub === "init") {
         if (!safeToken(args.name).trim()) return { error: "init 需要 name（项目名）" };
-        const argv = ["init", safeToken(args.name)];
+        if (!safeToken(args.dir).trim()) {
+          return { error: "init 需要 dir（工作区 projects/ 目录绝对路径）——上游默认会把项目建进 skill 目录，LaboFlow 必须显式指定工作区" };
+        }
+        const argv = ["init", safeToken(args.name), "--dir", safeToken(args.dir)];
         if (args.format) argv.push("--format", safeToken(args.format));
         return { argv };
       }
@@ -53,6 +56,7 @@ export const PPT_SCRIPTS = {
       properties: {
         subcommand: { type: "string", enum: ["init", "import-sources", "validate"] },
         name: { type: "string", description: "init: 项目名（如 maoming_chantou_20260912）" },
+        dir: { type: "string", description: "init: 必填，项目基目录（工作区 projects/ 的绝对路径）" },
         format: { type: "string", description: "init: 画布格式（默认注册格式，常用 ppt169）" },
         projectPath: { type: "string", description: "import-sources/validate: 项目目录（绝对路径）" },
         sources: { type: "array", items: { type: "string" }, description: "import-sources: 源文件/URL 列表" },

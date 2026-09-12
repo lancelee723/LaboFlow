@@ -279,7 +279,7 @@ test("Slides exposes the PPT-Master skill corpus to the agent", () => {
   assert.ok(skill.length <= 128 * 1024, "skill body must stay under 128 KiB");
 });
 
-test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", () => {
+test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", async () => {
   const vendorRoot = "resources/plugins/laboflow.slides/vendored/ppt-master";
   for (const rel of [
     "SKILL.md",
@@ -303,17 +303,17 @@ test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", () => {
   for (const banned of ["PyMuPDF", "pandoc", "edge-tts", "ebooklib", "flask"]) {
     assert.doesNotMatch(req, new RegExp(`^${banned}`, "m"), `${banned} must stay out of the trimmed requirements`);
   }
-  // No compiled bytecode in the vendored tree (they once landed in git).
-  const pyc = [];
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = resolve(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".pyc")) pyc.push(full);
-    }
-  };
-  walk(resolve(vendorRoot));
-  assert.deepEqual(pyc, [], "vendored tree must not contain .pyc files");
+  // Running the vendored python regenerates bytecode caches on disk (the
+  // wrapper sets PYTHONDONTWRITEBYTECODE=1 but direct runs do not), so the
+  // real invariant is repository hygiene: none may be tracked in git.
+  const { execFileSync } = await import("node:child_process");
+  const repoRoot = resolve("../..");
+  const tracked = execFileSync(
+    "git",
+    ["ls-files", "apps/desktop/resources/plugins/laboflow.slides/**/*.pyc"],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 },
+  ).split("\n").filter(Boolean);
+  assert.deepEqual(tracked, [], "no .pyc files may be tracked in git");
   // Packaging footprint baseline (DEVPLAN G): the vendored corpus dominates
   // the installer delta. Guard the ceiling so a careless vendor refresh can
   // not silently blow up download sizes.

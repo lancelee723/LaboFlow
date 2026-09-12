@@ -141,9 +141,9 @@ Phase 4 共享工作区（前置，未启动）
 
 - **M0 治理**：验收勘误（模块 06 L2 结论降级）；bundled 断言组（先红后绿）；106 个误提交 .pyc 清除 + `__pycache__/` 入 .gitignore；R1–R4 根因登记。
 - **Phase A 等价移植（R1/R4 销项）**：`ppt-runtime` 重构（venv 迁 getDataPath + 旧路径迁移；uv 优先 `--seed` + venv pip 回退；python ≥3.10 版本硬校验；pipMirror 镜像双 env；freeze 黑名单）；后台作业管理器（提交/取消/轮询/持久化/中断恢复）；薄壳技能 `ppt-master.md`（7 条宿主约定 + 上游正文原样，ToolSearch 可发现）+ `slides.md` 引擎路由节；工具注册 `ppt_master_status`（附 skillDir/pythonPath）/`ppt_master_setup`（异步）/`ppt_job_status`/`ppt_read_doc`（白名单+防穿越+1MiB 截断）。
-- **Phase B 硬门禁（R2 销项）**：`pipeline-state.json` 状态机（提交→用户确认→result.json 只读一次；损坏回退 pending）；`ppt_script` 8 项白名单 argspec 对齐上游 argparse（修复 §1.2 #3 参数错误）；导出三脚本硬校验 Stage-2（`PPT_STAGE_NOT_CONFIRMED`/`PPT_SPEC_LOCK_MISSING`）；确认卡面板（契约/三方向/快速豁免，zh/en）+ `openConfirmCard` 命令 + `onPanelInvoke` 桥。
+- **Phase B 硬门禁（R2 销项）**：`pipeline-state.json` 状态机（提交→用户确认→result.json 只读一次；损坏回退 pending）；`ppt_script` 8 项白名单 argspec 对齐上游 argparse（修复 §1.2 #3 参数错误）；导出三脚本硬校验 Stage-2（`PPT_STAGE_NOT_CONFIRMED`/`PPT_SPEC_LOCK_MISSING`）；确认卡面板（契约/三方向/快速豁免，8 语言）+ `openConfirmCard` 命令 + `onPanelInvoke` 桥。
 - **Phase C 体验（R3 销项）**：工作台视图（运行时状态卡/管线时间线/SVG 翻页预览/导出卡）；L1 复核——8 版式在当前代码已真实渲染（R3 为会话时点旧插件资源所致），补 graphicFrame 原生表格断言固化。
-- **G 验收**：`scripts/e2e-slides.mjs`（L1 快速路径 + L2 诊断/门禁路径，6 检查全过，跨平台无网络依赖）；AGPL 黑名单断言（fitz/PyMuPDF/pandoc/edge-tts/ebooklib/flask）进测试常驻；体积基线 66.6 MiB + 75 MiB 上限断言。
+- **G 验收**：`scripts/e2e-slides.mjs`（L1 快速路径 + L2 诊断/门禁路径，6 检查全过，跨平台无网络依赖）；**PPT_IT 全链冒烟**（init --dir → design_spec/spec_lock 最小合规样例 → SVG 页 → checker early/final 双闸 → finalize → svg_to_pptx 导出 + POSTFLIGHT 回执，5.3s 全链）；**init 项目根加固**：上游 `project_manager.py init` 默认把项目建进 skill 目录（LaboFlow 中为应用资源区），`ppt_script` 强制 init 传 `--dir <工作区>/projects` 并写入薄壳技能硬性约定；AGPL 黑名单断言（fitz/PyMuPDF/pandoc/edge-tts/ebooklib/flask）进测试常驻；体积基线 66.6 MiB + 75 MiB 上限断言。
 
 **回归数据**：desktop **1428 pass / 0 fail**（基线 1353，+75；2 skip 为 PPT_IT=1 门控真机集成）；typecheck 全绿；lint 9 个违规为**既有问题**（a7a2febd team 功能引入 chat-shell.css，经分支起点复证，不在本计划范围）。真机集成（PPT_IT=1，darwin）：uv 全新 venv 17.7s 就绪（指标 ≤3 分钟）、freeze 黑名单零命中、上游 checker --help 通过。
 

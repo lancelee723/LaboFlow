@@ -31,10 +31,16 @@ test("unknown scripts are refused with a structured code", () => {
 });
 
 test("argspec snapshot: project_manager subcommands mirror upstream argparse", () => {
-  assert.deepEqual(plan("project_manager", { subcommand: "init", name: "demo" }).argv, ["init", "demo"]);
-  assert.deepEqual(plan("project_manager", { subcommand: "init", name: "demo", format: "ppt169" }).argv, [
-    "init", "demo", "--format", "ppt169",
+  assert.deepEqual(plan("project_manager", { subcommand: "init", name: "demo", dir: "/w/projects" }).argv, [
+    "init", "demo", "--dir", "/w/projects",
   ]);
+  assert.deepEqual(
+    plan("project_manager", { subcommand: "init", name: "demo", dir: "/w/projects", format: "ppt169" }).argv,
+    ["init", "demo", "--dir", "/w/projects", "--format", "ppt169"],
+  );
+  // LaboFlow must always redirect the projects root into the workspace — the
+  // upstream default resolves against the vendored skill location.
+  assert.equal(plan("project_manager", { subcommand: "init", name: "demo" }).code, "PPT_SCRIPT_INVALID_ARGS");
   assert.deepEqual(
     plan("project_manager", { subcommand: "import-sources", projectPath: "/w/projects/demo", sources: ["/w/sources/a.docx"] }).argv,
     ["import-sources", "/w/projects/demo", "/w/sources/a.docx"],

@@ -42,26 +42,26 @@
 </style>
 </head>
 <body>
-<h1>PPT 工作台</h1>
+<h1 id="t-title"></h1>
 
-<h2>运行时 Runtime</h2>
+<h2 id="t-runtime"></h2>
 <div class="card row">
   <span class="badge" id="rt-stage">…</span>
   <span class="muted" id="rt-diag"></span>
   <span style="flex:1"></span>
-  <button id="btn-setup">安装 / Install</button>
-  <button id="btn-refresh">刷新 / Refresh</button>
+  <button id="btn-setup"></button>
+  <button id="btn-refresh"></button>
 </div>
 
-<h2>管线 Pipeline</h2>
+<h2 id="t-pipeline"></h2>
 <div class="row">
   <input type="text" id="project-dir" placeholder="projects/<name>_<date> 项目目录（绝对路径）">
-  <button id="btn-load">载入 / Load</button>
+  <button id="btn-load"></button>
 </div>
 <div class="card hidden" id="pipeline"></div>
 
-<h2>翻页预览 Pages</h2>
-<div id="preview"><span class="muted" id="preview-empty">载入项目后显示 svg_output 页面</span></div>
+<h2 id="t-pages"></h2>
+<div id="preview"><span class="muted" id="preview-empty"></span></div>
 <div class="pager hidden" id="pager">
   <button id="pg-prev">←</button>
   <span class="muted" id="pg-label">0 / 0</span>
@@ -69,11 +69,55 @@
   <span class="muted" id="pg-placeholder"></span>
 </div>
 
-<h2>导出 Exports</h2>
+<h2 id="t-exports"></h2>
 <div class="card filelist hidden" id="exports"></div>
 
 <script>
 const bridge = window.pluginBridge;
+
+// 8 locales matching packages/i18n (en is the source of truth).
+const T = {
+  "zh-CN": { title: "PPT 工作台", runtime: "运行时", pipeline: "管线", pages: "翻页预览", exports: "导出",
+    setup: "安装", refresh: "刷新", load: "载入", projectPh: "projects/<name>_<date> 项目目录（绝对路径）",
+    emptyPages: "载入项目后显示 svg_output 页面", noExports: "暂无导出" },
+  "zh-TW": { title: "PPT 工作台", runtime: "執行環境", pipeline: "管線", pages: "翻頁預覽", exports: "匯出",
+    setup: "安裝", refresh: "重新整理", load: "載入", projectPh: "projects/<name>_<date> 專案目錄（絕對路徑）",
+    emptyPages: "載入專案後顯示 svg_output 頁面", noExports: "暫無匯出" },
+  en: { title: "PPT workbench", runtime: "Runtime", pipeline: "Pipeline", pages: "Pages", exports: "Exports",
+    setup: "Install", refresh: "Refresh", load: "Load", projectPh: "projects/<name>_<date> project dir (absolute path)",
+    emptyPages: "Load a project to preview svg_output pages", noExports: "No exports yet" },
+  de: { title: "PPT-Werkbank", runtime: "Laufzeit", pipeline: "Pipeline", pages: "Seiten", exports: "Exporte",
+    setup: "Installieren", refresh: "Aktualisieren", load: "Laden", projectPh: "projects/<name>_<date> Projektordner (absolut)",
+    emptyPages: "Projekt laden, um svg_output-Seiten anzuzeigen", noExports: "Noch keine Exporte" },
+  es: { title: "Mesa de trabajo PPT", runtime: "Tiempo de ejecución", pipeline: "Flujo", pages: "Páginas", exports: "Exportaciones",
+    setup: "Instalar", refresh: "Actualizar", load: "Cargar", projectPh: "projects/<name>_<date> carpeta del proyecto (absoluta)",
+    emptyPages: "Cargue un proyecto para prever las páginas svg_output", noExports: "Aún no hay exportaciones" },
+  fr: { title: "Atelier PPT", runtime: "Exécution", pipeline: "Pipeline", pages: "Pages", exports: "Exports",
+    setup: "Installer", refresh: "Actualiser", load: "Charger", projectPh: "projects/<name>_<date> dossier du projet (absolu)",
+    emptyPages: "Chargez un projet pour prévisualiser les pages svg_output", noExports: "Aucun export pour l'instant" },
+  ko: { title: "PPT 작업대", runtime: "런타임", pipeline: "파이프라인", pages: "페이지", exports: "내보내기",
+    setup: "설치", refresh: "새로 고침", load: "불러오기", projectPh: "projects/<name>_<date> 프로젝트 디렉터리(절대 경로)",
+    emptyPages: "프로젝트를 불러오면 svg_output 페이지가 표시됩니다", noExports: "아직 내보내기가 없습니다" },
+  tr: { title: "PPT çalışma tezgahı", runtime: "Çalışma zamanı", pipeline: "Hatt", pages: "Sayfalar", exports: "Dışa aktarmalar",
+    setup: "Kur", refresh: "Yenile", load: "Yükle", projectPh: "projects/<name>_<date> proje dizini (mutlak)",
+    emptyPages: "svg_output sayfalarını görmek için proje yükleyin", noExports: "Henüz dışa aktarma yok" },
+};
+function pickLocale() {
+  const raw = (navigator.language || "zh-CN").toLowerCase();
+  if (raw.startsWith("zh")) return raw.includes("tw") || raw.includes("hk") || raw.includes("hant") ? "zh-TW" : "zh-CN";
+  for (const code of ["de", "es", "fr", "ko", "tr", "en"]) if (raw.startsWith(code)) return code;
+  return "en";
+}
+const t = T[pickLocale()];
+for (const [id, key] of [
+  ["t-title", "title"], ["t-runtime", "runtime"], ["t-pipeline", "pipeline"],
+  ["t-pages", "pages"], ["t-exports", "exports"], ["btn-setup", "setup"],
+  ["btn-refresh", "refresh"], ["btn-load", "load"],
+]) document.getElementById(id).textContent = t[key];
+document.getElementById("project-dir").placeholder = t.projectPh;
+document.getElementById("preview-empty").textContent = t.emptyPages;
+document.getElementById("t-noexports").textContent = t.noExports;
+
 let projectDir = "";
 let pages = []; // { name, bytes, dir }
 let pageIndex = 0;
@@ -126,7 +170,7 @@ async function loadProject() {
     ? files.map((f) =>
         `<div class="f"><span>${esc(f.name)}</span><span class="row"><span class="muted">${bytes(f.bytes)}</span>` +
         `<span class="linkish" data-open="${esc(projectDir + "/exports")}">打开 / open</span></span></div>`).join("")
-    : `<span class="muted">暂无导出 / no exports yet</span>`;
+    : `<span class="muted" id="t-noexports">暂无导出 / no exports yet</span>`;
 }
 
 function renderPipeline(state) {
