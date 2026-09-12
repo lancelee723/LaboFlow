@@ -6,11 +6,12 @@ import type {
   ThinkingLevel,
   UserSkillRecord,
 } from "@pi-desktop/shared";
-import { useAppStore } from "../stores/app-store";
-import { api, type ExpertListItem, type ExpertTeamListItem } from "../lib/api";
+import { useAppStore } from "../../stores/app-store";
+import { api, type ExpertListItem, type ExpertTeamListItem } from "../../lib/api";
 import { THINKING_LEVELS } from "@pi-desktop/shared";
-import { Badge, Button, Field, Input, Panel, Select, Textarea, cx } from "../components/ui";
-import { IconGraduationCap, IconPlus, IconSearch, IconUser, IconUsers, IconX } from "../components/icons";
+import { Badge, Button, Field, Input, Panel, Select, Textarea, cx } from "../ui";
+import { AgentCapabilityPage } from "./AgentCapabilityLayout";
+import { IconGraduationCap, IconPlus, IconSearch, IconUser, IconUsers, IconX } from "../icons";
 
 type ExpertTab = "center" | "mine" | "teams";
 
@@ -125,7 +126,7 @@ function modelOptionsFrom(providers: ProviderPublic[]): ModelOption[] {
   return options;
 }
 
-export function ExpertsPage() {
+export function AgentExpertsPage() {
   const { t } = useTranslation();
   const showToast = useAppStore((s) => s.showToast);
   const setPage = useAppStore((s) => s.setPage);
@@ -1102,29 +1103,10 @@ export function ExpertsPage() {
   );
 
   return (
-    <div className="thread-scroll">
-      <div className="page-frame">
-        <div className="page-header">
-          <div>
-            <h1 className="page-title">{t("expert.title")}</h1>
-            <div className="page-subtitle">{t("expert.subtitle")}</div>
-          </div>
-          <div className="flex gap-2">
-            {tab === "mine" ? (
-              <Button variant="primary" onClick={() => void openExpertEditor(null)}>
-                <IconPlus size={14} />
-                {t("expert.newExpert")}
-              </Button>
-            ) : null}
-            {tab === "teams" ? (
-              <Button variant="primary" onClick={() => openTeamEditor(null)}>
-                <IconPlus size={14} />
-                {t("expert.newTeam")}
-              </Button>
-            ) : null}
-          </div>
-        </div>
-
+    <AgentCapabilityPage
+      className="agent-experts"
+      description={t("expert.subtitle")}
+      toolbar={
         <div className="dest-toolbar">
           <div className="dest-filters" role="tablist" aria-label={t("expert.title")}>
             {(
@@ -1148,7 +1130,23 @@ export function ExpertsPage() {
               </button>
             ))}
           </div>
+          <div className="ml-auto flex gap-2">
+            {tab === "mine" ? (
+              <Button variant="primary" onClick={() => void openExpertEditor(null)}>
+                <IconPlus size={14} />
+                {t("expert.newExpert")}
+              </Button>
+            ) : null}
+            {tab === "teams" ? (
+              <Button variant="primary" onClick={() => openTeamEditor(null)}>
+                <IconPlus size={14} />
+                {t("expert.newTeam")}
+              </Button>
+            ) : null}
+          </div>
         </div>
+      }
+    >
 
         {tab === "center" ? (
           <>
@@ -1340,10 +1338,9 @@ export function ExpertsPage() {
         {loading && !experts.length ? (
           <div className="dest-section-label">{t("common.loading")}</div>
         ) : null}
-      </div>
       {renderInvokeDialog()}
       {renderExpertEditor()}
       {renderTeamEditor()}
-    </div>
+    </AgentCapabilityPage>
   );
 }

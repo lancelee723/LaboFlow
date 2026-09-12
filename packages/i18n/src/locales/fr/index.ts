@@ -677,6 +677,7 @@ export const fr = {
       "skills": "Compétences",
       "mcp": "MCP",
       "subagents": "Sous-agents",
+      "experts": "Experts",
       "import": "Importation",
       "projects": "Projets",
       "info": "Informations"
@@ -738,6 +739,8 @@ export const fr = {
     "mcpProjectPath": "Chemin MCP du projet",
     "subagents": "Sous-agents",
     "subagentsDescription": "Agents personnels pour le travail parallèle.",
+    "experts": "Experts",
+    "expertsDescription": "Centre d'experts : agents-persona, équipes d'experts et pipeline en boucle.",
     "subagentsGlobalPath": "Chemin global des sous-agents",
     "subagentsOnlyGlobal": "Les sous-agents sont uniquement globaux. Les définitions de projet ne sont pas prises en charge.",
     "capabilityPriority": "Les capacités du projet sont prioritaires sur les capacités globales portant le même nom.",

@@ -92,11 +92,6 @@ const ScheduledPage = lazy(() =>
     default: module.ScheduledPage,
   })),
 );
-const ExpertsPage = lazy(() =>
-  import("./pages/ExpertsPage").then((module) => ({
-    default: module.ExpertsPage,
-  })),
-);
 const PluginsPage = lazy(() =>
   import("./pages/PluginsPage").then((module) => ({
     default: module.PluginsPage,
@@ -1931,10 +1926,6 @@ function AppShell() {
               ) : page === "scheduled" ? (
                 <div className="route-surface route-page">
                   <ScheduledPage />
-                </div>
-              ) : page === "experts" ? (
-                <div className="route-surface route-page">
-                  <ExpertsPage />
                 </div>
               ) : page === "plugins" ? (
                 <div className="route-surface route-page">

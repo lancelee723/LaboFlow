@@ -1581,18 +1581,6 @@ export function Sidebar({
             <IconNewSession size={14} />
             <span>{t("nav.newTemporarySession")}</span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-action="quick-summon-expert"
-            onClick={() => {
-              closeMenus(false);
-              setPage("experts");
-            }}
-          >
-            <IconGraduationCap size={14} />
-            <span>{t("expert.menuSummon")}</span>
-          </button>
           {openProjects.map((project) => (
             <button
               key={project.path}

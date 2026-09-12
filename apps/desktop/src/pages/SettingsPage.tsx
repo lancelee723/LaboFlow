@@ -45,7 +45,7 @@ import {
   IconServer,
   IconSliders,
   IconSparkles,
-} from "../components/icons";
+  IconGraduationCap,} from "../components/icons";
 import { ModelConfigPage } from "../components/settings/ModelConfigPage";
 import { KeyboardShortcutsSection } from "../components/settings/KeyboardShortcutsSection";
 import { FontFamilyRow } from "../components/settings/FontFamilyRow";
@@ -60,6 +60,7 @@ import { OrgSettingsPage } from "../components/settings/OrgSettingsPage";
 import { AgentSkillsPage } from "../components/settings/AgentSkillsPage";
 import { AgentMcpPage } from "../components/settings/AgentMcpPage";
 import { AgentSubagentsPage } from "../components/settings/AgentSubagentsPage";
+import { AgentExpertsPage } from "../components/settings/AgentExpertsPage";
 
 type SettingsTab = ReturnType<typeof useAppStore.getState>["settingsTab"];
 
@@ -1240,6 +1241,7 @@ export function SettingsPage() {
       skills: <IconBookOpen size={14} />,
       mcp: <IconServer size={14} />,
       subagents: <IconBot size={14} />,
+      experts: <IconGraduationCap size={14} />,
       import: <IconDownload size={14} />,
       projects: <IconArchive size={14} />,
       org: <IconShield size={14} />,
@@ -1472,6 +1474,7 @@ export function SettingsPage() {
           {tab === "mcp" && <AgentMcpPage />}
 
           {tab === "subagents" && <AgentSubagentsPage />}
+          {tab === "experts" && <AgentExpertsPage />}
 
           {tab === "instructions" && <AgentInstructionsSection />}
 
@@ -1489,7 +1492,8 @@ export function SettingsPage() {
                 <SettingsRow title={t("settings.application")} description={t("settings.applicationDesc")}>
                   <div className="settings-about-meta">
                     <div className="font-medium">
-                      {version?.name || "LaboFlow"} {version?.version}
+                      {version?.displayName || version?.name || "LaboFlow Desktop"}{" "}
+                      {version?.displayVersion || version?.version}
                     </div>
                     <div className="font-mono text-xs-plus text-text-muted">
                       protocol {version?.protocolVersion} · host {version?.hostVersion}

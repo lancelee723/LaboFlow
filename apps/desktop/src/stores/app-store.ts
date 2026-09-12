@@ -863,7 +863,6 @@ export type AppState = {
     | "chat"
     | "pulls"
     | "scheduled"
-    | "experts"
     | "plugins"
     | "workspaces"
     | "spaces"

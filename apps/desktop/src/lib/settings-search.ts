@@ -14,6 +14,7 @@ export type SettingsTabId =
   | "skills"
   | "mcp"
   | "subagents"
+  | "experts"
   | "import"
   | "projects"
   | "org"
@@ -186,6 +187,20 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     ],
   },
   {
+    id: "experts",
+    labelKey: "settings.nav.experts",
+    titleKey: "settings.experts",
+    group: "agent",
+    keywordKeys: [
+      "settings.expertsDescription",
+      "expert.tabCenter",
+      "expert.tabMine",
+      "expert.tabTeams",
+      "expert.newExpert",
+      "expert.newTeam",
+    ],
+  },
+  {
     id: "import",
     labelKey: "settings.nav.import",
     titleKey: "settings.import",
@@ -239,7 +254,9 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.usage.totalTurns",
       "settings.usage.activity",
       "settings.usage.trend",
-      "settings.usage.dailyBreakdown",
+      "settings.usage.heatDay",
+      "settings.usage.heatWeek",
+      "settings.usage.heatCumulative",
     ],
   },
   {
