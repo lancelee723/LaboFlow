@@ -406,12 +406,17 @@ export function ModelSelectionPanes({
               const info = infoById.get(binding.id.toLowerCase());
               const publishedImages = info ? modelMatchesFilter(info, "vision") : false;
               const publishedDocuments = info ? modelMatchesFilter(info, "pdf") : false;
+              // The row summary reports the effective window: a published
+              // catalog value (already binding-adjusted upstream) wins over a
+              // legacy 128k default stored before the record was known.
+              const effectiveContextWindow =
+                info?.contextWindow ?? binding.contextWindow;
               return (
                 <li className="provider-chosen-row" key={binding.id}>
                   <div className="provider-chosen-row-head">
                     <span className="provider-chosen-row-id font-mono">{binding.id}</span>
                     <span className="provider-chosen-row-limits">
-                      {formatTokenCount(binding.contextWindow)} ·{" "}
+                      {formatTokenCount(effectiveContextWindow)} ·{" "}
                       {formatTokenCount(binding.maxTokens)}
                     </span>
                     <button
