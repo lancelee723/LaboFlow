@@ -108,6 +108,7 @@ export function ProjectsPage() {
   const restoreProject = useAppStore((s) => s.restoreProject);
   const newSession = useAppStore((s) => s.newSession);
   const selectSession = useAppStore((s) => s.selectSession);
+  const deleteSessionAction = useAppStore((s) => s.deleteSession);
   const setPage = useAppStore((s) => s.setPage);
   const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const renameSession = useAppStore((s) => s.renameSession);
@@ -332,6 +333,41 @@ export function ProjectsPage() {
       await selectSession(sessionId);
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
+    }
+  };
+
+  /** Delete a session from the project index, mirroring the sidebar flow when
+   * the deleted row is the active conversation (pick a sibling or start new). */
+  const deleteSessionFromIndex = async (session: SessionSummary) => {
+    try {
+      const wasActive =
+        useAppStore.getState().activeSessionId === session.id;
+      await deleteSessionAction(session.id);
+      if (!wasActive) return;
+      const state = useAppStore.getState();
+      const meta = state.sessionMeta;
+      const projectKey = session.projectPath
+        ? normalizeProjectPath(session.projectPath)
+        : null;
+      const sibling =
+        state.sessions.find(
+          (item) =>
+            item.id !== session.id &&
+            !meta[item.id]?.archived &&
+            normalizeProjectPath(item.projectPath ?? "") === projectKey,
+        ) ??
+        state.sessions.find(
+          (item) => item.id !== session.id && !meta[item.id]?.archived,
+        );
+      if (sibling) {
+        await selectSession(sibling.id);
+      } else {
+        await newSession({ projectPath: session.projectPath ?? null });
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), {
+        variant: "error",
+      });
     }
   };
 
@@ -793,6 +829,15 @@ export function ProjectsPage() {
                                     onClick={() => setRenameFor(s)}
                                   >
                                     <IconPencil size={13} aria-hidden />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="projects-detail-task-rename projects-detail-task-delete"
+                                    aria-label={t("nav.deleteTask", { defaultValue: "Delete" })}
+                                    title={t("nav.deleteTask", { defaultValue: "Delete" })}
+                                    onClick={() => void deleteSessionFromIndex(s)}
+                                  >
+                                    <IconX size={13} aria-hidden />
                                   </button>
                                 </div>
                               );

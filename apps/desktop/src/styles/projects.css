@@ -636,6 +636,11 @@
   color: var(--ds-text-primary);
 }
 
+.projects-detail-task-delete:hover {
+  background: color-mix(in oklab, var(--ds-error) 12%, transparent);
+  color: var(--ds-error);
+}
+
 /* Quiet in-panel empty state: centered glyph + copy, no decorative frame. */
 .projects-empty {
   display: flex;

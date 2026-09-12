@@ -109,6 +109,20 @@ export function fileDirOf(path: string): string {
   return index <= 0 ? "" : normalized.slice(0, index);
 }
 
+/**
+ * Whether a chat-referenced file can be rendered by the work-panel viewer
+ * (text/code, images, HTML, PDF). Non-previewable binaries (archives, office
+ * documents) still open with the OS default handler.
+ */
+export function isPreviewableFilePath(path: string): boolean {
+  const base = path.replaceAll("\\", "/").split("/").pop() ?? "";
+  if (!base) return false;
+  if (KNOWN_BARE_NAMES.has(base)) return true;
+  const dotIndex = base.lastIndexOf(".");
+  const ext = dotIndex > 0 ? base.slice(dotIndex + 1).toLowerCase() : "";
+  return KNOWN_EXTS.has(ext);
+}
+
 export function safeDecodeUri(value: string): string {
   try {
     return decodeURI(value);
