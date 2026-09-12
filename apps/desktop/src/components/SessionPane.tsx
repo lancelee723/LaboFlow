@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { ChatTranscript } from "./ChatTranscript";
+import { TeamRunStrip } from "./TeamRunStrip";
 import { useAppStore } from "../stores/app-store";
 import { headPermission, sessionPermissions } from "../lib/pending-permissions";
 import { headAsk } from "../lib/pending-asks";
@@ -71,6 +72,9 @@ export const SessionPane = memo(function SessionPane({
         planningState={planningState}
         paneVisible={visible}
       />
+      {/* Live expert-team execution chips (module 01 refinement); self-empty
+          unless a team run dispatched from this session is in flight. */}
+      <TeamRunStrip sessionId={sessionId} />
     </div>
   );
 });

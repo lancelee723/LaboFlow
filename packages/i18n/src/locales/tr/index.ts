@@ -1388,6 +1388,7 @@ export const tr = {
     phaseDone: "Tamamlandı",
     phaseFailed: "Başarısız",
     retryMember: "Yeniden dene",
+    stageLabel: "Aşama {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

@@ -1378,6 +1378,7 @@ export const zhTW = {
     phaseDone: "已完成",
     phaseFailed: "失敗",
     retryMember: "重試",
+    stageLabel: "階段 {{index}}/{{total}}：{{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

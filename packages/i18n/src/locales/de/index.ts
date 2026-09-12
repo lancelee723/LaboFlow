@@ -1367,6 +1367,7 @@ export const de = {
     phaseDone: "Abgeschlossen",
     phaseFailed: "Fehlgeschlagen",
     retryMember: "Erneut versuchen",
+    "stageLabel": "Stufe {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} Tokens",
     tokensUsed: "{{used}} Tokens",
   

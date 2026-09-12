@@ -1388,6 +1388,7 @@ export const ko = {
     phaseDone: "완료",
     phaseFailed: "실패",
     retryMember: "재시도",
+    stageLabel: "단계 {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

@@ -25,6 +25,12 @@ const MAX_PARALLEL_MEMBERS = 4;
 const DEP_RESULT_MAX_CHARS = 4000;
 const BUDGET_WARNING_RATIO = 0.8;
 
+/** Compact per-member token tag for delivery cards: " 12.3k tok", omitted at 0. */
+function memberTokenTag(tokens: number): string {
+  if (tokens <= 0) return "";
+  return ` ${tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : tokens} tok`;
+}
+
 export interface TeamMemberState {
   expert: string;
   status: "pending" | "running" | "done" | "failed";
@@ -425,7 +431,9 @@ export class TeamRunner {
         .postSessionCard(state.sessionId, {
           id: `team-card-${randomUUID()}`,
           role: "assistant",
-          content: `【${state.teamName} · 管线交付完成】\n\n${state.integratedText}\n\n—— 管线：${state.pipeline.join(" → ")}；消耗 ${state.totalTokens} tokens`,
+          content: `【${state.teamName} · 管线交付完成】\n\n${state.integratedText}\n\n—— 管线：${state.pipeline.join(" → ")}；成员：${state.members
+            .map((member) => `${member.expert}(${member.status === "done" ? "✓" : "×"}${memberTokenTag(member.totalTokens)})`)
+            .join("、")}；消耗 ${state.totalTokens} tokens`,
           createdAt: new Date().toISOString(),
           status: "complete",
           kind: "team-card",
@@ -450,7 +458,7 @@ export class TeamRunner {
       messages: [
         {
           role: "user" as const,
-          content: `任务：${state.task}\n\n可用成员（只能指派这些专家）：${members.join("、")}\n拆解粒度：${state.leaderStyle === "coarse" ? "粗放（尽量合并子任务）" : "精细（按职责拆到可独立执行）"}`,
+          content: `任务：${state.task}\n\n可用成员（只能指派这些专家）：${members.join("、")}\n拆解粒度：${state.leaderStyle === "coarse" ? "粗放（尽量合并子任务）" : "精细（按职责拆到可独立执行）"}\n\n编排规则：若任务单一、一名成员即可完成，直接拆为单成员直通计划（快速模式），不必凑齐多名成员。`,
           timestamp: Date.now(),
         },
       ],
@@ -651,7 +659,7 @@ export class TeamRunner {
         messages: [
           {
             role: "user" as const,
-            content: `原始任务：${state.task}\n\n各成员成果：\n${memberDigest}`,
+            content: `原始任务：${state.task}\n\n各成员成果：\n${memberDigest}\n\n交付要求：\n1. 以主持人身份收尾，简述各成员的开工与收尾（用 @成员名 提及）。\n2. 文末固定输出「用户下一步建议」段：给出 3-5 条用户拿到交付物后可以立即执行的后续动作。`,
             timestamp: Date.now(),
           },
         ],
@@ -685,7 +693,7 @@ export class TeamRunner {
           id: `team-card-${randomUUID()}`,
           role: "assistant",
           content: `【${state.teamName} · 交付完成】\n\n${integratedText}\n\n—— 成员：${state.members
-            .map((member) => `${member.expert}(${member.status === "done" ? "✓" : "×"})`)
+            .map((member) => `${member.expert}(${member.status === "done" ? "✓" : "×"}${memberTokenTag(member.totalTokens)})`)
             .join("、")}；消耗 ${state.totalTokens} tokens`,
           createdAt: new Date().toISOString(),
           status: "complete",

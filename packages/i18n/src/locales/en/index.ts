@@ -1386,6 +1386,7 @@ export const en = {
     phaseDone: "Done",
     phaseFailed: "Failed",
     retryMember: "Retry",
+    stageLabel: "Stage {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

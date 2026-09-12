@@ -1378,6 +1378,7 @@ export const zhCN = {
     phaseDone: "已完成",
     phaseFailed: "失败",
     retryMember: "重试",
+    stageLabel: "阶段 {{index}}/{{total}}：{{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   
