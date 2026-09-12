@@ -226,6 +226,9 @@ test("Slides ships the L1+L2 tool surface it registers", () => {
     "ppt_master_setup",
     "ppt_job_status",
     "ppt_read_doc",
+    "ppt_script",
+    "ppt_stage_submit",
+    "ppt_stage_status",
   ]) {
     assert.ok(declaredTools.includes(tool), `manifest must declare ${tool}`);
     assert.ok(
@@ -236,6 +239,22 @@ test("Slides ships the L1+L2 tool surface it registers", () => {
   // The old dead-code path (defined but never registered) must stay gone.
   assert.doesNotMatch(slidesMain, /registerL2Tools/);
   assert.match(slidesMain, /pi\.agent\.registerTool/);
+  // Phase B/C surfaces: the confirm card is a user panel, the workbench a
+  // docked view, and the palette entry only OPENS the card (confirmation is
+  // never a one-keystroke action).
+  assert.equal(slidesManifest.ui.panel, "renderer/confirm-card.html");
+  assert.deepEqual(slidesManifest.contributes.views.map((v) => v.id), ["workbench"]);
+  assert.ok(existsSync(resolve("resources/plugins/laboflow.slides/renderer/workbench.html")));
+  assert.deepEqual(slidesManifest.contributes.commands.map((c) => c.id), ["openConfirmCard"]);
+  for (const permission of ["ui.panel", "ui.view", "notify"]) {
+    assert.ok(slidesManifest.permissions.includes(permission), `permission needed: ${permission}`);
+  }
+  // Sandbox hygiene for both renderer pages.
+  for (const page of ["renderer/confirm-card.html", "renderer/workbench.html"]) {
+    const source = read(`resources/plugins/laboflow.slides/${page}`);
+    assert.match(source, /meta name="pi-plugin-chrome" content="v2"/);
+    assert.doesNotMatch(source, /require\(|ipcRenderer|webview/);
+  }
 });
 
 test("Slides exposes the PPT-Master skill corpus to the agent", () => {

@@ -64,7 +64,10 @@ export function capabilitiesFromModelInfo(model?: ModelInfo | null): ModelCapabi
  * Apply explicit per-provider model settings. Thinking levels and output limits
  * come from the user's binding. A legacy/generated 128k context value is treated
  * as the generic fallback when a published catalog window is available; every
- * other context value remains an explicit Advanced override.
+ * other context value remains an explicit Advanced override. An empty
+ * configured thinking-level list is the same kind of generic seed — the
+ * published catalog ladder wins, otherwise models discovered before the
+ * catalog knew them would be stuck with reasoning "off" forever.
  */
 export function modelConfigWithBinding(
   model: ModelConfig,
@@ -80,9 +83,11 @@ export function modelConfigWithBinding(
     | null,
 ): ModelConfig {
   if (!binding) return model;
-  const enabledThinkingLevels = THINKING_LEVELS.filter((level) =>
-    binding.thinkingLevels.includes(level),
-  );
+  const configuredLevels = binding.thinkingLevels ?? [];
+  const publishedLevels = model.supportedThinkingLevels ?? [];
+  const enabledThinkingLevels = configuredLevels.length
+    ? THINKING_LEVELS.filter((level) => configuredLevels.includes(level))
+    : THINKING_LEVELS.filter((level) => publishedLevels.includes(level));
   const contextWindow =
     effectiveContextWindow(model.contextWindow, binding.contextWindow) ??
     model.contextWindow;

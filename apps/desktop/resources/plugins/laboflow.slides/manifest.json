@@ -6,6 +6,10 @@
   "description": "PPT assistant: fast editable decks (pptxgenjs baseline) plus the vendored PPT-Master refinement pipeline (native DrawingML, consulting-grade), with an isolated guarded Python runtime.",
   "author": "LaboFlow",
   "main": "main.js",
+  "ui": {
+    "panel": "renderer/confirm-card.html",
+    "title": { "en": "PPT confirm card", "zh-CN": "PPT 确认卡" }
+  },
   "contributes": {
     "agentTools": [
       {
@@ -72,6 +76,62 @@
           "properties": { "path": { "type": "string" } },
           "required": ["path"]
         }
+      },
+      {
+        "name": "ppt_script",
+        "description": "Run a whitelisted vendored PPT-Master script with the isolated venv: project_manager | source_to_md | text_measure | quality_checker | finalize_svg | total_md_split | svg_to_pptx | image_search. Export scripts are hard-gated on Stage-2 user confirmation; >60s continues as a background job (poll ppt_job_status).",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "script": { "type": "string", "enum": ["project_manager", "source_to_md", "text_measure", "quality_checker", "finalize_svg", "total_md_split", "svg_to_pptx", "image_search"] },
+            "args": { "type": "object", "description": "Per-script args, upstream-argparse-faithful (e.g. quality_checker: { target, stage, json }; svg_to_pptx: { projectPath, output?, source?, format? })" }
+          },
+          "required": ["script", "args"]
+        }
+      },
+      {
+        "name": "ppt_stage_submit",
+        "description": "Submit PPT-Master design recommendations (Stage-1 沟通契约/Stage-2 三方向) for USER confirmation via the confirm card, then STOP and wait — silence confirms nothing. Input { projectDir, stage, recommendations }.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "projectDir": { "type": "string" },
+            "stage": { "type": "string", "enum": ["stage1", "stage2"] },
+            "recommendations": { "type": "object" }
+          },
+          "required": ["projectDir", "stage", "recommendations"]
+        }
+      },
+      {
+        "name": "ppt_stage_status",
+        "description": "Check the user's decision on a submitted PPT stage. Input { projectDir, stage? }. pending/submitted = keep waiting; confirmed = result.json (read-once, later calls return a cached summary); waived = quick mode.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "projectDir": { "type": "string" },
+            "stage": { "type": "string", "enum": ["stage1", "stage2"] }
+          },
+          "required": ["projectDir"]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "id": "openConfirmCard",
+        "title": "Slides: 打开 PPT 确认卡 / Open PPT confirm card",
+        "keywords": ["ppt", "确认", "confirm", "slides", "设计"]
+      }
+    ],
+    "views": [
+      {
+        "id": "workbench",
+        "title": { "en": "PPT workbench", "zh-CN": "PPT 工作台" },
+        "icon": "sparkles",
+        "entry": "renderer/workbench.html",
+        "order": 12
       }
     ],
     "skills": ["./skills/slides.md", "./skills/ppt-master.md"],
@@ -100,7 +160,7 @@
       }
     ]
   },
-  "permissions": ["agent.tool.register", "workspace.read", "fs.write"],
+  "permissions": ["agent.tool.register", "workspace.read", "fs.write", "ui.panel", "ui.view", "notify"],
   "engines": {
     "piDesktop": ">=0.8.0"
   },

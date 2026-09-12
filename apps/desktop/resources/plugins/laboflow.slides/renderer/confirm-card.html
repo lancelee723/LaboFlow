@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="pi-plugin-chrome" content="v2">
+<title>PPT 确认卡</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: calc(var(--pi-plugin-titlebar-height, 46px) + 12px) 16px 16px;
+    font: 13px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--pi-fg, #1f2328);
+    background: var(--pi-bg, transparent);
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  h2 { font-size: 13px; margin: 14px 0 6px; opacity: .85; }
+  .muted { opacity: .6; font-size: 12px; }
+  .card {
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 10px; padding: 10px 12px; margin: 8px 0;
+  }
+  .card.sel { outline: 2px solid color-mix(in srgb, currentColor 55%, transparent); }
+  .card label { display: block; cursor: pointer; }
+  pre {
+    background: color-mix(in srgb, currentColor 7%, transparent);
+    border-radius: 8px; padding: 8px; overflow: auto; max-height: 220px;
+    font-size: 11px; white-space: pre-wrap; word-break: break-word;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button {
+    font: inherit; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+    background: transparent; color: inherit;
+  }
+  button.primary { font-weight: 600; }
+  button.primary:not(:disabled) { background: color-mix(in srgb, currentColor 88%, transparent); color: var(--pi-bg, #fff); }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type="text"] {
+    font: inherit; padding: 5px 8px; border-radius: 8px; flex: 1; min-width: 160px;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+    background: transparent; color: inherit;
+  }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+  .hidden { display: none; }
+  #toast { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: color-mix(in srgb, currentColor 88%, transparent); color: var(--pi-bg, #fff);
+    padding: 6px 14px; border-radius: 999px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<h1 data-i18n="title">PPT 设计确认</h1>
+<div id="meta" class="muted"></div>
+<div id="content"><p class="muted" data-i18n="loading">加载中…</p></div>
+
+<div id="actions" class="row hidden">
+  <button id="btn-confirm" class="primary" data-i18n="confirm">确认方案</button>
+  <button id="btn-waive" data-i18n="quick">快速模式（跳过确认）</button>
+  <input type="text" id="waive-reason" class="hidden" data-i18n-ph="reason" placeholder="填写跳过原因（必填）">
+</div>
+<div id="toast"></div>
+
+<script>
+const bridge = window.pluginBridge;
+const T = {
+  zh: {
+    title: "PPT 设计确认", loading: "加载中…", nopending: "当前没有待确认的 PPT 设计方案。",
+    nopendingHint: "当助手提交 Stage-1/Stage-2 设计方案时，确认卡会自动打开；也可在命令面板搜索「确认卡」。",
+    stage1: "Stage-1 · 沟通契约与模板选择", stage2: "Stage-2 · 最终设计方向（三选一）",
+    confirm: "确认方案", quick: "快速模式（跳过确认）", reason: "填写跳过原因（必填）",
+    done: "已提交，可关闭本窗口。", needReason: "请先填写跳过原因。",
+    runtime: "运行时", contract: "沟通契约", directions: "候选方向", raw: "原始推荐 JSON",
+  },
+  en: {
+    title: "PPT design confirmation", loading: "Loading…", nopending: "No PPT design is waiting for confirmation.",
+    nopendingHint: "The card opens automatically when the assistant submits Stage-1/Stage-2; you can also search “confirm card” in the command palette.",
+    stage1: "Stage-1 · Communication contract & template", stage2: "Stage-2 · Final design direction (pick one)",
+    confirm: "Confirm", quick: "Quick mode (skip confirmation)", reason: "Reason (required to waive)",
+    done: "Submitted — you can close this window.", needReason: "Please enter a waive reason first.",
+    runtime: "Runtime", contract: "Contract", directions: "Directions", raw: "Raw recommendations JSON",
+  },
+};
+let lang = (navigator.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
+const t = (key) => T[lang][key] ?? key;
+let pending = null, data = null;
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg; el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2200);
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function init() {
+  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  const boot = await bridge.invoke("ppt.getBootstrap");
+  pending = boot.pending;
+  const meta = document.getElementById("meta");
+  if (boot.runtime) meta.textContent = `${t("runtime")}: ${boot.runtime.stage}`;
+  if (!pending) {
+    document.getElementById("content").innerHTML =
+      `<p class="muted">${esc(t("nopending"))}</p><p class="muted">${esc(t("nopendingHint"))}</p>`;
+    return;
+  }
+  data = await bridge.invoke("ppt.getState", { projectDir: pending.projectDir });
+  render();
+}
+
+function kvBlock(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  const lines = Object.entries(obj)
+    .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
+    .map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`);
+  return lines.join("");
+}
+
+function render() {
+  const stage = pending.stage;
+  const rec = data.recommendations?.[stage];
+  const parts = [`<div class="muted">${esc(pending.projectDir)}</div>`];
+  parts.push(`<h2>${stage === "stage1" ? t("stage1") : t("stage2")}</h2>`);
+  if (!rec) {
+    parts.push(`<p class="muted">recommendations 缺失，请让助手重新提交。</p>`);
+  } else if (stage === "stage1") {
+    parts.push(`<div class="card"><h2 style="margin-top:0">${t("contract")}</h2>${kvBlock(rec)}</div>`);
+    if (rec.templates || rec.templateOptions) {
+      parts.push(`<pre>${esc(JSON.stringify(rec.templates ?? rec.templateOptions, null, 2))}</pre>`);
+    }
+  } else {
+    const directions = rec.directions ?? rec.options ?? [];
+    parts.push(`<div id="dirs">` + (directions).map((d, i) =>
+      `<div class="card${i === 0 ? " sel" : ""}" data-dir="${i}"><label><input type="radio" name="dir" value="${i}" ${i === 0 ? "checked" : ""}> <b>${esc(d.name ?? d.title ?? `方向 ${i + 1} / Direction ${i + 1}`)}</b></label>${kvBlock(d)}</div>`).join("") + `</div>`);
+  }
+  parts.push(`<details><summary class="muted">${t("raw")}</summary><pre>${esc(JSON.stringify(rec ?? {}, null, 2))}</pre></details>`);
+  document.getElementById("content").innerHTML = parts.join("");
+  document.getElementById("actions").classList.remove("hidden");
+}
+
+async function submit(waive) {
+  const reason = document.getElementById("waive-reason").value.trim();
+  if (waive && !reason) { toast(t("needReason")); document.getElementById("waive-reason").classList.remove("hidden"); return; }
+  document.getElementById("btn-confirm").disabled = true;
+  document.getElementById("btn-waive").disabled = true;
+  const result = await bridge.invoke("ppt.confirmStage", {
+    projectDir: pending.projectDir, stage: pending.stage, waive, waiveReason: reason || null,
+  });
+  if (result.error) { toast(result.error); document.getElementById("btn-confirm").disabled = false; document.getElementById("btn-waive").disabled = false; return; }
+  document.getElementById("content").innerHTML = `<p>${esc(t("done"))}</p>`;
+  document.getElementById("actions").classList.add("hidden");
+}
+
+document.getElementById("btn-confirm").addEventListener("click", () => submit(false));
+document.getElementById("btn-waive").addEventListener("click", () => submit(true));
+init();
+</script>
+</body>
+</html>

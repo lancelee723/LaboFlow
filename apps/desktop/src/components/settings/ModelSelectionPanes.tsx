@@ -402,7 +402,6 @@ export function ModelSelectionPanes({
               const levelChoices = THINKING_LEVELS;
               const publishedLevels =
                 publishedLevelsById.get(binding.id.toLowerCase()) ?? [];
-              const enabledLevels = sortThinkingLevels(binding.thinkingLevels);
               const info = infoById.get(binding.id.toLowerCase());
               const publishedImages = info ? modelMatchesFilter(info, "vision") : false;
               const publishedDocuments = info ? modelMatchesFilter(info, "pdf") : false;
@@ -411,6 +410,12 @@ export function ModelSelectionPanes({
               // legacy 128k default stored before the record was known.
               const effectiveContextWindow =
                 info?.contextWindow ?? binding.contextWindow;
+              // Chips mirror the effective runtime state: an empty stored list
+              // is the generic seed that now inherits the published ladder
+              // (runtime) — toggling a chip writes the explicit override back.
+              const enabledLevels = binding.thinkingLevels.length
+                ? sortThinkingLevels(binding.thinkingLevels)
+                : sortThinkingLevels(publishedLevels);
               return (
                 <li className="provider-chosen-row" key={binding.id}>
                   <div className="provider-chosen-row-head">

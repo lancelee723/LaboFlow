@@ -495,14 +495,17 @@ export const THINKING_LEVEL_LABELS: Record<ThinkingLevel, string> = {
   max: "Max",
 };
 
+// One ruler everywhere: the composer's reasoning menu shares the
+// `thinkingLevel.*` namespace with the subagent and expert editors, so the
+// same level reads the same in every surface.
 const THINKING_LEVEL_I18N_KEYS: Record<ThinkingLevel, string> = {
-  off: "chat.effortOff",
-  minimal: "chat.effortMinimal",
-  low: "chat.effortLow",
-  medium: "chat.effortMid",
-  high: "chat.effortHigh",
-  xhigh: "chat.effortXhigh",
-  max: "chat.effortMax",
+  off: "thinkingLevel.off",
+  minimal: "thinkingLevel.minimal",
+  low: "thinkingLevel.low",
+  medium: "thinkingLevel.medium",
+  high: "thinkingLevel.high",
+  xhigh: "thinkingLevel.xhigh",
+  max: "thinkingLevel.max",
 };
 
 function isThinkingLevel(value: unknown): value is ThinkingLevel {

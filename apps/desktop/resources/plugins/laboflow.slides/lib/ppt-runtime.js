@@ -138,8 +138,9 @@ export const execRunner = (file, args, options) =>
       (error, stdout, stderr) => {
         const rawCode = (error || {})?.code;
         const code = typeof rawCode === "number" ? rawCode : error ? 1 : 0;
+        const timedOut = !!error && error.killed === true && error.signal === "SIGTERM";
         if (error && code === 0) reject(error);
-        else resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+        else resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), timedOut });
       },
     );
   });
@@ -167,7 +168,7 @@ export async function runVendoredScript(deps, scriptRelPath, args, options = {})
       cwd: options.cwd,
       timeoutMs: options.timeoutMs ?? 10 * 60 * 1000,
       signal: options.signal,
-      env: { PPT_MASTER_DISABLE_PDF: "1", PYTHONIOENCODING: "utf-8" },
+      env: { PPT_MASTER_DISABLE_PDF: "1", PYTHONIOENCODING: "utf-8", PYTHONDONTWRITEBYTECODE: "1" },
     },
   );
   return { ...result, pythonPath };
@@ -178,7 +179,7 @@ export async function runGuard(deps) {
   return (deps.runner ?? execRunner)(
     venvPythonPath(resolveRuntimeRoot(deps)),
     [join(skillRoot(deps.pluginDir), PPT_MASTER_GUARD)],
-    { timeoutMs: 30_000, env: { PYTHONIOENCODING: "utf-8" } },
+    { timeoutMs: 30_000, env: { PYTHONIOENCODING: "utf-8", PYTHONDONTWRITEBYTECODE: "1" } },
   );
 }
 
@@ -243,6 +244,19 @@ export async function detectRuntime(deps) {
         : "完整性断言失败：查看 diag；必要时删除 venv 后重装",
     };
   }
+  const pipProbe = await runner(pythonPath, ["-m", "pip", "--version"], {
+    timeoutMs: 30_000,
+    env: {},
+  }).catch((error) => ({ code: 1, stdout: "", stderr: String(error) }));
+  if (pipProbe.code !== 0) {
+    return {
+      stage: "deps-missing",
+      pythonPath,
+      venvPath: root,
+      diag: `venv 缺少 pip：${`${pipProbe.stdout}${pipProbe.stderr}`.trim().slice(0, 400)}`,
+      doctor: "旧版 uv venv 未 seed 所致：删除 venv 目录后重新 ppt_master_setup（现以 --seed 创建）",
+    };
+  }
   const pipCheck = await runner(pythonPath, ["-m", "pip", "check"], {
     timeoutMs: 60_000,
     env: {},
@@ -300,7 +314,7 @@ export async function ensureRuntime(deps, onLog) {
     log("creating venv…");
     const created =
       useUv
-        ? await runner("uv", ["venv", "--python", "3.12", venvPath], {
+        ? await runner("uv", ["venv", "--seed", "--python", "3.12", venvPath], {
             timeoutMs: 600_000,
             env,
             signal,

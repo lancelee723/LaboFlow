@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="pi-plugin-chrome" content="v2">
+<title>PPT 工作台</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: calc(var(--pi-plugin-titlebar-height, 0px) + 12px) 14px 14px;
+    font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--pi-fg, #1f2328); background: var(--pi-bg, transparent);
+  }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin: 16px 0 6px; }
+  .card { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 10px; padding: 10px 12px; margin: 6px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { opacity: .6; font-size: 12px; }
+  button { font: inherit; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type="text"] { font: inherit; padding: 5px 8px; border-radius: 8px; flex: 1; min-width: 200px;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  .stage { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
+  .stage .name { min-width: 86px; font-weight: 600; }
+  .badge { padding: 1px 9px; border-radius: 999px; font-size: 11px;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent); white-space: nowrap; }
+  .badge.confirmed, .badge.succeeded, .badge.ready { background: color-mix(in srgb, currentColor 82%, transparent); color: var(--pi-bg, #fff); }
+  .badge.submitted, .badge.running { background: color-mix(in srgb, currentColor 16%, transparent); }
+  .badge.waived { opacity: .7; }
+  #preview { width: 100%; aspect-ratio: 16 / 9; border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); display: flex;
+    align-items: center; justify-content: center; overflow: hidden; }
+  #preview svg { width: 100%; height: 100%; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .filelist { font-size: 12px; }
+  .filelist .f { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  .linkish { text-decoration: underline; cursor: pointer; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>PPT 工作台</h1>
+
+<h2>运行时 Runtime</h2>
+<div class="card row">
+  <span class="badge" id="rt-stage">…</span>
+  <span class="muted" id="rt-diag"></span>
+  <span style="flex:1"></span>
+  <button id="btn-setup">安装 / Install</button>
+  <button id="btn-refresh">刷新 / Refresh</button>
+</div>
+
+<h2>管线 Pipeline</h2>
+<div class="row">
+  <input type="text" id="project-dir" placeholder="projects/<name>_<date> 项目目录（绝对路径）">
+  <button id="btn-load">载入 / Load</button>
+</div>
+<div class="card hidden" id="pipeline"></div>
+
+<h2>翻页预览 Pages</h2>
+<div id="preview"><span class="muted" id="preview-empty">载入项目后显示 svg_output 页面</span></div>
+<div class="pager hidden" id="pager">
+  <button id="pg-prev">←</button>
+  <span class="muted" id="pg-label">0 / 0</span>
+  <button id="pg-next">→</button>
+  <span class="muted" id="pg-placeholder"></span>
+</div>
+
+<h2>导出 Exports</h2>
+<div class="card filelist hidden" id="exports"></div>
+
+<script>
+const bridge = window.pluginBridge;
+let projectDir = "";
+let pages = []; // { name, bytes, dir }
+let pageIndex = 0;
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const bytes = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
+
+async function refreshRuntime() {
+  const { runtime } = await bridge.invoke("ppt.runtimeStatus");
+  const badge = document.getElementById("rt-stage");
+  badge.textContent = runtime.stage;
+  badge.className = `badge ${runtime.stage}`;
+  document.getElementById("rt-diag").textContent = runtime.diag ?? "";
+  document.getElementById("btn-setup").disabled = runtime.stage === "ready";
+}
+
+async function refreshJobs() {
+  const { jobs } = await bridge.invoke("ppt.jobStatus");
+  const active = (jobs ?? []).find((j) => j.status === "running");
+  if (active) {
+    document.getElementById("btn-setup").disabled = true;
+    document.getElementById("rt-diag").textContent = `${active.id}: ${active.status} — ${(active.logTail ?? []).slice(-1)[0] ?? ""}`;
+    setTimeout(refreshJobs, 2000);
+  } else {
+    await refreshRuntime();
+  }
+}
+
+async function loadProject() {
+  projectDir = document.getElementById("project-dir").value.trim();
+  if (!projectDir) return;
+  const data = await bridge.invoke("ppt.getState", { projectDir });
+  if (data.error) return;
+  renderPipeline(data.state);
+  pages = [
+    ...(data.listings?.svgPages ?? []).map((p) => ({ ...p, dir: "svg_output" })),
+    ...(data.listings?.svgFinal ?? []).map((p) => ({ ...p, dir: "svg_final" })),
+  ];
+  pageIndex = 0;
+  document.getElementById("pager").classList.toggle("hidden", pages.length === 0);
+  if (pages.length === 0) {
+    document.getElementById("preview-empty").textContent = "svg_output 暂无页面 / no pages yet";
+  } else {
+    await showPage();
+  }
+  const exports = document.getElementById("exports");
+  exports.classList.remove("hidden");
+  const files = data.listings?.exports ?? [];
+  exports.innerHTML = files.length
+    ? files.map((f) =>
+        `<div class="f"><span>${esc(f.name)}</span><span class="row"><span class="muted">${bytes(f.bytes)}</span>` +
+        `<span class="linkish" data-open="${esc(projectDir + "/exports")}">打开 / open</span></span></div>`).join("")
+    : `<span class="muted">暂无导出 / no exports yet</span>`;
+}
+
+function renderPipeline(state) {
+  const el = document.getElementById("pipeline");
+  el.classList.remove("hidden");
+  el.innerHTML = Object.entries(state.stages ?? {})
+    .map(([name, s]) =>
+      `<div class="stage"><span class="name">${esc(name)}</span>` +
+      `<span class="badge ${esc(s.status)}">${esc(s.status)}${s.waiveReason ? ` · ${esc(s.waiveReason)}` : ""}</span>` +
+      `${s.confirmedAt ? `<span class="muted">${esc(s.confirmedAt)}</span>` : ""}</div>`)
+    .join("");
+}
+
+async function showPage() {
+  const page = pages[pageIndex];
+  document.getElementById("pg-label").textContent = `${pageIndex + 1} / ${pages.length}`;
+  document.getElementById("pg-placeholder").textContent = page.name + (page.bytes ? ` · ${bytes(page.bytes)}` : "");
+  const { svg, error } = await bridge.invoke("ppt.readSvg", { path: `${projectDir}/${page.dir}/${page.name}` });
+  const preview = document.getElementById("preview");
+  if (error || !svg) {
+    preview.innerHTML = `<span class="muted">${esc(error ?? "empty")}</span>`;
+    return;
+  }
+  preview.innerHTML = svg;
+}
+
+document.getElementById("btn-refresh").addEventListener("click", refreshRuntime);
+document.getElementById("btn-setup").addEventListener("click", async () => {
+  document.getElementById("btn-setup").disabled = true;
+  await bridge.invoke("ppt.setup");
+  refreshJobs();
+});
+document.getElementById("btn-load").addEventListener("click", loadProject);
+document.getElementById("pg-prev").addEventListener("click", () => { if (pages.length) { pageIndex = (pageIndex - 1 + pages.length) % pages.length; showPage(); } });
+document.getElementById("pg-next").addEventListener("click", () => { if (pages.length) { pageIndex = (pageIndex + 1) % pages.length; showPage(); } });
+document.addEventListener("keydown", (event) => {
+  if (event.target.tagName === "INPUT") return;
+  if (event.key === "ArrowLeft") document.getElementById("pg-prev").click();
+  if (event.key === "ArrowRight") document.getElementById("pg-next").click();
+});
+document.getElementById("exports").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-open]");
+  if (target) bridge.invoke("ppt.openPath", { path: target.dataset.open });
+});
+
+refreshRuntime();
+</script>
+</body>
+</html>

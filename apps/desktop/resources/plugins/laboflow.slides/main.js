@@ -23,12 +23,15 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { exec as spawnExec } from "node:child_process";
 import { join } from "node:path";
 
 import { exportDeckToBuffer, normalizeOutline, sanitizeFileName } from "./lib/slides.js";
 import {
   detectRuntime,
   ensureRuntime,
+  execRunner,
   findForbiddenDistributions,
   freezeDistributions,
   resolveRuntimeRoot,
@@ -37,10 +40,21 @@ import {
 } from "./lib/ppt-runtime.js";
 import { createJobManager } from "./lib/ppt-jobs.js";
 import { listDocDir, MAX_DOC_BYTES, resolveDocEntry } from "./lib/ppt-read-doc.js";
+import {
+  assertExportAllowed,
+  confirmStage,
+  loadState,
+  readStageResult,
+  STAGES,
+  submitStage,
+} from "./lib/ppt-state.js";
+import { PPT_SCRIPTS, planScript } from "./lib/ppt-script.js";
 
 let toolsRegistered = false;
 let jobManager = null;
 let activeSetupJobId = null;
+/** Last submitted stage awaiting user action in the confirm card. */
+let pendingConfirm = null;
 
 function getPluginDir() {
   // The plugin host loads main.js from <pluginDir>/main.js.
@@ -88,6 +102,45 @@ export async function onLoad() {
 
   registerL1Tools();
   registerMasterTools();
+  registerStageTools();
+
+  await pi.commands.register({
+    id: "openConfirmCard",
+    title: "Slides: 打开 PPT 确认卡 / Open PPT confirm card",
+    keywords: ["ppt", "确认", "confirm", "slides", "设计", "pipeline"],
+    run: async () => {
+      await pi.ui.openPanel({ title: "PPT 确认卡" });
+    },
+  });
+}
+
+/** Shared setup-job body for the agent tool and the workbench panel. */
+async function startSetupJob() {
+  if (activeSetupJobId) {
+    const existing = jobManager.get(activeSetupJobId);
+    if (existing && !["succeeded", "failed", "cancelled", "interrupted"].includes(existing.status)) {
+      return { jobId: activeSetupJobId, reused: true };
+    }
+  }
+  const settings = await pi.plugin.getSettings().catch(() => ({}));
+  const pipMirror = settings?.pipMirror && settings.pipMirror !== "default" ? settings.pipMirror : undefined;
+  const submitted = jobManager.submit({
+    kind: "ppt-setup",
+    run: async (ctx) => {
+      const status = await ensureRuntime({ ...runtimeDeps(), pipMirror, signal: ctx.signal }, ctx.log);
+      if (status.stage === "ready") {
+        const frozen = await freezeDistributions(runtimeDeps()).catch(() => null);
+        const forbidden = findForbiddenDistributions(frozen);
+        if (forbidden.length) {
+          throw new Error(`AGPL/GPL 黑名单依赖出现在 venv 中：${forbidden.join(", ")}——请删除 venv 重装并检查镜像源`);
+        }
+        return { stage: status.stage, pythonPath: status.pythonPath, forbidden: [] };
+      }
+      throw new Error(`${status.stage}: ${status.diag ?? ""}`);
+    },
+  });
+  activeSetupJobId = submitted.id;
+  return submitted;
 }
 
 function registerL1Tools() {
@@ -226,33 +279,13 @@ function registerMasterTools() {
     risk: "medium",
     schema: { type: "object", properties: {} },
     execute: async () => {
-      if (activeSetupJobId) {
-        const existing = jobManager.get(activeSetupJobId);
-        if (existing && !["succeeded", "failed", "cancelled", "interrupted"].includes(existing.status)) {
-          return {
-            content: `已有安装作业进行中：${activeSetupJobId}（${existing.status}）。用 ppt_job_status 轮询即可，无需重复安装。`,
-            details: { jobId: activeSetupJobId, reused: true },
-          };
-        }
+      const submitted = await startSetupJob();
+      if (submitted.reused) {
+        return {
+          content: `已有安装作业进行中：${submitted.jobId}。用 ppt_job_status 轮询即可，无需重复安装。`,
+          details: submitted,
+        };
       }
-      const settings = await pi.plugin.getSettings().catch(() => ({}));
-      const pipMirror = settings?.pipMirror && settings.pipMirror !== "default" ? settings.pipMirror : undefined;
-      const submitted = jobManager.submit({
-        kind: "ppt-setup",
-        run: async (ctx) => {
-          const status = await ensureRuntime({ ...deps(), pipMirror, signal: ctx.signal }, ctx.log);
-          if (status.stage === "ready") {
-            const frozen = await freezeDistributions(deps()).catch(() => null);
-            const forbidden = findForbiddenDistributions(frozen);
-            if (forbidden.length) {
-              throw new Error(`AGPL/GPL 黑名单依赖出现在 venv 中：${forbidden.join(", ")}——请删除 venv 重装并检查镜像源`);
-            }
-            return { stage: status.stage, pythonPath: status.pythonPath, forbidden: [] };
-          }
-          throw new Error(`${status.stage}: ${status.diag ?? ""}`);
-        },
-      });
-      activeSetupJobId = submitted.id;
       return {
         content: `安装作业已启动：${submitted.id}（后台执行，需数分钟）。请用 ppt_job_status(jobId="${submitted.id}") 轮询；成功后再用 ppt_master_status 确认 ready。`,
         details: submitted,
@@ -335,10 +368,250 @@ function registerMasterTools() {
   });
 }
 
+// ───────────── Phase B: hard confirmation gates + script whitelist ─────────────
+
+function registerStageTools() {
+  void pi.agent.registerTool({
+    name: "ppt_script",
+    description:
+      "Run a whitelisted vendored PPT-Master script with the isolated venv (argparse-faithful args). Whitelist: project_manager(init/import-sources/validate) | source_to_md | text_measure(calibrate) | quality_checker(early/final gates) | finalize_svg | total_md_split | svg_to_pptx | image_search. finalize/total_md_split/svg_to_pptx are EXPORT-GATED: they refuse unless the user confirmed Stage-2 in the confirm card (or explicitly waived). Runs sync up to 60s, then continues as a background job — poll ppt_job_status. PDF routes are disabled (AGPL).",
+    risk: "medium",
+    schema: {
+      type: "object",
+      properties: {
+        script: { type: "string", enum: Object.keys(PPT_SCRIPTS), description: "Whitelisted script name" },
+        args: { type: "object", description: "Per-script arguments (see each script's schema in the tool description of ppt_script_help)" },
+      },
+      required: ["script", "args"],
+    },
+    execute: async (input) => {
+      const plan = planScript({
+        pluginDir: getPluginDir(),
+        script: input?.script,
+        args: input?.args,
+        exportGate: (projectDir) => assertExportAllowed(projectDir),
+      });
+      if (!plan.ok) {
+        return { error: plan.error, code: plan.code, ...(plan.gate ? { gate: true } : {}) };
+      }
+      const runOnce = (timeoutMs, signal) =>
+        execRunner(venvPythonPath(resolveRuntimeRoot(runtimeDeps())), [plan.scriptPath, ...plan.argv], {
+          cwd: plan.cwd,
+          timeoutMs,
+          signal,
+          env: { PPT_MASTER_DISABLE_PDF: "1", PYTHONIOENCODING: "utf-8" },
+        });
+      try {
+        let result = await runOnce(plan.syncBudgetMs);
+        if (result.timedOut) {
+          // Budget exhausted → keep the same command running as a job.
+          const submitted = jobManager.submit({
+            kind: `ppt-script-${input.script}`,
+            run: async (ctx) => {
+              const full = await runOnce(15 * 60_000, ctx.signal);
+              if (full.code !== 0) throw new Error(`退出码 ${full.code}：${full.stderr || full.stdout}`.slice(-1500));
+              return { stdout: full.stdout.slice(-4000) };
+            },
+          });
+          return {
+            content: `${plan.script} 需要 longer than 60s，已转入后台作业 ${submitted.id}。用 ppt_job_status(jobId="${submitted.id}") 轮询。`,
+            details: { jobId: submitted.id, script: input.script, async: true },
+          };
+        }
+        if (result.code !== 0) {
+          return { error: `${plan.script} 退出码 ${result.code}：${result.stderr || result.stdout}`.slice(-1500) };
+        }
+        return {
+          content: `${plan.summary}\n\n${(result.stdout || result.stderr || "ok").slice(-4000)}`,
+          details: { script: input.script, argv: plan.argv, exit: 0 },
+        };
+      } catch (error) {
+        return { error: error?.message || String(error) };
+      }
+    },
+  });
+
+  void pi.agent.registerTool({
+    name: "ppt_stage_submit",
+    description:
+      "Submit your design recommendations for user confirmation (PPT-Master Stage-1 沟通契约+模板选择, or Stage-2 三个设计方向). Opens the confirm card for the USER to decide — then STOP and wait: silence confirms nothing. Input: { projectDir, stage: stage1|stage2, recommendations }. After submitting, tell the user what to look at and poll ppt_stage_status; do NOT proceed past a ⛔ BLOCKING gate until status returns confirmed/waived.",
+    risk: "low",
+    schema: {
+      type: "object",
+      properties: {
+        projectDir: { type: "string", description: "PPT-Master 项目目录（绝对路径）" },
+        stage: { type: "string", enum: STAGES },
+        recommendations: { type: "object", description: "上游格式的推荐内容（stage2 需含 directions 数组）" },
+      },
+      required: ["projectDir", "stage", "recommendations"],
+    },
+    execute: async (args) => {
+      const projectDir = String(args?.projectDir ?? "").trim();
+      const stage = String(args?.stage ?? "").trim();
+      if (!projectDir) return { error: "projectDir is required" };
+      const verdict = submitStage(projectDir, stage, args?.recommendations);
+      if (verdict.error) return { error: verdict.error };
+      pendingConfirm = { projectDir, stage, submittedAt: verdict.state.stages[stage]?.submittedAt ?? null };
+      try {
+        await pi.ui.openPanel({ title: "PPT 确认卡" });
+      } catch {
+        /* panel unavailable (e.g. headless) — chat confirmation still applies */
+      }
+      try {
+        pi.ui.showNativeNotification?.("PPT 设计方案待确认", "打开确认卡查看并提交你的选择");
+      } catch {
+        /* notifications optional */
+      }
+      return {
+        content: `已提交 ${stage} 设计方案，确认卡已打开：请在卡上选择后提交（或选择快速模式）。**现在停下等待用户操作**——沉默不构成确认。用户操作后用 ppt_stage_status(projectDir, stage) 查询结果；等待期间不要推进任何 ⛔ BLOCKING 之后的步骤。`,
+        details: { statePath: join(projectDir, "laboflow", "pipeline-state.json") },
+      };
+    },
+  });
+
+  void pi.agent.registerTool({
+    name: "ppt_stage_status",
+    description:
+      "Check the user's decision on a submitted PPT-Master stage. Input: { projectDir, stage? } — omit stage for the whole pipeline state. Returns pending/submitted (keep waiting) or confirmed (with result.json, READ-ONCE: later calls return a cached summary) or waived (quick mode).",
+    risk: "low",
+    schema: {
+      type: "object",
+      properties: {
+        projectDir: { type: "string", description: "PPT-Master 项目目录（绝对路径）" },
+        stage: { type: "string", enum: STAGES },
+      },
+      required: ["projectDir"],
+    },
+    execute: async (args) => {
+      const projectDir = String(args?.projectDir ?? "").trim();
+      if (!projectDir) return { error: "projectDir is required" };
+      const stage = args?.stage ? String(args.stage) : null;
+      if (stage) {
+        const verdict = readStageResult(projectDir, stage);
+        if (verdict.error) return { error: verdict.error };
+        return {
+          content: `${stage}：${verdict.status}${verdict.warning ? `\n${verdict.warning}` : ""}${verdict.message ? `\n${verdict.message}` : ""}`,
+          details: verdict,
+        };
+      }
+      const { state, created, corrupted } = loadState(projectDir);
+      return {
+        content: `管线状态：${JSON.stringify(state.stages)}${corrupted ? "\n（状态文件曾损坏，已重置为 pending）" : ""}`,
+        details: { state, created, corrupted },
+      };
+    },
+  });
+}
+
+// ───────────────────────── Panel bridge (confirm card + workbench) ─────────────────────────
+
+function projectListings(projectDir) {
+  const safeList = (dir, exts) => {
+    try {
+      if (!existsSync(dir)) return [];
+      return readdirSync(dir)
+        .filter((name) => exts.some((ext) => name.toLowerCase().endsWith(ext)))
+        .map((name) => {
+          const full = join(dir, name);
+          let bytes = 0;
+          try {
+            bytes = statSync(full).size;
+          } catch {
+            /* vanished */
+          }
+          return { name, bytes };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return [];
+    }
+  };
+  return {
+    svgPages: safeList(join(projectDir, "svg_output"), [".svg"]),
+    svgFinal: safeList(join(projectDir, "svg_final"), [".svg"]),
+    exports: safeList(join(projectDir, "exports"), [".pptx"]),
+  };
+}
+
+export async function onPanelInvoke(channel, payload = {}) {
+  switch (channel) {
+    case "ppt.getBootstrap": {
+      const runtime = await detectRuntime(runtimeDeps());
+      return { pending: pendingConfirm, runtime, projects: pendingConfirm ? [pendingConfirm.projectDir] : [] };
+    }
+    case "ppt.getState": {
+      const projectDir = String(payload.projectDir ?? "");
+      if (!projectDir) return { error: "projectDir required" };
+      const { state, corrupted } = loadState(projectDir);
+      const confirmDir = join(projectDir, "confirm_ui");
+      const readJson = async (file) => {
+        try {
+          return JSON.parse(await readFile(join(confirmDir, file), "utf8"));
+        } catch {
+          return null;
+        }
+      };
+      return {
+        state,
+        corrupted,
+        recommendations: {
+          stage1: await readJson("recommendations.stage1.json"),
+          stage2: await readJson("recommendations.stage2.json"),
+        },
+        listings: projectListings(projectDir),
+      };
+    }
+    case "ppt.confirmStage": {
+      const projectDir = String(payload.projectDir ?? "");
+      const stage = String(payload.stage ?? "");
+      const waive = payload.waive === true;
+      const verdict = confirmStage(projectDir, stage, { waive, waiveReason: payload.waiveReason });
+      if (verdict.error) return { error: verdict.error };
+      if (pendingConfirm?.projectDir === projectDir && pendingConfirm?.stage === stage) {
+        pendingConfirm = null;
+      }
+      try {
+        pi.ui.showToast?.(`已${waive ? "豁免" : "确认"} ${stage}`, "success");
+      } catch {
+        /* toast optional */
+      }
+      return { ok: true, state: verdict.state };
+    }
+    case "ppt.runtimeStatus":
+      return { runtime: await detectRuntime(runtimeDeps()) };
+    case "ppt.setup": {
+      const submitted = await startSetupJob();
+      return { jobId: submitted.id ?? submitted.jobId, reused: !!submitted.reused };
+    }
+    case "ppt.jobStatus":
+      return { jobs: jobManager.list() };
+    case "ppt.readSvg": {
+      const path = String(payload.path ?? "");
+      if (!path.toLowerCase().endsWith(".svg")) return { error: "仅支持 .svg" };
+      try {
+        const text = await readFile(path, "utf8");
+        return { svg: text.slice(0, 4 * 1024 * 1024) };
+      } catch (error) {
+        return { error: error?.message ?? String(error) };
+      }
+    }
+    case "ppt.openPath": {
+      const path = String(payload.path ?? "");
+      if (!existsSync(path)) return { error: "路径不存在" };
+      const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+      spawnExec(`${command} ${JSON.stringify(path)}`, () => {});
+      return { ok: true };
+    }
+    default:
+      return { error: `unknown channel: ${channel}` };
+  }
+}
+
 export function onUnload() {
   toolsRegistered = false;
   jobManager = null;
   activeSetupJobId = null;
+  pendingConfirm = null;
 }
 
 // Exposed for host-side smoke checks.
