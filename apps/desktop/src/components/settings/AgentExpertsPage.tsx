@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ExpertTeamProgress,
+  McpServerRecord,
   ProviderPublic,
   ThinkingLevel,
   UserSkillRecord,
@@ -10,10 +11,24 @@ import { useAppStore } from "../../stores/app-store";
 import { api, type ExpertListItem, type ExpertTeamListItem } from "../../lib/api";
 import { THINKING_LEVELS } from "@pi-desktop/shared";
 import { Badge, Button, Field, Input, Panel, Select, Textarea, cx } from "../ui";
-import { AgentCapabilityPage } from "./AgentCapabilityLayout";
-import { IconGraduationCap, IconPlus, IconSearch, IconUser, IconUsers, IconX } from "../icons";
-
-type ExpertTab = "center" | "mine" | "teams";
+import {
+  AgentCapabilityPage,
+  CapabilityButton,
+  CapabilityEmpty,
+  CapabilityGroupHeader,
+  CapabilityPanel,
+  CapabilityRow,
+  CapabilityToolbar,
+} from "./AgentCapabilityLayout";
+import {
+  McpEditorSheet,
+  draftFromRecord,
+  draftToInput,
+  emptyMcpDraft,
+  type McpDraft,
+} from "../extensions/McpEditorSheet";
+import { AgentMultiSelect } from "./AgentMultiSelect";
+import { IconGraduationCap, IconPencil, IconPlus, IconServer, IconUser, IconUsers, IconX } from "../icons";
 
 /** Industry filter chips: the fixed catalog first, then anything else in data. */
 const FIXED_INDUSTRIES = ["通用", "战略与组织", "金融", "先进制造", "TMT", "医疗健康"];
@@ -29,7 +44,8 @@ interface ExpertFormState {
   examples: string;
   /** Multi-select from the user's skill list (4a). */
   skills: string[];
-  mcpServers: string;
+  /** Multi-select from the user's GLOBAL MCP servers (module 01 polish). */
+  mcpServers: string[];
   /** `providerId/modelId` from the provider list; empty = same as session. */
   model: string;
   thinkingLevel: ThinkingLevel | "";
@@ -79,7 +95,7 @@ const EMPTY_EXPERT_FORM: ExpertFormState = {
   tags: "",
   examples: "",
   skills: [],
-  mcpServers: "",
+  mcpServers: [],
   model: "",
   thinkingLevel: "",
   body: "",
@@ -126,33 +142,64 @@ function modelOptionsFrom(providers: ProviderPublic[]): ModelOption[] {
   return options;
 }
 
+/**
+ * Editor field heading (div-based, NOT a `<label>` wrapper — the label
+ * element forwards clicks to the first labelable control inside, which
+ * broke checkbox pickers). `required` renders the red asterisk; `error`
+ * turns the title red until the user fills the value in.
+ */
+function EditorField({
+  label,
+  required = false,
+  error = false,
+  hint,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className={cx("ext-field-label", error && "is-error")}>
+        {label}
+        {required ? (
+          <span className="required-mark" aria-hidden="true">
+            *
+          </span>
+        ) : null}
+      </div>
+      {children}
+      {hint ? <p className="ext-field-hint">{hint}</p> : null}
+    </div>
+  );
+}
+
 export function AgentExpertsPage() {
   const { t } = useTranslation();
   const showToast = useAppStore((s) => s.showToast);
   const setPage = useAppStore((s) => s.setPage);
   const selectSession = useAppStore((s) => s.selectSession);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const sessions = useAppStore((s) => s.sessions);
 
-  const [tab, setTab] = useState<ExpertTab>("center");
   const [experts, setExperts] = useState<ExpertListItem[]>([]);
   const [teams, setTeams] = useState<ExpertTeamListItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // 专家中心 filters
+  // Filters (single-page grouped list, mirroring the skills page).
   const [industry, setIndustry] = useState("all");
   const [query, setQuery] = useState("");
 
-  // Expert invoke dialog
+  // Expert invoke dialog (foreground dispatch: no target-session picker).
   const [invokeTarget, setInvokeTarget] = useState<ExpertListItem | null>(null);
   const [invokeTask, setInvokeTask] = useState("");
-  const [invokeSessionId, setInvokeSessionId] = useState("");
   const [invoking, setInvoking] = useState(false);
 
   // Team invoke dialog
   const [teamTarget, setTeamTarget] = useState<ExpertTeamListItem | null>(null);
   const [teamTask, setTeamTask] = useState("");
-  const [teamSessionId, setTeamSessionId] = useState("");
   const [teamInvoking, setTeamInvoking] = useState(false);
 
   // Expert editor sheet
@@ -160,18 +207,28 @@ export function AgentExpertsPage() {
   const [editingPreset, setEditingPreset] = useState(false);
   const [form, setForm] = useState<ExpertFormState>(EMPTY_EXPERT_FORM);
   const [saving, setSaving] = useState(false);
+  // Required-field validation: armed on save attempt, cleared live as the
+  // user fills the field in (red title until the value exists).
+  const [expertErrorsArmed, setExpertErrorsArmed] = useState(false);
 
   // Team editor sheet
   const [teamEditorOpen, setTeamEditorOpen] = useState(false);
   const [teamForm, setTeamForm] = useState<TeamFormState>(EMPTY_TEAM_FORM);
   const [teamSaving, setTeamSaving] = useState(false);
+  const [teamErrorsArmed, setTeamErrorsArmed] = useState(false);
 
-  // Live team runs (专家团 tab)
+  // Live team runs (专家团 group)
   const [runs, setRuns] = useState<Record<string, TeamRunView>>({});
 
-  // Picker sources (4a): the model and skill lists come from LaboFlow itself.
+  // Picker sources (4a): the model, skill, and GLOBAL MCP server lists come
+  // from LaboFlow itself; project-scoped MCP configs are never read here.
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [skillOptions, setSkillOptions] = useState<UserSkillRecord[]>([]);
+  const [mcpOptions, setMcpOptions] = useState<McpServerRecord[]>([]);
+  const [mcpEditorDraft, setMcpEditorDraft] = useState<McpDraft | null>(null);
+  const [mcpEditingId, setMcpEditingId] = useState<string | null>(null);
+  const [mcpSaving, setMcpSaving] = useState(false);
+  const [mcpTesting, setMcpTesting] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -203,12 +260,18 @@ export function AgentExpertsPage() {
     } catch {
       setSkillOptions([]);
     }
+    try {
+      // Global scope only: project-workspace MCP configs must not leak into
+      // the expert's server list.
+      const { servers } = await api.listMcpServers({ level: "global" });
+      setMcpOptions(servers ?? []);
+    } catch {
+      setMcpOptions([]);
+    }
   };
 
   useEffect(() => {
     void refresh();
-    setInvokeSessionId(activeSessionId ?? "");
-    setTeamSessionId(activeSessionId ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -281,20 +344,6 @@ export function AgentExpertsPage() {
     });
   }, [experts, industry, query]);
 
-  const mineExperts = useMemo(
-    () => experts.filter((expert) => expert.source === "user"),
-    [experts],
-  );
-
-  const sessionOptions = useMemo(
-    () =>
-      sessions
-        .slice()
-        .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
-        .slice(0, 30),
-    [sessions],
-  );
-
   const phaseKey = (phase: string) => {
     if (phase === "executing") return "expert.phaseExecuting";
     if (phase === "integrating") return "expert.phaseIntegrating";
@@ -331,7 +380,6 @@ export function AgentExpertsPage() {
 
   const openInvoke = (expert: ExpertListItem) => {
     setInvokeTask(expert.examples[0] ?? "");
-    setInvokeSessionId(activeSessionId ?? "");
     setInvokeTarget(expert);
   };
 
@@ -340,15 +388,18 @@ export function AgentExpertsPage() {
     if (!target || !invokeTask.trim()) return;
     setInvoking(true);
     try {
-      await api.invokeExpert({
-        sessionId: invokeSessionId || undefined,
+      // Foreground dispatch: the invoke creates a NEW session — project-scoped
+      // from the current one — and returns it; we navigate there.
+      const result = await api.invokeExpert({
+        sessionId: activeSessionId || undefined,
         expertId: target.id,
         task: invokeTask.trim(),
       });
       showToast(t("expert.dispatched", { expert: target.name }), { variant: "success" });
       setInvokeTarget(null);
       setInvokeTask("");
-      if (invokeSessionId) await selectSession(invokeSessionId);
+      await useAppStore.getState().refreshSessions();
+      await selectSession(result.sessionId);
       setPage("chat");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
@@ -362,15 +413,16 @@ export function AgentExpertsPage() {
     if (!target || !teamTask.trim()) return;
     setTeamInvoking(true);
     try {
-      await api.invokeExpertTeam({
-        sessionId: teamSessionId || undefined,
+      const result = await api.invokeExpertTeam({
+        sessionId: activeSessionId || undefined,
         teamId: target.id,
         task: teamTask.trim(),
       });
       showToast(t("expert.teamDispatched", { team: target.name }), { variant: "success" });
       setTeamTarget(null);
       setTeamTask("");
-      if (teamSessionId) await selectSession(teamSessionId);
+      await useAppStore.getState().refreshSessions();
+      await selectSession(result.sessionId);
       setPage("chat");
     } catch (e) {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
@@ -381,6 +433,7 @@ export function AgentExpertsPage() {
 
   const openExpertEditor = async (expert: ExpertListItem | null) => {
     void loadPickerSources();
+    setExpertErrorsArmed(false);
     if (!expert) {
       setEditingPreset(false);
       setForm(EMPTY_EXPERT_FORM);
@@ -398,7 +451,7 @@ export function AgentExpertsPage() {
         tags: record.tags.join(", "),
         examples: record.examples.join("\n"),
         skills: [...record.skills],
-        mcpServers: record.mcpServers.join(", "),
+        mcpServers: [...record.mcpServers],
         model: record.model ?? "",
         thinkingLevel: (record.thinkingLevel as ThinkingLevel | undefined) ?? "",
         body: detail.body ?? "",
@@ -410,7 +463,11 @@ export function AgentExpertsPage() {
   };
 
   const submitExpertForm = async () => {
-    if (!form.name.trim()) return;
+    // Required: name + description (host-core rejects saves without them).
+    if (!form.name.trim() || !form.description.trim()) {
+      setExpertErrorsArmed(true);
+      return;
+    }
     setSaving(true);
     try {
       await api.saveExpert({
@@ -423,7 +480,7 @@ export function AgentExpertsPage() {
           .map((line) => line.trim())
           .filter(Boolean),
         skills: form.skills,
-        mcpServers: splitList(form.mcpServers),
+        mcpServers: form.mcpServers,
         ...(form.model.trim() ? { model: form.model.trim() } : {}),
         ...(form.thinkingLevel ? { thinkingLevel: form.thinkingLevel } : {}),
         body: form.body,
@@ -435,6 +492,40 @@ export function AgentExpertsPage() {
       showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** Save the in-sheet MCP form into the user's GLOBAL server list. */
+  const submitMcpEditor = async () => {
+    if (!mcpEditorDraft) return;
+    const candidateId = mcpEditorDraft.id.trim();
+    if (!candidateId) {
+      showToast(t("settings.mcpDuplicate"), { variant: "error" });
+      return;
+    }
+    setMcpSaving(true);
+    try {
+      await api.upsertMcpServer(
+        draftToInput(mcpEditorDraft, { level: "global" }),
+      );
+      const { servers } = await api.listMcpServers({ level: "global" });
+      setMcpOptions(servers ?? []);
+      // The freshly added server becomes selected for this expert.
+      setForm((current) => ({
+        ...current,
+        mcpServers: current.mcpServers.includes(candidateId)
+          ? current.mcpServers
+          : [...current.mcpServers, candidateId],
+      }));
+      setMcpEditorDraft(null);
+      setMcpEditingId(null);
+      showToast(t("expert.mcpAdded", { name: mcpEditorDraft.label || candidateId }), {
+        variant: "success",
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally {
+      setMcpSaving(false);
     }
   };
 
@@ -459,6 +550,7 @@ export function AgentExpertsPage() {
 
   const openTeamEditor = (team: ExpertTeamListItem | null) => {
     void loadPickerSources();
+    setTeamErrorsArmed(false);
     if (!team) {
       setTeamForm(EMPTY_TEAM_FORM);
       setTeamEditorOpen(true);
@@ -485,7 +577,11 @@ export function AgentExpertsPage() {
   };
 
   const submitTeamForm = async () => {
-    if (!teamForm.name.trim()) return;
+    // Required: name + description + at least one member (host-core rules).
+    if (!teamForm.name.trim() || !teamForm.description.trim() || !teamForm.members.length) {
+      setTeamErrorsArmed(true);
+      return;
+    }
     setTeamSaving(true);
     try {
       const budget = Number(teamForm.budgetTokens);
@@ -526,76 +622,126 @@ export function AgentExpertsPage() {
     }
   };
 
-  const renderExpertCard = (expert: ExpertListItem) => (
-    <Panel key={expert.id} className="page-card flex flex-col space-y-2">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-bg-hover text-text-secondary">
-            <IconGraduationCap size={15} />
-          </span>
-          <span className="min-w-0 truncate text-base-plus font-medium">{expert.name}</span>
-        </div>
-        <Badge tone={sourceBadgeTone(expert.source)}>
-          {sourceBadge(expert.source)}
-        </Badge>
-      </div>
-      <div className="line-clamp-2 text-sm text-text-secondary">{expert.description}</div>
-      {expert.tags.length ? (
-        <div className="flex flex-wrap gap-1">
-          {expert.tags.map((tag) => (
-            <Badge key={tag} tone="neutral">
-              {tag}
-            </Badge>
-          ))}
-        </div>
-      ) : null}
-      {expert.examples.length ? (
-        <div className="space-y-1">
-          {expert.examples.slice(0, 2).map((example) => (
-            <button
-              key={example}
-              type="button"
-              className="block w-full truncate rounded-md bg-bg-hover px-2 py-1 text-left text-xs text-text-secondary hover:text-text-primary"
-              title={example}
-              onClick={() => {
-                setInvokeTask(example);
-                setInvokeSessionId(activeSessionId ?? "");
-                setInvokeTarget(expert);
-              }}
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <div className="mt-auto flex justify-end pt-1">
-        <Button size="sm" variant="primary" onClick={() => openInvoke(expert)}>
-          <IconGraduationCap size={13} />
-          {t("expert.summon")}
-        </Button>
-      </div>
-    </Panel>
-  );
+  /** One expert as a capability row (skills-page parity for list layout). */
+  const renderExpertRow = (expert: ExpertListItem) => {
+    const key = `expert:${expert.id}`;
+    return (
+      <CapabilityRow
+        key={key}
+        glyph={<IconGraduationCap size={16} />}
+        name={expert.name}
+        off={!expert.enabled}
+        badges={
+          <>
+            <span className="agent-capability-badge">{sourceBadge(expert.source)}</span>
+            {expert.industry ? (
+              <span className="agent-capability-badge">{expert.industry}</span>
+            ) : null}
+            {!expert.enabled ? (
+              <span className="agent-capability-badge">{t("expert.disabled")}</span>
+            ) : null}
+          </>
+        }
+        description={expert.description || t("settings.noCapabilityDescription")}
+        meta={
+          expert.tags.length ? (
+            <div className="flex flex-wrap gap-1">
+              {expert.tags.map((tag) => (
+                <Badge key={tag} tone="neutral">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          ) : undefined
+        }
+        actions={
+          <>
+            <Button size="sm" variant="primary" onClick={() => openInvoke(expert)}>
+              {t("expert.summon")}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void openExpertEditor(expert)}>
+              <IconPencil size={13} />
+              {t("expert.edit")}
+            </Button>
+            {expert.source === "user" ? (
+              <>
+                <Button size="sm" variant="secondary" onClick={() => void toggleExpert(expert)}>
+                  {expert.enabled ? t("expert.disabled") : t("expert.enabled")}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void deleteExpert(expert)}>
+                  {t("expert.delete")}
+                </Button>
+              </>
+            ) : null}
+          </>
+        }
+      />
+    );
+  };
 
-  const renderSessionSelect = (
-    value: string,
-    onChange: (next: string) => void,
-  ) => (
-    <Field label={t("expert.targetSession")}>
-      <Select value={value} onChange={(event) => onChange(event.target.value)}>
-        {activeSessionId ? (
-          <option value={activeSessionId}>{t("expert.currentSession")}</option>
-        ) : null}
-        <option value="">{t("expert.noSession")}</option>
-        {sessionOptions
-          .filter((session) => session.id !== activeSessionId)
-          .map((session) => (
-            <option key={session.id} value={session.id}>
-              {session.title || t("chat.untitledTask")}
-            </option>
-          ))}
-      </Select>
-    </Field>
+  /** One team as a capability row. */
+  const renderTeamRow = (team: ExpertTeamListItem) => (
+    <CapabilityRow
+      key={`team:${team.id}`}
+      glyph={<IconUsers size={16} />}
+      name={team.name}
+      off={!team.enabled}
+      badges={
+        <>
+          <span className="agent-capability-badge">{sourceBadge(team.source)}</span>
+          <span className="agent-capability-badge">
+            {t("expert.leaderStyle")}:{" "}
+            {t(`expert.leader_${team.leaderStyle === "coarse" ? "coarse" : "fine"}`)}
+          </span>
+          {team.budgetTokens != null ? (
+            <span className="agent-capability-badge">
+              {t("expert.budgetShort")}: {team.budgetTokens.toLocaleString()}
+            </span>
+          ) : null}
+        </>
+      }
+      description={team.description || t("settings.noCapabilityDescription")}
+      meta={
+        team.members.length ? (
+          <div className="flex flex-wrap gap-1">
+            {team.members.map((member) => (
+              <span
+                key={member}
+                className="flex items-center gap-1 rounded-full border border-border-default px-2 py-0.5 text-xs text-text-secondary"
+              >
+                <IconUser size={11} />
+                {member}
+              </span>
+            ))}
+          </div>
+        ) : undefined
+      }
+      actions={
+        <>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => {
+              setTeamTask("");
+              setTeamTarget(team);
+            }}
+          >
+            {t("expert.invoke")}
+          </Button>
+          {team.source === "user" ? (
+            <>
+              <Button size="sm" variant="secondary" onClick={() => openTeamEditor(team)}>
+                <IconPencil size={13} />
+                {t("expert.edit")}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void deleteTeam(team)}>
+                {t("expert.delete")}
+              </Button>
+            </>
+          ) : null}
+        </>
+      }
+    />
   );
 
   const renderInvokeDialog = () => {
@@ -604,8 +750,6 @@ export function AgentExpertsPage() {
     const name = invokeTarget?.name ?? teamTarget?.name ?? "";
     const task = invokeTarget ? invokeTask : teamTask;
     const setTask = invokeTarget ? setInvokeTask : setTeamTask;
-    const sessionId = invokeTarget ? invokeSessionId : teamSessionId;
-    const setSessionId = invokeTarget ? setInvokeSessionId : setTeamSessionId;
     const busy = invoking || teamInvoking;
     const submit = invokeTarget ? submitInvoke : submitTeamInvoke;
     return (
@@ -649,7 +793,7 @@ export function AgentExpertsPage() {
               onChange={(event) => setTask(event.target.value)}
             />
           </Field>
-          {renderSessionSelect(sessionId, setSessionId)}
+          <p className="text-xs text-text-muted">{t("expert.newSessionNote")}</p>
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
@@ -678,9 +822,22 @@ export function AgentExpertsPage() {
     }));
   };
 
+  const toggleFormMcp = (id: string, on: boolean) => {
+    setForm((current) => ({
+      ...current,
+      mcpServers: on
+        ? [...current.mcpServers, id]
+        : current.mcpServers.filter((server) => server !== id),
+    }));
+  };
+
   const renderExpertEditor = () => {
     if (!editorOpen) return null;
+    // Required-field errors arm on save and clear live as values arrive.
+    const nameError = expertErrorsArmed && !form.name.trim();
+    const descriptionError = expertErrorsArmed && !form.description.trim();
     return (
+      <>
       <div
         className="overlay ext-sheet-overlay"
         role="presentation"
@@ -711,14 +868,20 @@ export function AgentExpertsPage() {
               <p className="ext-field-hint">{t("expert.presetShadowNote")}</p>
             ) : null}
             <div className="ext-field-pair">
-              <Field label={t("expert.fieldName")}>
+              <EditorField
+                label={t("expert.fieldName")}
+                required
+                error={nameError}
+                hint={editingPreset ? t("expert.presetNameHint") : undefined}
+              >
                 <Input
                   value={form.name}
                   autoFocus={!editingPreset}
+                  disabled={editingPreset}
                   onChange={(event) => setForm({ ...form, name: event.target.value })}
                 />
-              </Field>
-              <Field label={t("expert.fieldIndustry")}>
+              </EditorField>
+              <EditorField label={t("expert.fieldIndustry")}>
                 <Select
                   value={form.industry}
                   onChange={(event) => setForm({ ...form, industry: event.target.value })}
@@ -730,66 +893,24 @@ export function AgentExpertsPage() {
                     </option>
                   ))}
                 </Select>
-              </Field>
+              </EditorField>
             </div>
 
-            <Field label={t("expert.fieldDescription")}>
+            <EditorField label={t("expert.fieldDescription")} required error={descriptionError}>
               <Input
                 value={form.description}
                 onChange={(event) => setForm({ ...form, description: event.target.value })}
               />
-            </Field>
+            </EditorField>
 
             <div className="ext-field-pair">
-              <Field label={t("expert.fieldTags")} hint={t("expert.tagsHint")}>
+              <EditorField label={t("expert.fieldTags")} hint={t("expert.tagsHint")}>
                 <Input
                   value={form.tags}
                   onChange={(event) => setForm({ ...form, tags: event.target.value })}
                 />
-              </Field>
-              <Field label={t("expert.fieldMcp")} hint={t("expert.mcpHint")}>
-                <Input
-                  value={form.mcpServers}
-                  onChange={(event) => setForm({ ...form, mcpServers: event.target.value })}
-                />
-              </Field>
-            </div>
-
-            <Field label={t("expert.fieldExamples")} hint={t("expert.examplesHint")}>
-              <Textarea
-                rows={2}
-                value={form.examples}
-                onChange={(event) => setForm({ ...form, examples: event.target.value })}
-              />
-            </Field>
-
-            <div className="ext-field-group">
-              <div className="ext-field-label">{t("expert.fieldSkills")}</div>
-              <p className="ext-field-hint">{t("expert.skillsHint")}</p>
-              {skillOptions.length ? (
-                <div className="ext-tool-pick" role="group" aria-label={t("expert.fieldSkills")}>
-                  {skillOptions.map((skill) => (
-                    <label
-                      key={skill.id}
-                      className={cx("ext-tool-opt", form.skills.includes(skill.id) && "is-on")}
-                      title={skill.description || undefined}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={form.skills.includes(skill.id)}
-                        onChange={(event) => toggleFormSkill(skill.id, event.target.checked)}
-                      />
-                      <code>{skill.id}</code>
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <p className="ext-field-hint">{t("expert.skillsEmpty")}</p>
-              )}
-            </div>
-
-            <div className="ext-field-pair">
-              <Field label={t("expert.fieldModel")} hint={t("expert.modelHint")}>
+              </EditorField>
+              <EditorField label={t("expert.fieldModel")} hint={t("expert.modelHint")}>
                 <Select
                   value={form.model}
                   onChange={(event) => setForm({ ...form, model: event.target.value })}
@@ -801,25 +922,95 @@ export function AgentExpertsPage() {
                     </option>
                   ))}
                 </Select>
-              </Field>
-              <Field label={t("expert.fieldThinking")} hint={t("expert.thinkingHint")}>
-                <Select
-                  value={form.thinkingLevel}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      thinkingLevel: event.target.value as ThinkingLevel | "",
-                    })
-                  }
+              </EditorField>
+            </div>
+
+            <Field label={t("expert.fieldExamples")} hint={t("expert.examplesHint")}>
+              <Textarea
+                rows={2}
+                value={form.examples}
+                onChange={(event) => setForm({ ...form, examples: event.target.value })}
+              />
+            </Field>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label">{t("expert.fieldThinking")}</div>
+              <p className="ext-field-hint">{t("expert.thinkingHint")}</p>
+              <Select
+                value={form.thinkingLevel}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    thinkingLevel: event.target.value as ThinkingLevel | "",
+                  })
+                }
+              >
+                <option value="">{t("expert.thinkInherit")}</option>
+                {THINKING_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {t(`thinkingLevel.${level}`)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label">{t("expert.fieldSkills")}</div>
+              <p className="ext-field-hint">{t("expert.skillsHint")}</p>
+              <AgentMultiSelect
+                options={skillOptions.map((skill) => ({
+                  value: skill.id,
+                  label: skill.name || skill.id,
+                  description: skill.description || "",
+                }))}
+                selected={form.skills}
+                onChange={(next) => setForm((current) => ({ ...current, skills: next }))}
+                placeholder={t("expert.skillsSelect")}
+                emptyLabel={t("expert.skillsEmpty")}
+              />
+            </div>
+
+            <div className="ext-field-group">
+              <div className="flex items-center justify-between gap-2">
+                <div className="ext-field-label">{t("expert.fieldMcp")}</div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setMcpEditorDraft(emptyMcpDraft());
+                    setMcpEditingId(null);
+                  }}
                 >
-                  <option value="">{t("expert.thinkInherit")}</option>
-                  {THINKING_LEVELS.map((level) => (
-                    <option key={level} value={level}>
-                      {t(`thinkingLevel.${level}`)}
-                    </option>
+                  <IconPlus size={13} />
+                  {t("expert.mcpAdd")}
+                </Button>
+              </div>
+              <p className="ext-field-hint">{t("expert.mcpHint")}</p>
+              {mcpOptions.length ? (
+                <div className="ext-tool-pick" role="group" aria-label={t("expert.fieldMcp")}>
+                  {mcpOptions.map((server) => (
+                    <label
+                      key={server.id}
+                      className={cx(
+                        "ext-tool-opt",
+                        form.mcpServers.includes(server.id) && "is-on",
+                      )}
+                      title={server.description || undefined}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.mcpServers.includes(server.id)}
+                        onChange={(event) => toggleFormMcp(server.id, event.target.checked)}
+                      />
+                      <IconServer size={12} />
+                      <code>{server.label || server.id}</code>
+                      <span className="ext-tool-opt-tag">{server.transport}</span>
+                    </label>
                   ))}
-                </Select>
-              </Field>
+                </div>
+              ) : (
+                <p className="ext-field-hint">{t("expert.mcpEmpty")}</p>
+              )}
             </div>
 
             <div className="ext-field-group">
@@ -842,17 +1033,30 @@ export function AgentExpertsPage() {
               <Button variant="ghost" onClick={() => setEditorOpen(false)} disabled={saving}>
                 {t("common.cancel")}
               </Button>
-              <Button
-                variant="primary"
-                disabled={saving || !form.name.trim()}
-                onClick={() => void submitExpertForm()}
-              >
+              <Button variant="primary" disabled={saving} onClick={() => void submitExpertForm()}>
                 {saving ? t("common.saving") : t("common.save")}
               </Button>
             </div>
           </div>
         </div>
-      </div>
+        </div>
+        {mcpEditorDraft ? (
+          <McpEditorSheet
+            draft={mcpEditorDraft}
+            setDraft={setMcpEditorDraft}
+            editing={mcpEditingId ? (mcpOptions.find((s) => s.id === mcpEditingId) ?? null) : null}
+            saving={mcpSaving}
+            testing={false}
+            projects={[]}
+            onClose={() => {
+              setMcpEditorDraft(null);
+              setMcpEditingId(null);
+            }}
+            onSave={() => void submitMcpEditor()}
+            onTest={() => undefined}
+          />
+        ) : null}
+      </>
     );
   };
 
@@ -903,13 +1107,17 @@ export function AgentExpertsPage() {
 
           <div className="ext-sheet-body">
             <div className="ext-field-pair">
-              <Field label={t("expert.fieldName")}>
+              <EditorField
+                label={t("expert.fieldName")}
+                required
+                error={teamErrorsArmed && !teamForm.name.trim()}
+              >
                 <Input
                   value={teamForm.name}
                   autoFocus
                   onChange={(event) => setTeamForm({ ...teamForm, name: event.target.value })}
                 />
-              </Field>
+              </EditorField>
               <Field label={t("expert.fieldBudget")} hint={t("expert.budgetHint")}>
                 <Input
                   type="number"
@@ -921,16 +1129,22 @@ export function AgentExpertsPage() {
               </Field>
             </div>
 
-            <Field label={t("expert.fieldDescription")}>
+            <EditorField
+              label={t("expert.fieldDescription")}
+              required
+              error={teamErrorsArmed && !teamForm.description.trim()}
+            >
               <Input
                 value={teamForm.description}
                 onChange={(event) => setTeamForm({ ...teamForm, description: event.target.value })}
               />
-            </Field>
+            </EditorField>
 
             <div className="ext-field-group">
               <div className="ext-field-label ext-field-label-row">
-                <span>{t("expert.fieldMembers")}</span>
+                <span className={cx(teamErrorsArmed && !teamForm.members.length && "is-error")}>
+                  {t("expert.fieldMembers")}
+                </span>
                 <span className="ext-byte-count">
                   {t("expert.membersCount", {
                     count: teamForm.members.length,
@@ -1023,7 +1237,7 @@ export function AgentExpertsPage() {
               </Button>
               <Button
                 variant="primary"
-                disabled={teamSaving || !teamForm.name.trim()}
+                disabled={teamSaving}
                 onClick={() => void submitTeamForm()}
               >
                 {teamSaving ? t("common.saving") : t("common.save")}
@@ -1035,71 +1249,15 @@ export function AgentExpertsPage() {
     );
   };
 
-  const renderTeamCard = (team: ExpertTeamListItem) => (
-    <Panel key={team.id} className="page-card flex flex-col space-y-2">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-bg-hover text-text-secondary">
-            <IconUsers size={15} />
-          </span>
-          <span className="min-w-0 truncate text-base-plus font-medium">{team.name}</span>
-        </div>
-        <Badge tone={sourceBadgeTone(team.source)}>
-          {sourceBadge(team.source)}
-        </Badge>
-      </div>
-      <div className="line-clamp-2 text-sm text-text-secondary">{team.description}</div>
-      {team.members.length ? (
-        <div className="flex flex-wrap items-center gap-1">
-          {team.members.map((member) => (
-            <span
-              key={member}
-              className="flex items-center gap-1 rounded-full border border-border-default px-2 py-0.5 text-xs text-text-secondary"
-            >
-              <IconUser size={11} />
-              {member}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <div className="flex flex-wrap gap-1">
-        <Badge tone="neutral">{t("expert.leaderStyle")}: {t(`expert.leader_${team.leaderStyle === "coarse" ? "coarse" : "fine"}`)}</Badge>
-        <Badge tone="neutral">
-          {t("expert.integration")}:{" "}
-          {t(
-            `expert.integration_${
-              (INTEGRATION_MODES as readonly string[]).includes(team.integration)
-                ? team.integration
-                : "moderator"
-            }`,
-          )}
-        </Badge>
-        {team.budgetTokens != null ? (
-          <Badge tone="neutral">
-            {t("expert.budgetShort")}: {team.budgetTokens.toLocaleString()}
-          </Badge>
-        ) : null}
-      </div>
-      <div className="mt-auto flex justify-end gap-1 pt-1">
-        <Button size="sm" variant="primary" onClick={() => {
-          setTeamTask(team.members.length ? "" : "");
-          setTeamSessionId(activeSessionId ?? "");
-          setTeamTarget(team);
-        }}>
-          {t("expert.invoke")}
-        </Button>
-        {team.source === "user" ? (
-          <>
-            <Button size="sm" variant="secondary" onClick={() => openTeamEditor(team)}>
-              {t("expert.edit")}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void deleteTeam(team)}>
-              {t("expert.delete")}
-            </Button>
-          </>
-        ) : null}
-      </div>
-    </Panel>
+  // Grouped list (skills-page parity): teams with their live runs, personal
+  // experts, then preset experts — one shared search + industry filter.
+  const mineGroup = useMemo(
+    () => centerExperts.filter((expert) => expert.source === "user"),
+    [centerExperts],
+  );
+  const presetGroup = useMemo(
+    () => centerExperts.filter((expert) => expert.source === "preset"),
+    [centerExperts],
   );
 
   return (
@@ -1107,237 +1265,176 @@ export function AgentExpertsPage() {
       className="agent-experts"
       description={t("expert.subtitle")}
       toolbar={
-        <div className="dest-toolbar">
-          <div className="dest-filters" role="tablist" aria-label={t("expert.title")}>
-            {(
-              [
-                ["center", t("expert.tabCenter")],
-                ["mine", t("expert.tabMine")],
-                ["teams", t("expert.tabTeams")],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={tab === id}
-                className={`dest-filter ${tab === id ? "active" : ""}`}
-                onClick={() => setTab(id)}
+        <CapabilityToolbar
+          search={query}
+          onSearchChange={setQuery}
+          searchPlaceholder={t("expert.searchPlaceholder")}
+          actions={
+            <>
+              <CapabilityButton
+                variant="primary"
+                title={t("expert.newExpert")}
+                onClick={() => void openExpertEditor(null)}
               >
-                {id === "center" ? <IconGraduationCap size={13} /> : null}
-                {id === "teams" ? <IconUsers size={13} /> : null}
-                {label}
+                <IconPlus size={14} />
+                {t("expert.newExpert")}
+              </CapabilityButton>
+              <CapabilityButton title={t("expert.newTeam")} onClick={() => openTeamEditor(null)}>
+                <IconPlus size={14} />
+                {t("expert.newTeam")}
+              </CapabilityButton>
+            </>
+          }
+        />
+      }
+    >
+      {industries.length ? (
+        <div className="dest-toolbar">
+          <div className="dest-filters" role="group" aria-label={t("expert.fieldIndustry")}>
+            <button
+              type="button"
+              className={`dest-filter ${industry === "all" ? "active" : ""}`}
+              onClick={() => setIndustry("all")}
+            >
+              {t("expert.allIndustries")}
+            </button>
+            {industries.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={`dest-filter ${industry === item ? "active" : ""}`}
+                onClick={() => setIndustry(item)}
+              >
+                {item}
               </button>
             ))}
           </div>
-          <div className="ml-auto flex gap-2">
-            {tab === "mine" ? (
-              <Button variant="primary" onClick={() => void openExpertEditor(null)}>
-                <IconPlus size={14} />
-                {t("expert.newExpert")}
-              </Button>
-            ) : null}
-            {tab === "teams" ? (
-              <Button variant="primary" onClick={() => openTeamEditor(null)}>
-                <IconPlus size={14} />
-                {t("expert.newTeam")}
-              </Button>
-            ) : null}
-          </div>
         </div>
-      }
-    >
+      ) : null}
 
-        {tab === "center" ? (
-          <>
-            <div className="dest-toolbar">
-              <div className="dest-filters" role="group" aria-label={t("expert.fieldIndustry")}>
-                <button
-                  type="button"
-                  className={`dest-filter ${industry === "all" ? "active" : ""}`}
-                  onClick={() => setIndustry("all")}
-                >
-                  {t("expert.allIndustries")}
-                </button>
-                {industries.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={`dest-filter ${industry === item ? "active" : ""}`}
-                    onClick={() => setIndustry(item)}
-                  >
-                    {item}
-                  </button>
-                ))}
+      <CapabilityPanel loading={loading} loadingLabel={t("common.loading")}>
+        <CapabilityGroupHeader label={t("expert.tabTeams")} path="~/.agents/teams" count={teams.length} />
+        {recentRuns.length ? (
+          <div className="dest-section-label">{t("expert.runningTitle")}</div>
+        ) : null}
+        {recentRuns.map((run) => {
+          const budget = run.budgetTokens ?? 0;
+          const ratio = budget > 0 ? Math.min(1, run.totalTokens / budget) : 0;
+          return (
+            <Panel key={run.runId} className="page-card space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-bg-hover text-text-secondary">
+                    <IconUsers size={13} />
+                  </span>
+                  <span className="min-w-0 truncate text-sm font-medium">{run.teamName}</span>
+                </div>
+                <Badge tone={phaseTone(run.phase)}>{t(phaseKey(run.phase))}</Badge>
               </div>
-              <div className="relative min-w-[200px] flex-1">
-                <Input
-                  value={query}
-                  placeholder={t("expert.searchPlaceholder")}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-                <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                  <IconSearch size={14} />
+              {run.stage ? (
+                <div className="text-xs text-text-secondary">
+                  {t("expert.stageOf", {
+                    index: run.stage.index,
+                    total: run.stage.total,
+                    name: run.stage.name,
+                    expert: run.stage.expert ?? "",
+                  })}
+                  {run.stage.round && run.stage.maxRounds && run.stage.maxRounds > 1
+                    ? ` · ${t("expert.roundOf", { round: run.stage.round, max: run.stage.maxRounds })}`
+                    : ""}
+                </div>
+              ) : null}
+              {run.members.length ? (
+                <div className="flex flex-wrap gap-1">
+                  {run.members.map((member, index) => (
+                    <span key={`${member.expert}-${index}`}>
+                      <Badge tone={memberTone(member.status)}>
+                        {member.expert}
+                        {member.status === "failed" ? (
+                          <button
+                            type="button"
+                            className="ml-1 underline"
+                            onClick={() => void retryMember(run, index)}
+                          >
+                            {t("expert.retryMember")}
+                          </button>
+                        ) : null}
+                      </Badge>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-hover">
+                  <div
+                    className={`h-full rounded-full ${ratio >= 1 ? "bg-error" : "bg-success"}`}
+                    style={{ width: `${Math.round(ratio * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs text-text-muted">
+                  {budget > 0
+                    ? t("expert.budgetUsage", {
+                        used: run.totalTokens.toLocaleString(),
+                        budget: budget.toLocaleString(),
+                      })
+                    : t("expert.tokensUsed", { used: run.totalTokens.toLocaleString() })}
                 </span>
               </div>
-            </div>
-            {centerExperts.length === 0 ? (
-              <Panel className="page-card page-empty">
-                <div className="page-empty-icon">
-                  <IconGraduationCap size={20} />
-                </div>
-                <div className="text-base-plus font-medium">{t("expert.emptyCenter")}</div>
-              </Panel>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {centerExperts.map(renderExpertCard)}
-              </div>
-            )}
-          </>
-        ) : null}
+            </Panel>
+          );
+        })}
+        {teams.length ? (
+          teams.map(renderTeamRow)
+        ) : (
+          <CapabilityEmpty
+            message={t("expert.emptyTeams")}
+            icon={<IconUsers size={18} />}
+            action={
+              <CapabilityButton variant="primary" onClick={() => openTeamEditor(null)}>
+                <IconPlus size={14} />
+                {t("expert.newTeam")}
+              </CapabilityButton>
+            }
+          />
+        )}
 
-        {tab === "mine" ? (
-          <>
-            {mineExperts.length === 0 && !editorOpen ? (
-              <Panel className="page-card page-empty">
-                <div className="page-empty-icon">
-                  <IconGraduationCap size={20} />
-                </div>
-                <div className="text-base-plus font-medium">{t("expert.emptyMine")}</div>
-                <Button className="mt-5" variant="primary" onClick={() => void openExpertEditor(null)}>
-                  {t("expert.newExpert")}
-                </Button>
-              </Panel>
-            ) : (
-              <div className="dest-list">
-                {mineExperts.map((expert) => (
-                  <div key={expert.id} className="dest-row">
-                    <div className="dest-row-icon">
-                      <IconGraduationCap size={16} />
-                    </div>
-                    <div className="dest-row-body">
-                      <div className="dest-row-title">
-                        <span className="min-w-0 truncate">{expert.name}</span>
-                        <Badge tone={expert.enabled ? "success" : "neutral"}>
-                          {expert.enabled ? t("expert.enabled") : t("expert.disabled")}
-                        </Badge>
-                        {expert.industry ? <Badge tone="neutral">{expert.industry}</Badge> : null}
-                      </div>
-                      <div className="dest-row-meta line-clamp-2">{expert.description}</div>
-                    </div>
-                    <div className="dest-row-actions">
-                      <Button size="sm" variant="primary" onClick={() => openInvoke(expert)}>
-                        {t("expert.invoke")}
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => void toggleExpert(expert)}>
-                        {expert.enabled ? t("expert.disabled") : t("expert.enabled")}
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => void openExpertEditor(expert)}>
-                        {t("expert.edit")}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => void deleteExpert(expert)}>
-                        {t("expert.delete")}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : null}
+        <CapabilityGroupHeader
+          label={t("expert.tabMine")}
+          path="~/.agents/experts"
+          count={mineGroup.length}
+          action={
+            <CapabilityButton onClick={() => void openExpertEditor(null)}>
+              <IconPlus size={14} />
+              {t("expert.newExpert")}
+            </CapabilityButton>
+          }
+        />
+        {mineGroup.length ? (
+          mineGroup.map(renderExpertRow)
+        ) : (
+          <CapabilityEmpty
+            message={t("expert.emptyMine")}
+            icon={<IconGraduationCap size={18} />}
+            action={
+              <CapabilityButton variant="primary" onClick={() => void openExpertEditor(null)}>
+                <IconPlus size={14} />
+                {t("expert.newExpert")}
+              </CapabilityButton>
+            }
+          />
+        )}
 
-        {tab === "teams" ? (
-          <>
-            {recentRuns.length ? (
-              <div className="dest-section-label">{t("expert.runningTitle")}</div>
-            ) : null}
-            {recentRuns.map((run) => {
-              const budget = run.budgetTokens ?? 0;
-              const ratio = budget > 0 ? Math.min(1, run.totalTokens / budget) : 0;
-              return (
-                <Panel key={run.runId} className="page-card space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-bg-hover text-text-secondary">
-                        <IconUsers size={13} />
-                      </span>
-                      <span className="min-w-0 truncate text-sm font-medium">{run.teamName}</span>
-                    </div>
-                    <Badge tone={phaseTone(run.phase)}>{t(phaseKey(run.phase))}</Badge>
-                  </div>
-                  {run.stage ? (
-                    <div className="text-xs text-text-secondary">
-                      {t("expert.stageOf", {
-                        index: run.stage.index,
-                        total: run.stage.total,
-                        name: run.stage.name,
-                        expert: run.stage.expert ?? "",
-                      })}
-                      {run.stage.round && run.stage.maxRounds && run.stage.maxRounds > 1
-                        ? ` · ${t("expert.roundOf", { round: run.stage.round, max: run.stage.maxRounds })}`
-                        : ""}
-                    </div>
-                  ) : null}
-                  {run.members.length ? (
-                    <div className="flex flex-wrap gap-1">
-                      {run.members.map((member, index) => (
-                        <span key={`${member.expert}-${index}`}>
-                          <Badge tone={memberTone(member.status)}>
-                            {member.expert}
-                            {member.status === "failed" ? (
-                              <button
-                                type="button"
-                                className="ml-1 underline"
-                                onClick={() => void retryMember(run, index)}
-                              >
-                                {t("expert.retryMember")}
-                              </button>
-                            ) : null}
-                          </Badge>
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  <div className="flex items-center gap-2">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-hover">
-                      <div
-                        className={`h-full rounded-full ${ratio >= 1 ? "bg-error" : "bg-success"}`}
-                        style={{ width: `${Math.round(ratio * 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-text-muted">
-                      {budget > 0
-                        ? t("expert.budgetUsage", {
-                            used: run.totalTokens.toLocaleString(),
-                            budget: budget.toLocaleString(),
-                          })
-                        : t("expert.tokensUsed", { used: run.totalTokens.toLocaleString() })}
-                    </span>
-                  </div>
-                </Panel>
-              );
-            })}
-            {teams.length === 0 && !teamEditorOpen ? (
-              <Panel className="page-card page-empty">
-                <div className="page-empty-icon">
-                  <IconUsers size={20} />
-                </div>
-                <div className="text-base-plus font-medium">{t("expert.emptyTeams")}</div>
-                <Button className="mt-5" variant="primary" onClick={() => openTeamEditor(null)}>
-                  {t("expert.newTeam")}
-                </Button>
-              </Panel>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {teams.map(renderTeamCard)}
-              </div>
-            )}
-          </>
-        ) : null}
+        <CapabilityGroupHeader label={t("expert.tabCenter")} path="builtin" count={presetGroup.length} />
+        {presetGroup.length ? (
+          presetGroup.map(renderExpertRow)
+        ) : (
+          <CapabilityEmpty
+            message={t("expert.emptyCenter")}
+            icon={<IconGraduationCap size={18} />}
+          />
+        )}
+      </CapabilityPanel>
 
-        {loading && !experts.length ? (
-          <div className="dest-section-label">{t("common.loading")}</div>
-        ) : null}
       {renderInvokeDialog()}
       {renderExpertEditor()}
       {renderTeamEditor()}
