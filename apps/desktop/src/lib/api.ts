@@ -1019,6 +1019,11 @@ export const api = {
       IPC.invoke.statsGetTokenUsageHistory,
       query,
     ),
+  /** The Token Insights plugin's live fact cube, read-only (usage stats page). */
+  getTokenInsights: () =>
+    invoke<import("@pi-desktop/shared").TokenInsightsFactsResult>(
+      IPC.invoke.statsGetTokenInsights,
+    ),
   menuRendererReady: () =>
     invoke<{ ready: boolean }>(IPC.invoke.menuRendererReady),
   nativeMenuAction: (action: NativeMenuAction) =>

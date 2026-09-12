@@ -163,6 +163,46 @@ test("Advisor ships as an ordinary plugin over the public complete APIs", () => 
   assert.doesNotMatch(advisorPanel, /require\(|ipcRenderer/);
 });
 
+/**
+ * Token Insights ships bundled so the usage stats page has its live fact cube
+ * on a fresh machine (the page renders the plugin's aggregation, scoped to
+ * this app's "pi-desktop" source, and falls back to host history when the
+ * plugin is absent). Vendored from the official PI-Desktop market plugin.
+ */
+test("Token Insights ships as an ordinary bundled plugin", () => {
+  const insightsManifest = JSON.parse(
+    read("resources/plugins/pi.token-insights/manifest.json"),
+  );
+  const insightsMain = read("resources/plugins/pi.token-insights/main.js");
+  const insightsPanel = read(
+    "resources/plugins/pi.token-insights/renderer/panel.js",
+  );
+  assert.equal(insightsManifest.id, "pi.token-insights");
+  // Enabled by default so the usage stats page finds its cube out of the box.
+  assert.equal(insightsManifest.enabledByDefault ?? true, true);
+  assert.deepEqual([...insightsManifest.permissions].sort(), [
+    "agent.tool.register",
+    "ui.panel",
+  ]);
+  // The agent tool is the plugin's documented aggregation surface.
+  assert.deepEqual(
+    insightsManifest.contributes.agentTools.map((tool) => tool.name),
+    ["token_usage_summary"],
+  );
+  assert.equal(insightsManifest.ui.panel, "renderer/index.html");
+  // The plugin is CommonJS; without this shim Node walks up to
+  // apps/desktop/package.json (type: module) and main.js dies with
+  // "require is not defined in ES module scope" at load.
+  const insightsPkg = JSON.parse(
+    read("resources/plugins/pi.token-insights/package.json"),
+  );
+  assert.equal(insightsPkg.type, "commonjs");
+  // Reads local metadata only, exactly like every third-party plugin could.
+  assert.match(insightsMain, /pi\.plugin\.getDataPath/);
+  assert.match(insightsPanel, /window\.pluginBridge/);
+  assert.doesNotMatch(insightsPanel, /require\(|ipcRenderer|webview/);
+});
+
 test("bundled plugins are packaged and located at runtime", () => {
   assert.ok(
     packageJson.build.extraResources.some(

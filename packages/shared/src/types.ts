@@ -1906,6 +1906,24 @@ export type TokenUsageModelSeries = {
   items: TokenUsageHistoryItem[];
 };
 
+/**
+ * The Token Insights plugin's published fact cube (usageFacts in its plugin
+ * settings), exposed read-only so the usage stats page can render the same
+ * live aggregation the plugin panel shows. Buckets are numeric rows aligned
+ * with `columns`; `days`/`models` index into the row's day/model cells.
+ */
+export type TokenInsightsFactsResult = {
+  available: boolean;
+  generatedAt?: number;
+  columns?: string[];
+  days?: string[];
+  models?: string[];
+  /** Tool source ids aligned with the row's source cell. Producers ship either
+   * bare ids ("pi-desktop") or {id, label} objects (Token Insights' shape). */
+  sources?: Array<string | { id: string; label?: string }>;
+  buckets?: number[][];
+};
+
 export type TokenUsageHistoryResult = {
   bucket: TokenUsageBucket;
   rangeStart: number;

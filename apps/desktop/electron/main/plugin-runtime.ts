@@ -2489,6 +2489,24 @@ export class PluginRuntime {
     return join(root, "plugins", "data", pluginId.replace(/[^a-zA-Z0-9._-]/g, "_"));
   }
 
+  /**
+   * Read-only JSON file access inside a plugin's own data directory, for host
+   * views that consume a plugin's published artifacts (e.g. the usage stats
+   * page reading Token Insights' fact cube). Returns null when the plugin,
+   * file, or JSON is absent — callers fall back to their own data.
+   */
+  readPluginDataJson(pluginId: string, file: string): unknown | null {
+    const dir = this.pluginDataDir(pluginId);
+    const target = join(dir, file);
+    if (!target.startsWith(dir + sep)) return null;
+    if (!existsSync(target)) return null;
+    try {
+      return JSON.parse(readFileSync(target, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+
   private browserSessionId(pluginId?: string): string | undefined {
     const als = toolSession.getStore()?.trim();
     if (als) return als;

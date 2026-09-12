@@ -2067,6 +2067,17 @@
   color: var(--ds-text-primary);
 }
 
+/* "Data updated at" hint for the plugin-fed usage page. */
+.usage-data-note {
+  margin-left: auto;
+  font-size: var(--text-3xs);
+  color: var(--ds-text-muted);
+}
+
+.usage-section-head .usage-data-note + .usage-range {
+  margin-left: 10px;
+}
+
 .usage-range {
   display: inline-flex;
   gap: 2px;
@@ -2091,6 +2102,7 @@
 }
 
 .usage-heatmap {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2108,12 +2120,32 @@
   color: var(--ds-text-muted);
 }
 
+/* Labels span their month's real column range (set inline); never wrap. */
+.usage-heatmap-months span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
 .usage-heatmap-grid {
   display: grid;
   grid-template-rows: repeat(7, 10px);
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 3px;
+}
+
+/* Weekly (13×2) and cumulative monthly (6×2) granularities of the same grid. */
+.usage-heatmap-grid.is-week {
+  grid-template-rows: repeat(2, 10px);
+  grid-auto-flow: row;
+  grid-template-columns: repeat(13, 1fr);
+}
+
+.usage-heatmap-grid.is-month {
+  grid-template-rows: repeat(2, 10px);
+  grid-auto-flow: row;
+  grid-template-columns: repeat(6, 1fr);
 }
 
 .usage-heat-cell {
@@ -2125,7 +2157,47 @@
   background: var(--ds-text-primary);
 }
 
+/* Hovered cell gets a bold outline plus a floating detail card. */
+.usage-heat-cell.is-hover {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid var(--ds-text-primary);
+  outline-offset: 0;
+}
+
+.usage-heat-tooltip {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, calc(-100% - 8px));
+  min-width: 132px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--ds-bg-elevated-opaque);
+  border: 1px solid var(--ds-border-default);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.usage-heat-tooltip-label {
+  font-size: var(--text-3xs);
+  color: var(--ds-text-muted);
+}
+
+.usage-heat-tooltip-value {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--ds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-heat-tooltip-detail {
+  font-size: var(--text-3xs);
+  color: var(--ds-text-secondary);
+}
+
 .usage-chart {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2143,46 +2215,184 @@
 .usage-chart-grid {
   stroke: var(--ds-border-subtle);
   stroke-width: 1;
-}
-
-.usage-chart-area {
-  fill: var(--ds-text-primary);
-  opacity: 0.06;
+  stroke-dasharray: 4 5;
 }
 
 .usage-chart-line {
   fill: none;
   stroke: var(--ds-text-primary);
   stroke-width: 2;
-}
-
-.usage-chart-line.is-input {
-  stroke: var(--ds-accent-soft);
-  opacity: 0.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .usage-chart-legend {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 14px;
+  font-size: var(--text-2xs);
+  color: var(--ds-text-muted);
+  /* Align the first legend item with the first date tick: the tick starts at
+     CHART_PAD (12) of the 600-unit viewBox. */
+  padding-left: 2%;
+}
+
+.usage-chart-legend-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ds-text-secondary);
+}
+
+.usage-chart-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+/* Date ticks under the trend plot area. Size is a viewBox-unit fontSize
+   attribute on the <text> element so it visually matches the HTML legend
+   (which sits outside the svg's scale). */
+.usage-tick {
+  fill: var(--ds-text-muted);
+}
+
+/* Hovered-day guide line and per-model dots. */
+.usage-chart-hover-line {
+  stroke: var(--ds-border-default);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.usage-chart-hover-dot {
+  stroke-width: 1.5;
+}
+
+/* Floating card listing every model's usage on the hovered day. */
+.usage-trend-tooltip {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -100%);
+  min-width: 190px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--ds-bg-elevated-opaque);
+  border: 1px solid var(--ds-border-default);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.usage-trend-tooltip-title {
+  font-size: var(--text-2xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--ds-text-primary);
+  margin-bottom: 4px;
+}
+
+.usage-trend-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-2xs);
+  color: var(--ds-text-secondary);
+  padding: 1px 0;
+}
+
+.usage-trend-tooltip-model {
+  flex: 1;
+  padding-right: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-trend-tooltip-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-primary);
+}
+
+/* Cumulative per-model donut (ZCode reference): the ring is centered in the
+   card's LEFT half, the legend fills the right half. */
+.usage-donut {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  background: var(--ds-bg-elevated-opaque);
+  border: 1px solid var(--ds-border-subtle);
+}
+
+.usage-donut-left {
+  flex: 1 1 50%;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.usage-donut-svg {
+  width: min(300px, 90%);
+  height: auto;
+}
+
+.usage-donut-seg {
+  stroke-linecap: butt;
+}
+
+/* Donut center figures size themselves in viewBox units via SVG attributes
+   (fontSize=6 / fontSize=3) — pixel tokens would mis-scale inside the 42-unit
+   viewBox. */
+.usage-donut-total {
+  font-weight: var(--font-weight-semibold);
+  fill: var(--ds-text-primary);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.usage-donut-unit {
+  fill: var(--ds-text-muted);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.usage-donut-legend {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.usage-donut-row-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.usage-donut-model {
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--ds-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-donut-pct {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--ds-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-donut-tokens {
+  margin: 3px 0 0 15px;
   font-size: var(--text-2xs);
   color: var(--ds-text-muted);
 }
 
-.usage-chart-legend .is-total::before,
-.usage-chart-legend .is-input::before {
-  content: "";
-  display: inline-block;
-  width: 8px;
-  height: 2px;
-  margin-right: 5px;
-  vertical-align: middle;
-  background: var(--ds-text-primary);
-}
-
-.usage-chart-legend .is-input::before {
-  background: var(--ds-accent-soft);
-}
-
+/* Generic bordered table, shared beyond the usage page (Workspaces index). */
 .usage-table {
   width: 100%;
   border-collapse: collapse;

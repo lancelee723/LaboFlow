@@ -1,0 +1,6 @@
+{
+  "name": "pi.token-insights-bundled",
+  "private": true,
+  "type": "commonjs",
+  "description": "Module-type shim so the vendored CommonJS plugin loads as CJS: without it Node walks up to apps/desktop/package.json (type: module) and main.js fails with 'require is not defined in ES module scope'."
+}
