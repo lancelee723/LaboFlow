@@ -39,6 +39,7 @@ import {
   createHeadlessAgentDriver,
 } from "./headless-agent-driver";
 import { ExpertService } from "./expert-service";
+import { ForegroundSessionRegistry } from "./expert-foreground";
 import { TeamRunner } from "./team-runner";
 import { KbService } from "./kb-service";
 import { createChannelRegistryHost } from "./channels/registry";
@@ -4704,15 +4705,17 @@ async function postSessionCard(
   } satisfies AgentEventEnvelope);
 }
 
-// Expert center (module 01): experts are independent agents — @指派 and team
-// members run on background sessions via the headless driver, results land
-// back in the requesting session as completion cards.
+// Expert center (module 01): experts are independent agents. Foreground
+// polish: dispatch creates a REAL session and streams into it; the persona
+// binding lives in the foreground registry so later turns keep the persona.
+const expertForegroundRegistry = new ForegroundSessionRegistry(dataDir);
 const expertService = new ExpertService({
   getHost: () => host,
   getLogger: () => logger,
   getDriver: () => headlessAgentDriver,
   broadcast: (event) => sendToRenderer(IPC.event.expertTeamRun, event),
   postSessionCard,
+  foregroundRegistry: expertForegroundRegistry,
 });
 
 async function getOneShotProvider(): Promise<{
@@ -4783,6 +4786,18 @@ const teamRunner = new TeamRunner({
   getLogger: () => logger,
   getDriver: () => headlessAgentDriver,
   getOneShotProvider,
+  createSession: async (input) => {
+    if (!host) throw new Error("host unavailable");
+    const created = await host.call<{ session?: { id?: string } }>("session.create", {
+      title: input.title,
+      mode: "agent",
+      ...(input.projectPath ? { projectPath: input.projectPath } : {}),
+    });
+    const id = String(created.session?.id ?? "").trim();
+    if (!id) throw new Error("session.create returned no session");
+    return { id };
+  },
+  foregroundRegistry: expertForegroundRegistry,
   resolveTeam: async (teamId) => {
     const teams = await expertService.listTeams();
     const team = teams.find((item) => item.id === teamId || item.name === teamId);
@@ -8456,11 +8471,13 @@ function registerIpc() {
       });
       session = refreshed.session ?? { ...session, messages: kept };
     }
-    const launch = await resolveAgentRuntimeLaunch(
-      req.sessionId,
-      session,
-      settings,
-    );
+    // Foreground expert/team sessions (module 01 polish): keep the bound
+    // persona on every user turn. The registry is consulted per prompt; the
+    // overrides plumbing already flows personaPrompt into the sidecar.
+    const expertPersona = expertService.foregroundPersona(req.sessionId);
+    const launch = await resolveAgentRuntimeLaunch(req.sessionId, session, settings, {
+      ...(expertPersona ? { personaPrompt: expertPersona } : {}),
+    });
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 
     // Slash template expansion (D123, ADR 0024): templates expand before

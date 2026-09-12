@@ -2185,20 +2185,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     const expertDispatch = await matchExpertMention(content);
     if (expertDispatch) {
       const task = buildExpertDispatchTask(expertDispatch.task, draft);
+      let dispatchedSessionId: string | undefined;
       try {
-        if (expertDispatch.kind === "team") {
-          await api.invokeExpertTeam({
-            sessionId,
-            teamId: expertDispatch.id,
-            task,
-          });
-        } else {
-          await api.invokeExpert({
-            sessionId,
-            expertId: expertDispatch.id,
-            task,
-          });
-        }
+        // Foreground dispatch (module 01 polish): the invoke creates a REAL
+        // session — project-scoped from this one — and streams into it; we
+        // navigate there so the user watches the expert work like any chat.
+        const result =
+          expertDispatch.kind === "team"
+            ? await api.invokeExpertTeam({
+                sessionId,
+                teamId: expertDispatch.id,
+                task,
+              })
+            : await api.invokeExpert({
+                sessionId,
+                expertId: expertDispatch.id,
+                task,
+              });
+        dispatchedSessionId = result.sessionId;
       } catch (e) {
         get().showToast(
           e instanceof Error ? e.message : i18n.t("expert.dispatchFailed"),
@@ -2210,6 +2214,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         i18n.t("expert.dispatched", { expert: expertDispatch.name }),
         { variant: "success" },
       );
+      if (dispatchedSessionId) {
+        await get().refreshSessions();
+        await get().selectSession(dispatchedSessionId);
+      }
       return true;
     }
     if (get().runningSessions[sessionId]) {

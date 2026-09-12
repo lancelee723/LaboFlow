@@ -124,6 +124,18 @@ export interface TeamRunnerDeps {
     kind?: string;
   }): Promise<void>;
   getProjectPath(sessionId?: string): Promise<string | undefined>;
+  /** Foreground polish: create the REAL session a team run streams into. */
+  createSession(input: {
+    title: string;
+    projectPath?: string;
+  }): Promise<{ id: string }>;
+  /** Persona bindings for foreground expert/team sessions (module 01 polish). */
+  foregroundRegistry: {
+    register(
+      sessionId: string,
+      record: { kind: "expert" | "team"; id: string; name: string; personaPrompt: string },
+    ): void;
+  };
 }
 
 export function extractJson(raw: string): TeamPlan | null {
@@ -214,11 +226,27 @@ export class TeamRunner {
     sessionId?: string;
     teamId: string;
     task: string;
-  }): Promise<{ runId: string }> {
+  }): Promise<{ runId: string; sessionId: string }> {
     const team = await this.deps.resolveTeam(request.teamId);
     if (!team) throw new Error(`EXPERT_INVALID: unknown team "${request.teamId}"`);
     const driver = this.deps.getDriver();
     if (!driver) throw new Error("backend unavailable");
+
+    // Foreground polish (module 01): the team run streams into a REAL session
+    // the user is dropped into — project-scoped when dispatched from one.
+    // Progress milestones post there; the registry keeps the moderator persona
+    // for follow-up questions after the run settles.
+    const projectPath = await this.deps.getProjectPath(request.sessionId);
+    const session = await this.deps.createSession({
+      title: `${team.name} · ${request.task.slice(0, 24)}`,
+      ...(projectPath ? { projectPath } : {}),
+    });
+    this.deps.foregroundRegistry.register(session.id, {
+      kind: "team",
+      id: request.teamId,
+      name: team.name,
+      personaPrompt: team.body,
+    });
 
     const sections = splitLeaderSections(team.body);
     const stageExperts: Record<string, string> = {};
@@ -231,7 +259,7 @@ export class TeamRunner {
     }
     const state: TeamRunState = {
       runId: `team-${randomUUID()}`,
-      sessionId: request.sessionId,
+      sessionId: session.id,
       teamId: request.teamId,
       teamName: team.name,
       task: request.task,
@@ -257,6 +285,19 @@ export class TeamRunner {
     };
     this.states.set(state.runId, state);
 
+    // Kickoff milestone in the foreground session: the user sees the team
+    // accept the task with its plan instead of a silent background run.
+    await this.deps
+      .postSessionCard(session.id, {
+        id: `team-card-${randomUUID()}`,
+        role: "assistant",
+        content: `【${team.name} · 已受理】\n\n${request.task}\n\n—— 成员：${team.members.join("、")}；主持人正在拆解任务。`,
+        createdAt: new Date().toISOString(),
+        status: "complete",
+        kind: "team-card",
+      })
+      .catch(() => undefined);
+
     void this.run(state).catch((error) => {
       state.phase = "failed";
       this.broadcast(state, "failed", { error: String(error) });
@@ -265,7 +306,7 @@ export class TeamRunner {
         data: String(error),
       });
     });
-    return { runId: state.runId };
+    return { runId: state.runId, sessionId: session.id };
   }
 
   private async run(state: TeamRunState): Promise<void> {
@@ -277,6 +318,21 @@ export class TeamRunner {
       return;
     }
     await this.plan(state);
+    // Plan milestone for the foreground session (non-pipeline mode).
+    if (state.sessionId && state.members.length) {
+      await this.deps
+        .postSessionCard(state.sessionId, {
+          id: `team-card-${randomUUID()}`,
+          role: "assistant",
+          content: `【${state.teamName} · 拆解完成】\n\n${state.members
+            .map((member, index) => `${index + 1}. @${member.expert}：${member.brief ?? ""}`)
+            .join("\n")}`,
+          createdAt: new Date().toISOString(),
+          status: "complete",
+          kind: "team-card",
+        })
+        .catch(() => undefined);
+    }
     await this.dispatchAll(state);
     await this.integrate(state);
   }
@@ -416,6 +472,20 @@ export class TeamRunner {
       }
       resultsByState.set(index, stageOutput);
       previousSummary = stageOutput;
+      // Stage milestone in the foreground session (skip the last stage: its
+      // output is the delivery posted by the completion card below).
+      if (index < total - 1 && state.sessionId) {
+        await this.deps
+          .postSessionCard(state.sessionId, {
+            id: `team-card-${randomUUID()}`,
+            role: "assistant",
+            content: `【${state.teamName} · 阶段完成 ${index + 1}/${total}：${stage}】\n\n${clipResult(stageOutput, 1200)}\n\n—— 下一阶段：${state.pipeline[index + 1]}`,
+            createdAt: new Date().toISOString(),
+            status: "complete",
+            kind: "team-card",
+          })
+          .catch(() => undefined);
+      }
     }
     // Last stage's output is the delivery; integration runs only when the
     // team explicitly defines merge instructions beyond the pipeline.
