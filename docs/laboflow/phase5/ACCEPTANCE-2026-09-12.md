@@ -126,3 +126,11 @@ desktop +129（driver 10/slides 3/ppt-runtime 5/space 17/kb-ui+citations 12/chan
 | L1 版式（R3 复核） | 8 版式在当前代码已真实渲染；勘误节原判「L1 缺口」系会话时点旧插件资源所致，补 graphicFrame 断言固化 | `slides-plugin.test.mjs`（compare/timeline 原生表格断言） |
 
 **回归**：desktop 1428 pass / 0 fail（+75）；typecheck 绿；lint 9 违规为既有问题（分支起点复证）。详见 phase5 README 执行记录（2026-09-12 晚节）。
+
+### §6.1 场景验收补充（2026-09-13，S10 协议级重放）
+
+`scripts/e2e-slides-session.mjs` 以真实 host-core + 真实 bundled 插件注册表 + 真实工具分发链（tools.execute → plugins.execute → 插件 main.js → resolveExecution）重放失败会话场景，模型智能部分按薄壳技能规程脚本化（证据比 GUI 点击更可复现）。**13/13 通过**：
+
+S10-01 插件发现与启用 → S10-02 status 返回 ready+skillDir/pythonPath → S10-03 语料桥读取 routing.md → S10-04 工作区 init（--dir 强制）→ S10-05 Stage-2 提交（上游格式 recommendations）→ **S10-06 未确认导出被拒（PPT_STAGE_NOT_CONFIRMED）** → S10-07 用户确认（result.json）→ S10-07b 首读完整结果 → S10-08 final 质检 0 error → S10-09 finalize → **S10-10 真实导出 PPTX** → S10-11 只读一次缓存 → S10-12 禁用/启用回路。
+
+覆盖 §6.3 场景：S10（协议级等价）、S2（全管线+面板契约确认）、S4（三态门禁）、S8（豁免链路，见 ppt-pipeline-state 用例）、S5/S6（状态机+真机 venv）、UX 回路协议层（GUI 点击项留真人）。长任务指标：30 页 deck 双闸+finalize+export **4.7 秒**（预算 5 分钟，`ppt-master-longtask.test.mjs`）。theme 疑点解除：ask 确认 120s 超时（durationMs=120024），非参数问题（见 RCA 附录）。

@@ -147,7 +147,9 @@ Phase 4 共享工作区（前置，未启动）
 
 **回归数据**：desktop **1428 pass / 0 fail**（基线 1353，+75；2 skip 为 PPT_IT=1 门控真机集成）；typecheck 全绿；lint 9 个违规为**既有问题**（a7a2febd team 功能引入 chat-shell.css，经分支起点复证，不在本计划范围）。真机集成（PPT_IT=1，darwin）：uv 全新 venv 17.7s 就绪（指标 ≤3 分钟）、freeze 黑名单零命中、上游 checker --help 通过。
 
-**提交轨迹**：8b160efa 计划 → 1715832c M0 → dc4a0ca7 Phase A → c52b7d5b Phase B+C → G（本提交）。
+**场景验收（2026-09-13 补充）**：`scripts/e2e-slides-session.mjs` S10 协议级重放 13/13（真实 host-core + 真实插件分发链 + 真实 venv/脚本/状态机，覆盖 §6.3 S10/S2/S4/S8 与 UX 回路协议层）；30 页 deck 长任务 4.7s（预算 5 分钟）；lint 9 个既有违规已 token 化修绿；theme 拒绝疑点解除（ask 确认 120s 超时，非参数问题）。详见 ACCEPTANCE §6.1。
+
+**提交轨迹**：8b160efa 计划 → 1715832c M0 → dc4a0ca7 Phase A → c52b7d5b Phase B+C → 3d9ce248/58aeb3ab G → 场景验收补充（本提交）。
 
 **推广解锁门**（RP-8）：本阶段为 Phase C 完成态（硬门禁 + 精制面板齐备），组织推广已解锁；Phase A 单独发布时仅限自用/内测。
 

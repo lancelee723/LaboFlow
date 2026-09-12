@@ -18,5 +18,5 @@
 
 ## 附带疑点（单列排查，不阻塞主线）
 
-- **theme 参数被拒**：09:48 `slides_export`（带 `theme` 参数）被 TOOL_DENIED，去掉参数后 09:50 同样调用成功——疑似权限引擎对工具参数 schema 的误判（main.js 注册的 schema 与 manifest 声明不一致：manifest schema 含 theme 完整定义而 main.js schema 只有简化版）。Phase A 重整 manifest/注册 schema 一致性时复查。
-- **子代理幻觉**：用户 prompt 建议「派生子代理」，Pi 运行时 delegate 不可分配插件工具——薄壳技能须明示 L2 必须主会话执行（RP-5）。
+- **theme 参数被拒（已解除）**：09:48 `slides_export`（带 `theme`）被拒、09:50 去掉 theme 重试成功——取证显示被拒调用 `durationMs: 120024`，即 **ask 模式权限确认 120 秒超时自动拒绝**（Pi fail-closed 语义），与 theme 参数内容无关（当次确认弹窗无人响应；09:23 与 09:50 两次同参数调用均因人工点允许而成功）。缓解即薄壳技能 preamble 第 6 条：L2 会话建议 accept-edits/auto 模式，避免确认弹窗超时打断管线。
+- **子代理幻觉**：用户 prompt 建议「派生子代理」，Pi 运行时 delegate 不可分配插件工具——薄壳技能已明示 L2 必须主会话执行（RP-5）。

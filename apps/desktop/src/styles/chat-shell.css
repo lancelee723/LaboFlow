@@ -675,7 +675,7 @@
   padding: 10px 18px;
   border-top: 1px solid var(--border);
   background: var(--bg-secondary, var(--bg));
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .team-run-strip-head {
@@ -689,7 +689,7 @@
 .team-run-strip-name {
   min-width: 0;
   overflow: hidden;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -698,7 +698,7 @@
   flex-shrink: 0;
   padding: 1px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 .team-run-strip-tokens {
@@ -711,14 +711,14 @@
 .team-run-strip-budget {
   height: 3px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg-hover);
 }
 
 .team-run-strip-budget > span {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--success);
 }
 
@@ -742,7 +742,7 @@
   gap: 4px;
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-secondary);
 }
 
@@ -766,8 +766,8 @@
 }
 
 .team-run-chip-glyph {
-  font-size: 10px;
-  line-height: 1;
+  font-size: var(--text-3xs);
+  line-height: var(--text-3xs);
 }
 
 .team-run-chip-retry {
@@ -776,6 +776,6 @@
   background: none;
   color: var(--error);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-3xs);
   text-decoration: underline;
 }

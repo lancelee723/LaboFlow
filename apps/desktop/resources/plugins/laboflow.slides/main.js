@@ -253,9 +253,9 @@ function registerMasterTools() {
     risk: "low",
     schema: { type: "object", properties: {} },
     execute: async () => {
-      const status = await detectRuntime(deps());
+      const status = await detectRuntime(runtimeDeps());
       const skillDir = skillRoot(getPluginDir());
-      const venvPython = venvPythonPath(resolveRuntimeRoot(deps()));
+      const venvPython = venvPythonPath(resolveRuntimeRoot(runtimeDeps()));
       const payload = {
         ...status,
         skillDir,
