@@ -51,7 +51,10 @@ test("Composer gates enhancement, preserves file references, and guards stale re
 
 test("prompt enhancement has complete English-first locale coverage", () => {
   for (const source of [en, zh]) {
-    assert.match(source, /enhancePrompt:/);
+    // The enhance button's label lives on `enhancePromptTooltip` since the
+    // hover hint moved to a wrapper-level tooltip (disabled buttons swallow
+    // native titles).
+    assert.match(source, /enhancePromptTooltip:/);
     assert.match(source, /enhancingPrompt:/);
     assert.match(source, /undoEnhancement:/);
     assert.match(source, /enhancementFailed:/);

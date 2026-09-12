@@ -368,6 +368,43 @@
   min-width: 28px;
 }
 
+/* Hover tooltip ("AI一键优化提示词") shown to the right of the pointer. A
+   wrapper-level ::after keeps working while the inner button is disabled,
+   which suppresses native titles. */
+.composer-enhance-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.composer-enhance-wrap::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 30;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--ds-bg-elevated-opaque);
+  border: 1px solid var(--ds-border-default);
+  box-shadow: var(--shadow-pop, 0 4px 16px rgba(0, 0, 0, 0.18));
+  color: var(--ds-text-primary);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 100ms var(--motion-ease-out),
+    visibility 0s linear 100ms;
+}
+
+.composer-enhance-wrap:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 350ms;
+}
+
 .composer-enhance-btn.is-loading {
   cursor: wait;
   padding-inline: 8px;

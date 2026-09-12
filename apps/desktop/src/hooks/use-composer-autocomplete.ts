@@ -13,6 +13,7 @@ import {
   type ComposerTrigger,
   type FsIndexEntry,
   type FuzzyMatch,
+  type SessionSummary,
 } from "@pi-desktop/shared";
 import { api } from "../lib/api";
 import { useAppStore } from "../stores/app-store";
@@ -25,10 +26,12 @@ import { useAppStore } from "../stores/app-store";
  */
 
 const MAX_FILE_ITEMS = 50;
+const MAX_CONTEXT_ITEMS = 8;
 const SOURCE_TTL_MS = 10_000;
 
 export type AutocompleteItem =
   | { kind: "command"; command: ComposerCommand; match: FuzzyMatch }
+  | { kind: "context"; session: SessionSummary; match: FuzzyMatch }
   | { kind: "path"; entry: FsIndexEntry; match: FuzzyMatch };
 
 /** Module-level TTL caches so re-triggering stays IPC-free. */
@@ -99,6 +102,34 @@ function filterFiles(entries: FsIndexEntry[], query: string): AutocompleteItem[]
 }
 
 /**
+ * Recent conversations as @-context candidates (ZCode parity with the "+"
+ * menu's context picker): title/keyword substring filtering, most recently
+ * updated first, bounded to a handful of rows above the file matches.
+ */
+function filterContexts(
+  sessions: SessionSummary[],
+  activeSessionId: string | null | undefined,
+  query: string,
+): AutocompleteItem[] {
+  const needle = query.trim().toLowerCase();
+  const candidates = sessions
+    .filter((session) => session.id !== activeSessionId)
+    .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  const matched: Array<{ session: SessionSummary; match: FuzzyMatch }> = [];
+  for (const session of candidates) {
+    const title = session.title || "";
+    const hit = !needle
+      ? 0
+      : title.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle)
+        ? Math.max(0, 60 - title.length)
+        : null;
+    if (hit !== null) matched.push({ session, match: { score: hit, ranges: [] } });
+    if (matched.length >= MAX_CONTEXT_ITEMS) break;
+  }
+  return matched.map(({ session, match }) => ({ kind: "context", session, match }));
+}
+
+/**
  * Resolve a typed "/name" against the merged command list at send time
  * (builtin/plugin dispatch); templates and unknown names return as-is/null
  * and stay on the prompt path. Reuses the menu's TTL cache when warm.
@@ -135,6 +166,8 @@ export function useComposerAutocomplete({
 }) {
   const workspaceKey = useAppStore((s) => s.workspace?.path ?? "");
   const hasWorkspace = workspaceKey !== "";
+  const sessions = useAppStore((s) => s.sessions);
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
   const [commands, setCommands] = useState<ComposerCommand[] | null>(null);
   const [files, setFiles] = useState<{
     entries: FsIndexEntry[];
@@ -227,8 +260,12 @@ export function useComposerAutocomplete({
     if (trigger.mode === "slash") {
       return commands ? filterCommands(commands, trigger.query) : [];
     }
-    return files ? filterFiles(files.entries, trigger.query) : [];
-  }, [trigger, dismissed, commands, files]);
+    // The @ picker lists conversations (context) above workspace files, so a
+    // mention reaches either kind of reference from one popup.
+    const contexts = filterContexts(sessions, activeSessionId, trigger.query);
+    const fileItems = files ? filterFiles(files.entries, trigger.query) : [];
+    return [...contexts, ...fileItems];
+  }, [trigger, dismissed, commands, files, sessions, activeSessionId]);
 
   // New query or mode restarts keyboard navigation at the top hit.
   const itemsKey = trigger ? `${trigger.mode}:${trigger.query}` : "";
@@ -253,11 +290,21 @@ export function useComposerAutocomplete({
           value: string;
           cursor: number;
           fileReference?: { path: string; name: string };
+          contextSession?: SessionSummary;
         }
       | null => {
       if (!trigger) return null;
       const item = items[index];
       if (!item) return null;
+      if (item.kind === "context") {
+        // Picking a conversation attaches its transcript as context; the
+        // @ token itself is stripped without leaving a chip sentinel (the
+        // attachment pipeline splices its own chip at the caret).
+        return {
+          ...applyCompletion(value, trigger, ""),
+          contextSession: item.session,
+        };
+      }
       if (item.kind === "path" && item.entry.kind === "file") {
         return {
           ...applyCompletion(value, trigger, ""),

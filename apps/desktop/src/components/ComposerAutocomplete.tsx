@@ -5,6 +5,7 @@ import type { AutocompleteItem, useComposerAutocomplete } from "../hooks/use-com
 import {
   IconFileText,
   IconFolder,
+  IconNewSession,
   IconPlug,
   IconSlash,
   IconSparkles,
@@ -77,7 +78,9 @@ export function ComposerAutocomplete({
       key:
         item.kind === "command"
           ? `c:${item.command.kind}:${item.command.name}`
-          : `p:${item.entry.path}`,
+          : item.kind === "context"
+            ? `x:${item.session.id}`
+            : `p:${item.entry.path}`,
       type: "button" as const,
       role: "option" as const,
       "aria-selected": active,
@@ -108,6 +111,18 @@ export function ComposerAutocomplete({
         </button>
       );
     }
+    if (item.kind === "context") {
+      const title = item.session.title || t("chat.untitledTask");
+      return (
+        <button {...commonProps} title={title}>
+          <span className="composer-ac-icon">
+            <IconNewSession size={14} />
+          </span>
+          <span className="composer-ac-name">{title}</span>
+          <span className="composer-ac-hint">{t("chat.contextGroup")}</span>
+        </button>
+      );
+    }
     const isDir = item.entry.kind === "dir";
     const name = item.entry.path.split("/").pop() ?? item.entry.path;
     const displayName = `${name}${isDir ? "/" : ""}`;
@@ -135,6 +150,25 @@ export function ComposerAutocomplete({
         rows.push(
           <div key={`g:${group}`} className="composer-model-group-label">
             {t(GROUP_KEYS[group])}
+          </div>,
+        );
+      }
+    } else if (item.kind === "context" && lastGroup !== "context") {
+      lastGroup = "context";
+      rows.push(
+        <div key="g:context" className="composer-model-group-label">
+          {t("chat.contextGroup")}
+        </div>,
+      );
+    } else if (item.kind === "path" && lastGroup !== "path") {
+      lastGroup = "path";
+      // Files keep the long-standing unlabeled list unless contexts are shown
+      // above them; the label then separates the two reference kinds.
+      const hasContexts = ac.items.some((candidate) => candidate.kind === "context");
+      if (hasContexts) {
+        rows.push(
+          <div key="g:path" className="composer-model-group-label">
+            {t("chat.fileGroup")}
           </div>,
         );
       }
