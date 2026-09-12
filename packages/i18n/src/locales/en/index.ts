@@ -242,6 +242,8 @@ export const en = {
     enhancePromptTooltip: "Optimize prompt with AI",
     contextGroup: "Contexts",
     fileGroup: "Files",
+    expertGroup: "Experts",
+    teamGroup: "Expert teams",
     enhancingPrompt: "Enhancing…",
     undoEnhancement: "Undo enhancement",
     enhancementFailed: "Prompt enhancement failed",

@@ -233,6 +233,8 @@ export const fr = {
     "enhancePromptTooltip": "Optimiser le prompt par IA",
     "contextGroup": "Contextes",
     "fileGroup": "Fichiers",
+    "expertGroup": "Experts",
+    "teamGroup": "Équipes d'experts",
     "enhancingPrompt": "Amélioration…",
     "undoEnhancement": "Annuler l'amélioration",
     "enhancementFailed": "L'amélioration de l'invite a échoué",

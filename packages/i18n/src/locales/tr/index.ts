@@ -244,6 +244,8 @@ export const tr = {
     enhancePromptTooltip: "Promptu yapay zekâ ile optimize et",
     contextGroup: "Bağlamlar",
     fileGroup: "Dosyalar",
+    expertGroup: "Uzmanlar",
+    teamGroup: "Uzman ekipler",
     enhancingPrompt: "İyileştiriliyor…",
     undoEnhancement: "İyileştirmeyi geri al",
     enhancementFailed: "İstem iyileştirilemedi",

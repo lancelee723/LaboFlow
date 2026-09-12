@@ -244,6 +244,8 @@ export const ko = {
     enhancePromptTooltip: "AI로 프롬프트 최적화",
     contextGroup: "컨텍스트",
     fileGroup: "파일",
+    expertGroup: "전문가",
+    teamGroup: "전문가 팀",
     enhancingPrompt: "개선 중…",
     undoEnhancement: "개선 취소",
     enhancementFailed: "프롬프트 개선 실패",

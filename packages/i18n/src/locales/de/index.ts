@@ -233,6 +233,8 @@ export const de = {
     "enhancePromptTooltip": "Prompt mit KI optimieren",
     "contextGroup": "Kontexte",
     "fileGroup": "Dateien",
+    "expertGroup": "Experten",
+    "teamGroup": "Expertenteams",
     "enhancingPrompt": "Verbesserung…",
     "undoEnhancement": "Verbesserung rückgängig machen",
     "enhancementFailed": "Eingabeaufforderung zur Verbesserung fehlgeschlagen",

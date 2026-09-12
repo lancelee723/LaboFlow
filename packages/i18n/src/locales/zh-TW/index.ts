@@ -237,6 +237,8 @@ export const zhTW = {
     enhancePromptTooltip: "AI一鍵優化提示詞",
     contextGroup: "上下文",
     fileGroup: "檔案",
+    expertGroup: "專家",
+    teamGroup: "專家團隊",
     enhancingPrompt: "增強中…",
     undoEnhancement: "撤回增強",
     enhancementFailed: "提示詞增強失敗",

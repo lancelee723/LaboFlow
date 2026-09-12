@@ -5,10 +5,12 @@ import type { AutocompleteItem, useComposerAutocomplete } from "../hooks/use-com
 import {
   IconFileText,
   IconFolder,
+  IconGraduationCap,
   IconNewSession,
   IconPlug,
   IconSlash,
   IconSparkles,
+  IconUsers,
 } from "./icons";
 
 /**
@@ -78,9 +80,13 @@ export function ComposerAutocomplete({
       key:
         item.kind === "command"
           ? `c:${item.command.kind}:${item.command.name}`
-          : item.kind === "context"
-            ? `x:${item.session.id}`
-            : `p:${item.entry.path}`,
+          : item.kind === "expert"
+            ? `e:${item.expert.id}`
+            : item.kind === "team"
+              ? `t:${item.team.id}`
+              : item.kind === "context"
+                ? `x:${item.session.id}`
+                : `p:${item.entry.path}`,
       type: "button" as const,
       role: "option" as const,
       "aria-selected": active,
@@ -107,6 +113,24 @@ export function ComposerAutocomplete({
           ) : null}
           {item.command.description ? (
             <span className="composer-ac-desc">{item.command.description}</span>
+          ) : null}
+        </button>
+      );
+    }
+    if (item.kind === "expert" || item.kind === "team") {
+      const isTeam = item.kind === "team";
+      const name = isTeam ? item.team.name : item.expert.name;
+      const description = isTeam ? item.team.description : item.expert.description;
+      return (
+        <button {...commonProps} title={description || undefined}>
+          <span className="composer-ac-icon">
+            {isTeam ? <IconUsers size={14} /> : <IconGraduationCap size={14} />}
+          </span>
+          <span className="composer-ac-name">
+            <Highlighted text={name} ranges={item.match.ranges} />
+          </span>
+          {description ? (
+            <span className="composer-ac-desc">{description}</span>
           ) : null}
         </button>
       );
@@ -153,6 +177,20 @@ export function ComposerAutocomplete({
           </div>,
         );
       }
+    } else if (item.kind === "expert" && lastGroup !== "expert") {
+      lastGroup = "expert";
+      rows.push(
+        <div key="g:expert" className="composer-model-group-label">
+          {t("chat.expertGroup")}
+        </div>,
+      );
+    } else if (item.kind === "team" && lastGroup !== "team") {
+      lastGroup = "team";
+      rows.push(
+        <div key="g:team" className="composer-model-group-label">
+          {t("chat.teamGroup")}
+        </div>,
+      );
     } else if (item.kind === "context" && lastGroup !== "context") {
       lastGroup = "context";
       rows.push(
@@ -162,9 +200,15 @@ export function ComposerAutocomplete({
       );
     } else if (item.kind === "path" && lastGroup !== "path") {
       lastGroup = "path";
-      // Files keep the long-standing unlabeled list unless contexts are shown
-      // above them; the label then separates the two reference kinds.
-      const hasContexts = ac.items.some((candidate) => candidate.kind === "context");
+      // Files keep the long-standing unlabeled list unless any named group
+      // (agents or contexts) is shown above them; the label then separates
+      // the reference kinds.
+      const hasContexts = ac.items.some(
+        (candidate) =>
+          candidate.kind === "context" ||
+          candidate.kind === "expert" ||
+          candidate.kind === "team",
+      );
       if (hasContexts) {
         rows.push(
           <div key="g:path" className="composer-model-group-label">

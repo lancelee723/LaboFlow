@@ -15,7 +15,7 @@ import {
   type FuzzyMatch,
   type SessionSummary,
 } from "@pi-desktop/shared";
-import { api } from "../lib/api";
+import { api, type ExpertListItem, type ExpertTeamListItem } from "../lib/api";
 import { useAppStore } from "../stores/app-store";
 
 /**
@@ -27,10 +27,14 @@ import { useAppStore } from "../stores/app-store";
 
 const MAX_FILE_ITEMS = 50;
 const MAX_CONTEXT_ITEMS = 8;
+const MAX_EXPERT_ITEMS = 8;
+const MAX_TEAM_ITEMS = 8;
 const SOURCE_TTL_MS = 10_000;
 
 export type AutocompleteItem =
   | { kind: "command"; command: ComposerCommand; match: FuzzyMatch }
+  | { kind: "expert"; expert: ExpertListItem; match: FuzzyMatch }
+  | { kind: "team"; team: ExpertTeamListItem; match: FuzzyMatch }
   | { kind: "context"; session: SessionSummary; match: FuzzyMatch }
   | { kind: "path"; entry: FsIndexEntry; match: FuzzyMatch };
 
@@ -43,6 +47,8 @@ let filesCache: {
   entries: FsIndexEntry[];
   truncated: boolean;
 } | null = null;
+let expertsCache: { key: string; at: number; experts: ExpertListItem[] } | null = null;
+let teamsCache: { key: string; at: number; teams: ExpertTeamListItem[] } | null = null;
 
 const COMMAND_GROUP_ORDER = { template: 0, builtin: 1, plugin: 2 } as const;
 
@@ -130,6 +136,58 @@ function filterContexts(
 }
 
 /**
+ * Summonable agents as the @ picker's leading groups (module 01 refinement):
+ * enabled entries only, name hits ranked above description/tag/member hits,
+ * capped like the other sources. Experts and teams render as two separate
+ * groups — experts first, teams directly below.
+ */
+function filterExperts(
+  experts: ExpertListItem[],
+  query: string,
+): AutocompleteItem[] {
+  const needle = query.trim().toLowerCase();
+  const matched: Array<{ expert: ExpertListItem; match: FuzzyMatch }> = [];
+  for (const expert of experts) {
+    if (expert.enabled === false) continue;
+    const hit = !needle
+      ? 0
+      : expert.name.toLowerCase().includes(needle)
+        ? Math.max(0, 60 - expert.name.length)
+        : expert.description.toLowerCase().includes(needle) ||
+            expert.tags.some((tag) => tag.toLowerCase().includes(needle))
+          ? 20
+          : null;
+    if (hit !== null && matched.length < MAX_EXPERT_ITEMS) {
+      matched.push({ expert, match: { score: hit, ranges: [] } });
+    }
+  }
+  return matched.map(({ expert, match }) => ({ kind: "expert", expert, match }));
+}
+
+function filterTeams(
+  teams: ExpertTeamListItem[],
+  query: string,
+): AutocompleteItem[] {
+  const needle = query.trim().toLowerCase();
+  const matched: Array<{ team: ExpertTeamListItem; match: FuzzyMatch }> = [];
+  for (const team of teams) {
+    if (team.enabled === false) continue;
+    const hit = !needle
+      ? 0
+      : team.name.toLowerCase().includes(needle)
+        ? Math.max(0, 60 - team.name.length)
+        : team.description.toLowerCase().includes(needle) ||
+            team.members.some((member) => member.toLowerCase().includes(needle))
+          ? 20
+          : null;
+    if (hit !== null && matched.length < MAX_TEAM_ITEMS) {
+      matched.push({ team, match: { score: hit, ranges: [] } });
+    }
+  }
+  return matched.map(({ team, match }) => ({ kind: "team", team, match }));
+}
+
+/**
  * Resolve a typed "/name" against the merged command list at send time
  * (builtin/plugin dispatch); templates and unknown names return as-is/null
  * and stay on the prompt path. Reuses the menu's TTL cache when warm.
@@ -173,6 +231,8 @@ export function useComposerAutocomplete({
     entries: FsIndexEntry[];
     truncated: boolean;
   } | null>(null);
+  const [experts, setExperts] = useState<ExpertListItem[] | null>(null);
+  const [teams, setTeams] = useState<ExpertTeamListItem[] | null>(null);
   const [highlight, setHighlight] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const frozenRef = useRef<ComposerTrigger | null>(null);
@@ -223,9 +283,53 @@ export function useComposerAutocomplete({
         cancelled = true;
       };
     }
+    // Summonable experts/teams are workspace-independent sources: fetch them
+    // for every @ trigger (the slash branch above already returned), so both
+    // groups can lead the picker once warm.
+    let expertsCancelled = false;
+    let teamsCancelled = false;
+    if (
+      expertsCache &&
+      expertsCache.key === workspaceKey &&
+      now - expertsCache.at < SOURCE_TTL_MS
+    ) {
+      setExperts(expertsCache.experts);
+    } else {
+      void api
+        .listExperts()
+        .then((list) => {
+          const enabled = list.filter((expert) => expert.enabled !== false);
+          expertsCache = { key: workspaceKey, at: Date.now(), experts: enabled };
+          if (!expertsCancelled) setExperts(enabled);
+        })
+        .catch(() => {
+          if (!expertsCancelled) setExperts([]);
+        });
+    }
+    if (
+      teamsCache &&
+      teamsCache.key === workspaceKey &&
+      now - teamsCache.at < SOURCE_TTL_MS
+    ) {
+      setTeams(teamsCache.teams);
+    } else {
+      void api
+        .listExpertTeams()
+        .then((list) => {
+          const enabled = list.filter((team) => team.enabled !== false);
+          teamsCache = { key: workspaceKey, at: Date.now(), teams: enabled };
+          if (!teamsCancelled) setTeams(enabled);
+        })
+        .catch(() => {
+          if (!teamsCancelled) setTeams([]);
+        });
+    }
     if (!hasWorkspace) {
       setFiles({ entries: [], truncated: false });
-      return;
+      return () => {
+        expertsCancelled = true;
+        teamsCancelled = true;
+      };
     }
     if (
       filesCache &&
@@ -252,6 +356,8 @@ export function useComposerAutocomplete({
       });
     return () => {
       cancelled = true;
+      expertsCancelled = true;
+      teamsCancelled = true;
     };
   }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace]);
 
@@ -260,12 +366,24 @@ export function useComposerAutocomplete({
     if (trigger.mode === "slash") {
       return commands ? filterCommands(commands, trigger.query) : [];
     }
-    // The @ picker lists conversations (context) above workspace files, so a
-    // mention reaches either kind of reference from one popup.
+    // The @ picker leads with summonable agents — experts, then teams, each
+    // its own group — followed by conversations and workspace files, so a
+    // mention reaches any of the four reference kinds from one popup.
+    const expertItems = experts ? filterExperts(experts, trigger.query) : [];
+    const teamItems = teams ? filterTeams(teams, trigger.query) : [];
     const contexts = filterContexts(sessions, activeSessionId, trigger.query);
     const fileItems = files ? filterFiles(files.entries, trigger.query) : [];
-    return [...contexts, ...fileItems];
-  }, [trigger, dismissed, commands, files, sessions, activeSessionId]);
+    return [...expertItems, ...teamItems, ...contexts, ...fileItems];
+  }, [
+    trigger,
+    dismissed,
+    commands,
+    files,
+    experts,
+    teams,
+    sessions,
+    activeSessionId,
+  ]);
 
   // New query or mode restarts keyboard navigation at the top hit.
   const itemsKey = trigger ? `${trigger.mode}:${trigger.query}` : "";
@@ -296,6 +414,15 @@ export function useComposerAutocomplete({
       if (!trigger) return null;
       const item = items[index];
       if (!item) return null;
+      if (item.kind === "expert") {
+        // Keep the mention as literal draft text: the send path resolves
+        // `@名字` against the expert registry and dispatches the independent
+        // expert session (T51.5), posting the completion card back here.
+        return applyCompletion(value, trigger, `@${item.expert.name} `);
+      }
+      if (item.kind === "team") {
+        return applyCompletion(value, trigger, `@${item.team.name} `);
+      }
       if (item.kind === "context") {
         // Picking a conversation attaches its transcript as context; the
         // @ token itself is stripped without leaving a chip sentinel (the
