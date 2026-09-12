@@ -54,12 +54,13 @@ def main() -> None:
         master.getchannel("A"),
     )
     # The source artwork also contains a soft outline around its light app
-    # tile. Keep the known PI mark area so that outline cannot leak into the
-    # menu bar template silhouette.
+    # tile. Keep the known LaboFlow logo area so that outline cannot leak into
+    # the menu bar template silhouette. The rectangle matches the enlarged
+    # logo bounds in the tracked icon_1024.png (10px tile margins, bbox
+    # (110,270)-(913,754)).
     mark_clip = Image.new("L", master.size, 0)
     mark_draw = ImageDraw.Draw(mark_clip)
-    mark_draw.rectangle((120, 115, 850, 800), fill=255)
-    mark_draw.rectangle((120, 115, 250, 250), fill=0)
+    mark_draw.rectangle((110, 270, 913, 754), fill=255)
     tray_alpha = ImageChops.multiply(tray_alpha, mark_clip)
     tray_icon_mac = Image.new("RGBA", master.size, (0, 0, 0, 0))
     tray_icon_mac.putalpha(tray_alpha)
