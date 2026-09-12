@@ -565,7 +565,7 @@ export const api = {
   deleteExpert: (id: string) => invoke<boolean>(IPC.invoke.expertDelete, { id }),
   toggleExpert: (id: string, enabled: boolean) =>
     invoke<boolean>(IPC.invoke.expertToggle, { id, enabled }),
-  /** Starts an independent expert session; the card lands in `sessionId`. */
+  /** Dispatches an expert into a NEW foreground session and returns it. */
   invokeExpert: (input: { sessionId?: string; expertId: string; task: string }) =>
     invoke<{ sessionId: string }>(IPC.invoke.expertInvoke, input),
   listExpertTeams: () => invoke<ExpertTeamListItem[]>(IPC.invoke.expertTeamsList),
@@ -579,9 +579,9 @@ export const api = {
     invoke<{ team: Record<string, unknown> }>(IPC.invoke.expertTeamSave, input),
   deleteExpertTeam: (id: string) =>
     invoke<boolean>(IPC.invoke.expertTeamDelete, { id }),
-  /** Starts a star-topology team run; the delivery card lands in `sessionId`. */
+  /** Runs the team in a NEW foreground session; returns runId + session. */
   invokeExpertTeam: (input: { sessionId?: string; teamId: string; task: string }) =>
-    invoke<{ runId: string }>(IPC.invoke.expertTeamInvoke, input),
+    invoke<{ runId: string; sessionId: string }>(IPC.invoke.expertTeamInvoke, input),
   /** Re-run one failed member (by plan subtask index), then re-integrate. */
   retryTeamMember: (input: { runId: string; index: number }) =>
     invoke<boolean>(IPC.invoke.expertTeamRetryMember, input),

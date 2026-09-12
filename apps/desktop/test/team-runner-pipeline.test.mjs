@@ -37,6 +37,10 @@ const TEAM = {
 function makeRunner({ driver, team, unknownExperts = [] }) {
   const broadcasts = [];
   const cards = [];
+  const cardTargets = [];
+  const createdSessions = [];
+  const registered = {};
+  let sessionSeq = 0;
   const runner = new TeamRunner({
     getLogger: () => ({ app() {} }),
     getDriver: () => driver,
@@ -47,12 +51,25 @@ function makeRunner({ driver, team, unknownExperts = [] }) {
       return { name: id, personaPrompt: `你是${id}`, skills: [], mcpServers: [] };
     },
     broadcast: (event) => broadcasts.push(event),
-    postSessionCard: async (_sessionId, message) => {
+    postSessionCard: async (sessionId, message) => {
+      cardTargets.push(sessionId);
       cards.push(message);
     },
     getProjectPath: async () => undefined,
+    // Foreground polish: team runs stream into a freshly created session.
+    createSession: async (input) => {
+      sessionSeq += 1;
+      const id = `fg-${sessionSeq}`;
+      createdSessions.push({ id, ...input });
+      return { id };
+    },
+    foregroundRegistry: {
+      register: (sessionId, record) => {
+        registered[sessionId] = record;
+      },
+    },
   });
-  return { runner, broadcasts, cards };
+  return { runner, broadcasts, cards, cardTargets, createdSessions, registered };
 }
 
 /** Wait until the run reaches done/failed (broadcasts settle). */
@@ -80,7 +97,7 @@ test("extractJson tolerates fenced and embedded JSON", () => {
 
 test("pipeline stages run in order with summaries handed downstream", async () => {
   const { started, driver } = scriptDriver(["分析结论A", "基于A的测算B", "基于B的评审C"]);
-  const { runner, broadcasts, cards } = makeRunner({
+  const { runner, broadcasts, cards, cardTargets } = makeRunner({
     driver,
     team: {
       pipeline: "分析|测算|评审",
@@ -103,8 +120,17 @@ test("pipeline stages run in order with summaries handed downstream", async () =
   assert.match(started[1].prompt, /分析结论A/);
   assert.match(started[2].prompt, /基于A的测算B/);
   assert.match(started[0].prompt, /\[管线阶段 1\/3：分析\]/);
-  assert.equal(cards.length, 1);
-  assert.match(cards[0].content, /管线：分析 → 测算 → 评审/);
+  assert.equal(cards.length, 4);
+  // Foreground polish: every milestone posts into the NEW session (fg-1), not
+  // the dispatching one; kickoff → 2 stage notes (last stage is the delivery)
+  // → final pipeline delivery card.
+  for (const target of cardTargets) {
+    assert.equal(target, "fg-1");
+  }
+  assert.match(cards[0].content, /已受理/);
+  assert.match(cards[1].content, /阶段完成 1\/3：分析/);
+  assert.match(cards[2].content, /阶段完成 2\/3：测算/);
+  assert.match(cards[3].content, /管线：分析 → 测算 → 评审/);
 });
 
 test("goal mode repeats until [LOOP:DONE] or maxRounds cap", async () => {

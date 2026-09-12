@@ -1,20 +1,21 @@
 /**
- * ExpertService (module 01, plans T51.2/T51.5).
+ * ExpertService (module 01, plans T51.2/T51.5; foreground polish 2026-09).
  *
- * Experts are independent agents: invoking one starts a background expert
- * session through the HeadlessAgentDriver — never a subagent spawn — and the
- * result is posted back into the requesting session as a completion card.
- * Preset experts (`builtin-experts.ts`) merge with the user's
- * `~/.agents/experts` documents at list time; a personal document with the
- * same name shadows the preset.
+ * Experts are independent agents: invoking one creates a REAL conversation
+ * session (project-scoped when dispatched from one) and runs the first turn
+ * on it through the HeadlessAgentDriver — never a subagent spawn. The turn
+ * streams into the session like any chat, and the persona binding is
+ * registered with ForegroundSessionRegistry so later user turns keep the
+ * expert persona. Preset experts (`builtin-experts.ts`) merge with the
+ * user's `~/.agents/experts` documents at list time; a personal document
+ * with the same name shadows the preset.
  */
-
-import { randomUUID } from "node:crypto";
 
 import {
   BUILTIN_EXPERT_DOCUMENTS,
   BUILTIN_TEAM_DOCUMENTS,
 } from "./builtin-experts";
+import type { ForegroundSessionRegistry } from "./expert-foreground";
 import type {
   ExpertInvocation,
   ExpertTeamProgress,
@@ -92,6 +93,8 @@ export interface ExpertServiceDeps {
     status: "complete";
     kind?: string;
   }): Promise<void>;
+  /** Persona bindings for foreground expert/team sessions (module 01 polish). */
+  foregroundRegistry: ForegroundSessionRegistry;
 }
 
 interface HostExpertRecord {
@@ -169,6 +172,11 @@ export class ExpertService {
 
   constructor(deps: ExpertServiceDeps) {
     this.deps = deps;
+  }
+
+  /** Persona prompt for a foreground expert/team session (agentPrompt hook). */
+  foregroundPersona(sessionId: string): string | undefined {
+    return this.deps.foregroundRegistry.lookup(sessionId);
   }
 
   /** Org delivery (T51.8): packs ride the bootstrap cache — in-memory only,
@@ -447,8 +455,11 @@ export class ExpertService {
   }
 
   /**
-   * @专家指派 (FR-E-16): start a background INDEPENDENT expert session and
-   * deliver the result card into the requesting session when it settles.
+   * @专家指派 (FR-E-16, foreground polish): create a REAL conversation session
+   * (project-scoped when dispatched from one), run the first turn on it via
+   * the durable driver — streaming into the transcript like any chat — and
+   * register the persona so later turns in that session keep being the
+   * expert. No completion card is posted anywhere; the session IS the result.
    */
   async invoke(request: ExpertInvocation): Promise<{ sessionId: string }> {
     const driver = this.deps.getDriver();
@@ -466,13 +477,26 @@ export class ExpertService {
       projectPath = parent?.session?.projectPath;
     }
 
+    const created = await this.host().call<{
+      session?: { id?: string };
+    }>("session.create", {
+      title: `${persona.name} · ${request.task.slice(0, 24)}`,
+      mode: "agent",
+      ...(projectPath ? { projectPath } : {}),
+      ...(persona.model ? { modelId: persona.model } : {}),
+      ...(persona.thinkingLevel ? { thinkingLevel: persona.thinkingLevel } : {}),
+    });
+    const sessionId = String(created.session?.id ?? "").trim();
+    if (!sessionId) throw new Error("session.create returned no session");
+    this.deps.foregroundRegistry.register(sessionId, {
+      kind: "expert",
+      id: request.expertId,
+      name: persona.name,
+      personaPrompt: persona.personaPrompt,
+    });
+
     const run = await driver.start({
-      newSession: {
-        title: `${persona.name} · ${request.task.slice(0, 24)}`,
-        projectPath,
-        modelId: persona.model,
-        thinkingLevel: persona.thinkingLevel,
-      },
+      sessionId,
       prompt: request.task,
       personaPrompt: persona.personaPrompt,
       timeoutMs: HOST_RPC_TIMEOUT_MS,
@@ -480,28 +504,9 @@ export class ExpertService {
 
     void run.completion
       .then(async (result) => {
-        if (request.sessionId) {
-          const summary =
-            result.finalText.trim() || "（专家没有返回文本内容）";
-          await this.deps
-            .postSessionCard(request.sessionId, {
-              id: `expert-card-${randomUUID()}`,
-              role: "assistant",
-              content: `【@${persona.name} · ${result.status === "completed" ? "已完成" : result.status === "aborted" ? "已中止" : "失败"}】\n\n${summary}\n\n—— 完整过程见专家会话「${persona.name} · ${request.task.slice(0, 24)}」`,
-              createdAt: new Date().toISOString(),
-              status: "complete",
-              kind: "expert-card",
-            })
-            .catch((error) =>
-              this.logger().app("expert", "warn", "post expert card failed", {
-                sessionId: request.sessionId,
-                data: String(error),
-              }),
-            );
-        }
         this.deps.broadcast({
           runId: run.sessionId,
-          sessionId: request.sessionId,
+          sessionId,
           type: "member",
           payload: {
             expert: persona.name,
@@ -512,12 +517,12 @@ export class ExpertService {
       })
       .catch((error) => {
         this.logger().app("expert", "warn", "expert invoke failed", {
-          sessionId: request.sessionId,
+          sessionId,
           data: String(error),
         });
         this.deps.broadcast({
           runId: run.sessionId,
-          sessionId: request.sessionId,
+          sessionId,
           type: "member",
           payload: { expert: persona.name, status: "error" },
         });
@@ -525,11 +530,11 @@ export class ExpertService {
 
     this.deps.broadcast({
       runId: run.sessionId,
-      sessionId: request.sessionId,
+      sessionId,
       type: "member",
       payload: { expert: persona.name, status: "running" },
     });
-    return { sessionId: run.sessionId };
+    return { sessionId };
   }
 }
 

@@ -2551,3 +2551,160 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* --- Expert editor polish (module 01): required marks, error states, MCP
+   server picker, and the skills multi-select dropdown. --- */
+
+.ext-field-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ext-field-label .required-mark {
+  color: var(--error);
+  font-size: 14px;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+
+.ext-field-label.is-error {
+  color: var(--error);
+}
+
+.ext-field-label.is-error .required-mark {
+  color: var(--error);
+}
+
+.ext-tool-opt-tag {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* Skills multi-select dropdown (AgentMultiSelect). */
+.agent-multi {
+  position: relative;
+}
+
+.agent-multi-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-multi-trigger:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.agent-multi-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.agent-multi-placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.agent-multi-count {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.agent-multi-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+}
+
+.agent-multi-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-multi-search input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary, transparent);
+  font-size: 12px;
+}
+
+.agent-multi-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.agent-multi-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.agent-multi-opt:hover {
+  background: var(--bg-hover);
+}
+
+.agent-multi-opt.is-on {
+  background: var(--bg-hover);
+}
+
+.agent-multi-opt code {
+  flex-shrink: 0;
+}
+
+.agent-multi-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.agent-multi-empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
