@@ -1,25 +1,65 @@
 /**
- * Slides L1 — bundled first-party plugin (module 06, plan T56.1).
+ * Slides — bundled first-party plugin (module 06).
  *
- * Two agent tools: `slides_plan` normalizes/validates the outline the AGENT
- * drafted from the conversation (pure data shaping — no second model call),
- * `slides_export` writes the confirmed outline as an editable .pptx next to
- * the workspace. All heavy logic lives in ./lib/slides.js so it stays
- * testable without a plugin host.
+ * L1 (fast engine): `slides_plan` normalizes/validates the outline the AGENT
+ * drafted from the conversation, `slides_export` writes the confirmed outline
+ * as an editable .pptx via the vendored pptxgenjs. All heavy logic lives in
+ * ./lib/slides.js so it stays testable without a plugin host.
+ *
+ * L2 (PPT-Master, vendored skill — DEVPLAN Phase A): the skill corpus guides
+ * the agent (skills/ppt-master.md thin shell + upstream body); these tools
+ * expose only what the agent cannot do itself:
+ *   - ppt_master_status: five-state runtime inspection + the {skillDir,
+ *     pythonPath} pair the skill preamble requires before any Bash call
+ *   - ppt_master_setup: venv bootstrap as a background job (uv preferred,
+ *     AGPL-guarded MIT-only subset) — setup exceeds the 110s tool budget
+ *   - ppt_job_status: poll background jobs
+ *   - ppt_read_doc: read-only whitelist bridge into the vendored corpus
+ *     (the agent's Read sandbox cannot reach the app bundle)
+ * Phase B adds ppt_script (whitelisted script runner with hard confirm
+ * gates) and the stage confirmation tools; the old ppt_quality/finalize/
+ * export wrappers are gone — their CLI arg contracts were wrong and
+ * ppt_script replaces them with argparse-faithful schemas.
  */
 
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
 
 import { exportDeckToBuffer, normalizeOutline, sanitizeFileName } from "./lib/slides.js";
 import {
   detectRuntime,
   ensureRuntime,
-  runVendoredScript,
+  findForbiddenDistributions,
+  freezeDistributions,
+  resolveRuntimeRoot,
+  skillRoot,
+  venvPythonPath,
 } from "./lib/ppt-runtime.js";
+import { createJobManager } from "./lib/ppt-jobs.js";
+import { listDocDir, MAX_DOC_BYTES, resolveDocEntry } from "./lib/ppt-read-doc.js";
 
 let toolsRegistered = false;
-let l2ToolsRegistered = false;
+let jobManager = null;
+let activeSetupJobId = null;
+
+function getPluginDir() {
+  // The plugin host loads main.js from <pluginDir>/main.js.
+  return new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+}
+
+async function resolveDataDir() {
+  try {
+    const dataPath = await pi.plugin.getDataPath();
+    if (dataPath) return dataPath;
+  } catch {
+    /* host without data dir — fall through to legacy home */
+  }
+  return null;
+}
+
+function runtimeDeps(extra = {}) {
+  return { pluginDir: getPluginDir(), dataDir: globalThis.__pptDataDir, ...extra };
+}
 
 async function resolveOutputPath(fileName) {
   let root = "";
@@ -36,10 +76,21 @@ async function resolveOutputPath(fileName) {
     : join(process.cwd(), folder, fileName);
 }
 
-export function onLoad() {
+export async function onLoad() {
   if (toolsRegistered) return;
   toolsRegistered = true;
 
+  // Canonical venv home under the plugin data dir (Pi storage isolation).
+  globalThis.__pptDataDir = await resolveDataDir();
+  const deps = () => runtimeDeps();
+  jobManager = createJobManager({ dataDir: globalThis.__pptDataDir, logger: (line) => pi.log?.("info", line) });
+  jobManager.recover();
+
+  registerL1Tools();
+  registerMasterTools();
+}
+
+function registerL1Tools() {
   void pi.agent.registerTool({
     name: "slides_plan",
     description:
@@ -139,162 +190,155 @@ export function onLoad() {
   });
 }
 
-// ───────────────────────── L2: PPT-Master (vendored skill) ─────────────────────────
-// The vendored skill corpus guides the agent; these tools expose its
-// deterministic Python tail (quality gate → finalize → export) with the
-// isolated venv. PyMuPDF/pandoc routes are DISABLED (AGPL/GPL guard).
+// ───────── L2: PPT-Master runtime channel (vendored skill, Phase A) ─────────
 
-const L2_TOOLS = [
-  {
+function registerMasterTools() {
+  void pi.agent.registerTool({
     name: "ppt_master_status",
     description:
-      "Report the PPT-Master (L2 精制引擎) Python runtime status: ready / venv-missing / guard-failed with diagnostics. Takes no parameters. Call before L2 generation; if not ready, tell the user to run ppt_master_setup or fall back to slides_export (L1).",
+      "Check the PPT-Master (L2 精制引擎, vendored ppt-master) Python runtime and get the paths needed to run it. Takes no parameters. Returns { stage: ready|venv-missing|guard-failed|deps-missing, skillDir, pythonPath, doctor }. ALWAYS call this first before any PPT-Master work: use the returned skillDir/pythonPath for every subsequent script invocation — never guess or search for paths. If not ready, follow doctor (usually: call ppt_master_setup, or fall back to slides_export).",
     risk: "low",
     schema: { type: "object", properties: {} },
     execute: async () => {
-      const status = await detectRuntime({ pluginDir: getPluginDir() });
+      const status = await detectRuntime(deps());
+      const skillDir = skillRoot(getPluginDir());
+      const venvPython = venvPythonPath(resolveRuntimeRoot(deps()));
+      const payload = {
+        ...status,
+        skillDir,
+        pythonPath: status.pythonPath ?? venvPython,
+        hint:
+          status.stage === "ready"
+            ? "已就绪：按 ppt-master 技能规程用该 pythonPath 执行 ${skillDir}/scripts 下的脚本"
+            : "未就绪：按 doctor 提示处理；用户着急时可先用 slides_export（L1 快速引擎）保底",
+      };
       return {
-        content: JSON.stringify(status, null, 2),
-        details: status,
+        content: `PPT-Master 运行时：${payload.stage}\n${payload.doctor || ""}\n${payload.hint}\n\`\`\`json\n${JSON.stringify({ stage: payload.stage, skillDir: payload.skillDir, pythonPath: payload.pythonPath }, null, 2)}\n\`\`\``,
+        details: payload,
       };
     },
-  },
-  {
+  });
+
+  void pi.agent.registerTool({
     name: "ppt_master_setup",
     description:
-      "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard). Long-running; call only when the user asked to set up the L2 engine or approved the install prompt.",
+      "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard). Runs as a BACKGROUND JOB (takes minutes): returns { jobId } immediately — poll it with ppt_job_status until succeeded, then re-run ppt_master_status. Call only when the user asked to set up the L2 engine or approved the install; if a setup job is already running its jobId is returned instead of starting a second one.",
     risk: "medium",
-    schema: {
-      "type": "object",
-      "properties": {},
-    },
+    schema: { type: "object", properties: {} },
     execute: async () => {
-      const status = await ensureRuntime({ pluginDir: getPluginDir() }, (line) =>
-        pi.log?.("info", line),
-      );
+      if (activeSetupJobId) {
+        const existing = jobManager.get(activeSetupJobId);
+        if (existing && !["succeeded", "failed", "cancelled", "interrupted"].includes(existing.status)) {
+          return {
+            content: `已有安装作业进行中：${activeSetupJobId}（${existing.status}）。用 ppt_job_status 轮询即可，无需重复安装。`,
+            details: { jobId: activeSetupJobId, reused: true },
+          };
+        }
+      }
+      const settings = await pi.plugin.getSettings().catch(() => ({}));
+      const pipMirror = settings?.pipMirror && settings.pipMirror !== "default" ? settings.pipMirror : undefined;
+      const submitted = jobManager.submit({
+        kind: "ppt-setup",
+        run: async (ctx) => {
+          const status = await ensureRuntime({ ...deps(), pipMirror, signal: ctx.signal }, ctx.log);
+          if (status.stage === "ready") {
+            const frozen = await freezeDistributions(deps()).catch(() => null);
+            const forbidden = findForbiddenDistributions(frozen);
+            if (forbidden.length) {
+              throw new Error(`AGPL/GPL 黑名单依赖出现在 venv 中：${forbidden.join(", ")}——请删除 venv 重装并检查镜像源`);
+            }
+            return { stage: status.stage, pythonPath: status.pythonPath, forbidden: [] };
+          }
+          throw new Error(`${status.stage}: ${status.diag ?? ""}`);
+        },
+      });
+      activeSetupJobId = submitted.id;
       return {
-        content:
-          status.stage === "ready"
-            ? `L2 运行环境就绪（${status.pythonPath}）`
-            : `L2 运行环境未就绪（${status.stage}）：${status.diag ?? ""}`,
-        details: status,
+        content: `安装作业已启动：${submitted.id}（后台执行，需数分钟）。请用 ppt_job_status(jobId="${submitted.id}") 轮询；成功后再用 ppt_master_status 确认 ready。`,
+        details: submitted,
       };
     },
-  },
-  {
-    name: "ppt_quality",
+  });
+
+  void pi.agent.registerTool({
+    name: "ppt_job_status",
     description:
-      "Run the vendored SVG quality checker over a deck workspace (blocking gate before export). Input: { deckDir, page? } where deckDir contains the svg_output/ pages (P01.svg…).",
+      "Poll a PPT plugin background job (e.g. the ppt_master_setup install). Input: { jobId } for one job, or {} for the recent list. Returns status: running | succeeded | failed | cancelled | interrupted, plus the log tail and error when present. Keep polling (suggest waiting ~20s between calls) while a job is running.",
     risk: "low",
     schema: {
       type: "object",
       properties: {
-        deckDir: { type: "string", description: "Absolute deck workspace directory" },
+        jobId: { type: "string", description: "Job id returned by ppt_master_setup" },
       },
-      required: ["deckDir"],
     },
-    execute: async (args) => runL2Script("scripts/svg_quality_checker.py", args, 5 * 60_000),
-  },
-  {
-    name: "ppt_finalize",
+    execute: async (args) => {
+      const jobId = String(args?.jobId ?? "").trim();
+      if (jobId) {
+        const job = jobManager.get(jobId);
+        if (!job) return { error: `作业不存在：${jobId}` };
+        const tail = (job.logTail ?? []).slice(-10);
+        return {
+          content: `作业 ${job.id}：${job.status}${job.error ? `\n错误：${job.error}` : ""}${
+            tail.length ? `\n最近日志：\n- ${tail.join("\n- ")}` : ""
+          }`,
+          details: job,
+        };
+      }
+      const all = jobManager.list();
+      return {
+        content: all.length
+          ? `最近作业：\n${all.map((job) => `- ${job.id}：${job.status}`).join("\n")}`
+          : "尚无后台作业。",
+        details: { jobs: all },
+      };
+    },
+  });
+
+  void pi.agent.registerTool({
+    name: "ppt_read_doc",
     description:
-      "Finalize a generated deck: normalize SVGs into svg_final/ and split the speaker-notes markdown. Input: { deckDir, deckTitle? }.",
+      "Read the vendored PPT-Master skill corpus (workflows / references / scripts docs / template indexes) that the ppt-master skill routes to. Input: { path } — corpus-relative, e.g. \"workflows/routing.md\", \"references/strategist.md\"; a directory path lists its readable entries. Text only, ≤1MiB per call. Use this instead of Bash cat/Read — the corpus lives outside the workspace sandbox.",
     risk: "low",
     schema: {
       type: "object",
       properties: {
-        deckDir: { type: "string" },
-        deckTitle: { type: "string" },
+        path: { type: "string", description: "Corpus-relative path or directory" },
       },
-      required: ["deckDir"],
+      required: ["path"],
     },
     execute: async (args) => {
-      const first = await runL2Script("scripts/finalize_svg.py", { deckDir: args?.deckDir }, 10 * 60_000);
-      if (first.error) return first;
-      const second = await runL2Script("scripts/total_md_split.py", { deckDir: args?.deckDir, deckTitle: args?.deckTitle }, 5 * 60_000);
-      return second.error ? second : { content: `${first.content}\n${second.content}` };
+      const rootDir = skillRoot(getPluginDir());
+      const rel = String(args?.path ?? "");
+      const entry = resolveDocEntry(rootDir, rel);
+      if (!entry.ok) return { error: entry.reason };
+      try {
+        if (entry.kind === "dir") {
+          const listing = listDocDir(rootDir, entry.absPath, rel);
+          return {
+            content: `${listing.path}（目录，${listing.entries.length} 项）\n${listing.entries.join("\n")}\n\n${listing.hint}`,
+            details: listing,
+          };
+        }
+        const buffer = await readFile(entry.absPath);
+        const truncated = buffer.length > MAX_DOC_BYTES;
+        const text = buffer.subarray(0, MAX_DOC_BYTES).toString("utf8");
+        return {
+          content: truncated
+            ? `${text}\n\n[截断：文件超过 1MiB，仅显示前 1MiB]`
+            : text,
+          details: { path: rel, bytes: buffer.length, truncated },
+        };
+      } catch (error) {
+        return { error: error?.message || String(error) };
+      }
     },
-  },
-  {
-    name: "ppt_export",
-    description:
-      "Convert the finalized SVG deck into a native editable .pptx via the vendored converter (svg_to_pptx.py) and run its postflight report. PDF and PyMuPDF routes are disabled. Input: { deckDir, fileName? }. Call ppt_quality first; the checker must pass.",
-    risk: "medium",
-    schema: {
-      type: "object",
-      properties: {
-        deckDir: { type: "string" },
-        fileName: { type: "string" },
-      },
-      required: ["deckDir"],
-    },
-    execute: async (args) => {
-      const outputName = `${sanitizeFileName(args?.fileName || "deck")}.pptx`;
-      const outputPath = join(await resolveSlidesOutputDir(), outputName);
-      const result = await runL2Script(
-        "scripts/svg_to_pptx.py",
-        { deckDir: args?.deckDir, extra: ["-o", outputPath, "-s", String(args?.deckDir ?? "."), "-f", "ppt169"] },
-        15 * 60_000,
-      );
-      if (result.error) return result;
-      return {
-        content: `${result.content}\n已导出可编辑 PPTX：${outputPath}`,
-        details: { path: outputPath },
-      };
-    },
-  },
-];
-
-function getPluginDir() {
-  // The plugin host loads main.js from <pluginDir>/main.js.
-  return new URL(".", import.meta.url).pathname.replace(/\/$/, "");
-}
-
-async function resolveSlidesOutputDir() {
-  let root = "";
-  try {
-    const workspace = await pi.workspace.get();
-    root = String(workspace?.path ?? "");
-  } catch {
-    root = "";
-  }
-  const settings = await pi.plugin.getSettings().catch(() => ({}));
-  const folder = String(settings?.outputDir ?? "slides").replace(/^\/+|\/+$/g, "") || "slides";
-  return root ? join(root, folder) : join(process.cwd(), folder);
-}
-
-async function runL2Script(scriptRelPath, args, timeoutMs) {
-  const deckDir = String(args?.deckDir ?? "").trim();
-  if (!deckDir) return { error: "deckDir is required" };
-  const scriptArgs = args?.extra ?? [];
-  try {
-    const result = await runVendoredScript(
-      { pluginDir: getPluginDir() },
-      scriptRelPath,
-      scriptArgs,
-      { cwd: deckDir, timeoutMs },
-    );
-    const text = `${result.stdout}${result.stderr}`;
-    if (result.code !== 0) {
-      return { error: `${scriptRelPath} 退出码 ${result.code}：${text.slice(-1500)}` };
-    }
-    return { content: text.slice(-4000) || "ok" };
-  } catch (error) {
-    return { error: error?.message || String(error) };
-  }
-}
-
-function registerL2Tools() {
-  if (l2ToolsRegistered) return;
-  for (const tool of L2_TOOLS) {
-    void pi.agent.registerTool(tool);
-  }
-  l2ToolsRegistered = true;
+  });
 }
 
 export function onUnload() {
   toolsRegistered = false;
-  l2ToolsRegistered = false;
+  jobManager = null;
+  activeSetupJobId = null;
 }
 
 // Exposed for host-side smoke checks.

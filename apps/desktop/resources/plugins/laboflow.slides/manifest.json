@@ -1,78 +1,87 @@
 {
   "schemaVersion": 1,
   "id": "laboflow.slides",
-  "name": "Slides (L1)",
-  "version": "1.0.0",
-  "description": "Consulting-grade slide drafting: outline planning and editable PPTX export (pptxgenjs baseline). The fast engine of the PPT assistant.",
+  "name": "Slides",
+  "version": "2.0.0",
+  "description": "PPT assistant: fast editable decks (pptxgenjs baseline) plus the vendored PPT-Master refinement pipeline (native DrawingML, consulting-grade), with an isolated guarded Python runtime.",
   "author": "LaboFlow",
   "main": "main.js",
   "contributes": {
     "agentTools": [
       {
         "name": "slides_plan",
-        "description": "Draft a structured slide-deck outline from a topic or source notes. Returns a normalized outline (pages with layout, title, bullets/notes) for user review BEFORE any deck is generated. Input: { topic, audience?, pageCount?, pages? } where pages may carry draft page titles/points from the conversation.",
+        "description": "Normalize and validate a slide-deck outline you drafted from the conversation (fast L1 engine). Returns the canonical outline — show it to the user for review BEFORE calling slides_export. Input: { topic, outline: { deckTitle, pages } }.",
         "risk": "low",
         "schema": {
           "type": "object",
           "properties": {
             "topic": { "type": "string", "description": "Deck subject and core message" },
-            "audience": { "type": "string", "description": "Who will see this deck (e.g. client C-suite)" },
-            "pageCount": { "type": "number", "description": "Target page count (default 10)" },
-            "outline": { "type": "object", "description": "Optional pre-drafted outline to normalize instead of drafting" }
+            "outline": { "type": "object", "description": "Your drafted outline: { deckTitle, pages: [...] }" }
           },
-          "required": ["topic"]
+          "required": ["topic", "outline"]
         }
       },
       {
         "name": "slides_export",
-        "description": "Export a confirmed outline as an editable .pptx file (PowerPoint/WPS/LibreOffice compatible; every element is a native text box or table). Input: { deckTitle, pages: [{ layout, title, bullets?, data?, quote?, speakerNotes? }], theme? }. Returns the written file path.",
+        "description": "Export a confirmed outline as an editable .pptx (fast L1 engine: native text boxes/tables). Input: { deckTitle, pages: [{ layout, title, bullets?, data?, quote?, speakerNotes? }], theme? }. Call only after the user confirmed the outline.",
         "risk": "medium",
         "schema": {
           "type": "object",
           "properties": {
             "deckTitle": { "type": "string" },
-            "fileName": { "type": "string", "description": "Output file name without extension (default: sanitized deckTitle)" },
+            "fileName": { "type": "string" },
             "theme": {
               "type": "object",
               "properties": {
-                "accent": { "type": "string", "description": "Accent hex color, default 1F4E79 (consulting blue)" },
-                "font": { "type": "string", "description": "Font family, default PingFang SC / Microsoft YaHei stack" }
+                "accent": { "type": "string" },
+                "font": { "type": "string" }
               }
             },
-            "pages": {
-              "type": "array",
-              "description": "Confirmed outline pages, in order",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "layout": { "type": "string", "enum": ["title", "bullets", "data", "matrix", "compare", "timeline", "quote", "end"] },
-                  "title": { "type": "string", "description": "Action title — a full sentence judgment, not a noun phrase" },
-                  "subtitle": { "type": "string" },
-                  "bullets": { "type": "array", "items": { "type": "string" } },
-                  "columns": { "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string" }, "rows": { "type": "array", "items": { "type": "string" } } } } },
-                  "matrix": { "type": "array", "items": { "type": "object", "properties": { "quadrant": { "type": "string" }, "points": { "type": "array", "items": { "type": "string" } } } } },
-                  "milestones": { "type": "array", "items": { "type": "object", "properties": { "when": { "type": "string" }, "what": { "type": "string" } } } },
-                  "quote": { "type": "string" },
-                  "attribution": { "type": "string" },
-                  "data": { "type": "object", "description": "For layout=data: { metrics: [{label, value, note?}] }" },
-                  "speakerNotes": { "type": "string" }
-                },
-                "required": ["layout", "title"]
-              }
-            }
+            "pages": { "type": "array", "items": { "type": "object", "properties": { "layout": { "type": "string" }, "title": { "type": "string" } } } }
           },
           "required": ["deckTitle", "pages"]
         }
+      },
+      {
+        "name": "ppt_master_status",
+        "description": "Check the PPT-Master (L2 精制引擎, vendored ppt-master) Python runtime and get { stage, skillDir, pythonPath, doctor }. ALWAYS call first before PPT-Master work; use the returned paths for every script call — never guess.",
+        "risk": "low",
+        "schema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "ppt_master_setup",
+        "description": "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard) as a background job. Returns { jobId } — poll with ppt_job_status. Call only when the user asked for L2 setup or approved it.",
+        "risk": "medium",
+        "schema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "ppt_job_status",
+        "description": "Poll a PPT plugin background job (setup installs etc). Input { jobId } or {} for the recent list. Keep polling while status is running.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": { "jobId": { "type": "string" } }
+        }
+      },
+      {
+        "name": "ppt_read_doc",
+        "description": "Read the vendored PPT-Master skill corpus the ppt-master skill routes to (workflows/references/docs/template indexes). Input { path } corpus-relative; directories list their readable entries. Text only, ≤1MiB.",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"]
+        }
       }
     ],
-    "skills": ["./skills/slides.md"],
+    "skills": ["./skills/slides.md", "./skills/ppt-master.md"],
     "settings": [
       {
         "key": "accentColor",
         "type": "string",
         "default": "1F4E79",
         "title": "Accent color (hex)",
-        "description": "Theme accent for exported decks"
+        "description": "Theme accent for exported decks (L1)"
       },
       {
         "key": "outputDir",
@@ -80,6 +89,14 @@
         "default": "slides",
         "title": "Output folder (workspace-relative)",
         "description": "Where .pptx files are written inside the workspace"
+      },
+      {
+        "key": "pipMirror",
+        "type": "select",
+        "default": "default",
+        "enum": ["default", "https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.aliyun.com/pypi/simple/"],
+        "title": "Python package mirror",
+        "description": "Index for PPT-Master runtime installs (pip/uv)"
       }
     ]
   },
