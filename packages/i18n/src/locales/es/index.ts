@@ -233,6 +233,8 @@ export const es = {
     "enhancePromptTooltip": "Optimizar prompt con IA",
     "contextGroup": "Contextos",
     "fileGroup": "Archivos",
+    "expertGroup": "Expertos",
+    "teamGroup": "Equipos de expertos",
     "enhancingPrompt": "Mejorando...",
     "undoEnhancement": "Deshacer mejora",
     "enhancementFailed": "Error en la mejora de solicitud",
@@ -1365,6 +1367,7 @@ export const es = {
     phaseDone: "Completado",
     phaseFailed: "Fallido",
     retryMember: "Reintentar",
+    "stageLabel": "Etapa {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

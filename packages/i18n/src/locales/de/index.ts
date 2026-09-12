@@ -233,6 +233,8 @@ export const de = {
     "enhancePromptTooltip": "Prompt mit KI optimieren",
     "contextGroup": "Kontexte",
     "fileGroup": "Dateien",
+    "expertGroup": "Experten",
+    "teamGroup": "Expertenteams",
     "enhancingPrompt": "Verbesserung…",
     "undoEnhancement": "Verbesserung rückgängig machen",
     "enhancementFailed": "Eingabeaufforderung zur Verbesserung fehlgeschlagen",
@@ -1365,6 +1367,7 @@ export const de = {
     phaseDone: "Abgeschlossen",
     phaseFailed: "Fehlgeschlagen",
     retryMember: "Erneut versuchen",
+    "stageLabel": "Stufe {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} Tokens",
     tokensUsed: "{{used}} Tokens",
   

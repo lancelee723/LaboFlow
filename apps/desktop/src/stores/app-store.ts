@@ -159,6 +159,7 @@ import {
   type QueuedPrompt,
   type QueuedPrompts,
 } from "../lib/queued-prompts";
+import { buildExpertDispatchTask } from "../lib/expert-dispatch";
 import { settleBootstrapRequests } from "../lib/bootstrap-result";
 import type { SubagentPanelSelection } from "../lib/subagent-panel";
 
@@ -2175,16 +2176,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!sessionId) throw new Error("No active session");
     if (get().pendingPlans[sessionId]?.status === "pending") return false;
     // @专家指派 (module 01, T51.5): a prompt addressed to `@专家名` starts an
-    // independent expert session instead of the normal agent turn. The expert
-    // posts its completion card back into this session asynchronously.
+    // @专家/@专家团队指派 (module 01, T51.5 + refinement): a prompt addressed
+    // to `@专家名`/`@团队名` starts an independent expert (or team) run
+    // instead of the normal agent turn. The run posts its completion card
+    // back into this session asynchronously. The draft's explicit context
+    // (attached files, referenced-conversation transcripts) travels with the
+    // task; no conversation history is carried implicitly.
     const expertDispatch = await matchExpertMention(content);
     if (expertDispatch) {
+      const task = buildExpertDispatchTask(expertDispatch.task, draft);
       try {
-        await api.invokeExpert({
-          sessionId,
-          expertId: expertDispatch.expertId,
-          task: expertDispatch.task,
-        });
+        if (expertDispatch.kind === "team") {
+          await api.invokeExpertTeam({
+            sessionId,
+            teamId: expertDispatch.id,
+            task,
+          });
+        } else {
+          await api.invokeExpert({
+            sessionId,
+            expertId: expertDispatch.id,
+            task,
+          });
+        }
       } catch (e) {
         get().showToast(
           e instanceof Error ? e.message : i18n.t("expert.dispatchFailed"),
@@ -4739,21 +4753,28 @@ export async function materializeDraftSession(
 
 const EXPERT_MENTION_CACHE_TTL_MS = 60_000;
 let expertMentionCache: {
-  names: Map<string, string>;
+  experts: Map<string, string>;
+  teams: Map<string, string>;
   fetchedAt: number;
 } | null = null;
 
 export interface ExpertMentionMatch {
-  expertId: string;
+  /** Which registry resolved the mention: an independent expert or a team run. */
+  kind: "expert" | "team";
+  id: string;
   name: string;
   task: string;
 }
 
+// buildExpertDispatchTask (Q2 envelope) lives in lib/expert-dispatch for
+// direct unit testing; imported with the other lib modules above.
+
 /**
- * Resolve a leading `@专家名` against the expert list (fetched at most once
- * per TTL). Returns null when the prompt is not an expert mention — including
- * when the name is unknown — so a regular prompt that merely starts with "@"
- * still reaches the agent untouched.
+ * Resolve a leading `@专家名` (or `@团队名`) against the expert and team
+ * registries (fetched at most once per TTL). Expert names win over
+ * same-named teams. Returns null when the prompt is not an agent mention —
+ * including when the name is unknown — so a regular prompt that merely
+ * starts with "@" still reaches the agent untouched.
  */
 export async function matchExpertMention(
   content: string,
@@ -4775,16 +4796,32 @@ export async function matchExpertMention(
       // Expert center unavailable: treat the prompt as plain text.
       return null;
     }
-    const names = new Map<string, string>();
+    let teams: Awaited<ReturnType<typeof api.listExpertTeams>> = [];
+    try {
+      teams = await api.listExpertTeams();
+    } catch {
+      // Teams are an optional second registry; experts still resolve.
+    }
+    const expertsByName = new Map<string, string>();
     for (const expert of experts) {
       // A disabled expert must not hijack prompts addressed to its name.
-      if (expert.enabled !== false) names.set(expert.name, expert.id);
+      if (expert.enabled !== false) expertsByName.set(expert.name, expert.id);
     }
-    expertMentionCache = { names, fetchedAt: now };
+    const teamsByName = new Map<string, string>();
+    for (const team of teams) {
+      if (team.enabled !== false) teamsByName.set(team.name, team.id);
+    }
+    expertMentionCache = {
+      experts: expertsByName,
+      teams: teamsByName,
+      fetchedAt: now,
+    };
   }
-  const expertId = expertMentionCache.names.get(name);
-  if (!expertId) return null;
-  return { expertId, name, task };
+  const expertId = expertMentionCache.experts.get(name);
+  if (expertId) return { kind: "expert", id: expertId, name, task };
+  const teamId = expertMentionCache.teams.get(name);
+  if (!teamId) return null;
+  return { kind: "team", id: teamId, name, task };
 }
 
 /** Test hook: drop the cached @专家 list so the next mention re-resolves. */

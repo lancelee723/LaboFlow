@@ -233,6 +233,8 @@ export const fr = {
     "enhancePromptTooltip": "Optimiser le prompt par IA",
     "contextGroup": "Contextes",
     "fileGroup": "Fichiers",
+    "expertGroup": "Experts",
+    "teamGroup": "Équipes d'experts",
     "enhancingPrompt": "Amélioration…",
     "undoEnhancement": "Annuler l'amélioration",
     "enhancementFailed": "L'amélioration de l'invite a échoué",
@@ -1365,6 +1367,7 @@ export const fr = {
     phaseDone: "Terminé",
     phaseFailed: "Échec",
     retryMember: "Réessayer",
+    "stageLabel": "Étape {{index}}/{{total}} : {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

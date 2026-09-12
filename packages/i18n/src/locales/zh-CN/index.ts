@@ -237,6 +237,8 @@ export const zhCN = {
     enhancePromptTooltip: "AI一键优化提示词",
     contextGroup: "上下文",
     fileGroup: "文件",
+    expertGroup: "专家",
+    teamGroup: "专家团队",
     enhancingPrompt: "增强中…",
     undoEnhancement: "撤回增强",
     enhancementFailed: "提示词增强失败",
@@ -1376,6 +1378,7 @@ export const zhCN = {
     phaseDone: "已完成",
     phaseFailed: "失败",
     retryMember: "重试",
+    stageLabel: "阶段 {{index}}/{{total}}：{{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

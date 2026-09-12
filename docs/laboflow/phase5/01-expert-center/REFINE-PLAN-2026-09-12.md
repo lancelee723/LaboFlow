@@ -1,6 +1,6 @@
 # 专家中心细化计划 — @ 召唤 / 上下文传递 / 专家团模式建议
 
-日期：2026-09-12　分支：`phase5-dev`　状态：**待用户批准（本文档完成前未改任何代码）**
+日期：2026-09-12　分支：`phase5-dev`　状态：**已批准并实施（branch `agent-team`，见文末实施记录）**
 
 输入：
 1. 用户三点需求：(Q1) 对话框 `@` 快捷键支持召唤专家；(Q2) 专家被召唤时，用户的 Prompt 和上下文（如有）都能传递给专家；(Q3) 专家团走 Loop 模式还是别的模式（如主持人拉群聊、专家互相对话），给出包含架构设计、执行细节、落地步骤、验收标准的完整建议。
@@ -228,3 +228,25 @@
 - 自动携带当前会话历史给专家 → 需要时做显式"引用当前会话"。
 - 专家中心市场层（精选场景/类目 chips/最热排序/使用量统计）→ 属产品化增强，不在本三点需求内，列为后续候选。
 - 模块 03（远程指挥）继续暂缓。
+
+---
+
+## 9. 实施记录（2026-09-12，branch `agent-team`）
+
+提交：
+- `96d73b6e` feat(experts): @ 快捷召唤专家与专家团队（两组分列）+ 任务上下文 envelope（S1+S2+S3）
+- `a7a2febd` feat(team): 会话内团队执行条 + 完成卡成员明细 + 主持人编排模板增强（S4+S5）
+
+验收对账（§3.3 / §4.3 / §5.5）：
+- A-1～A-5 ✅（两组分列按用户修订落地；expert-mention-dispatch 7 例源码断言 + 既有 composer 全套回归）
+- B-1～B-5 ✅（expert-dispatch 3 例单测；无附件行为为纯透传，回归不变）
+- C-1 ✅ TeamRunStrip（成员 chips/阶段+轮次/预算条/失败重试，expertTeamRun 事件流，run 终态自动隐藏）
+- C-2 ✅ team-runner-pipeline 6 例全绿（DONE 裁决/maxRounds 失败不静默/预算语义未动）
+- C-3/C-4 ✅ 模板层落地（快速模式约定、主持人 @成员 叙述、文末「用户下一步建议」3-5 条）
+- C-5 ✅ 执行条内 failed 成员就地重试（api.retryTeamMember）；预算 80/100 未改动
+- C-6 ✅ desktop 1379/1379 · host-core 307/307 · agent-runtime 309/309 · tsc 无错 · i18n 8 locale 构建通过
+
+与计划的偏差（均已按更优机制处理）：
+1. §4.2 原定"引用会话内联 ≤8k 摘录"——实际复用了 @ 引用会话既有管线（composerAttachSession 将转录落为 scratch markdown 文件并成为普通附件 chip），envelope 只列文件路径、专家用工具自行读取。零内联、零重复实现，语义等价且更省。
+2. A4（Composer「+」菜单团队项）原标可选，本次一并实施，与 @ 弹层保持一致。
+3. 新增 `src/lib/expert-dispatch.ts`（envelope 纯函数，可直测）与 `src/components/TeamRunStrip.tsx`（会话内执行条）两个新文件，均在 A3/A6 授权范围内；主进程仅触碰我方 team-runner.ts，host-core/agent-runtime/IPC 白名单零改动。

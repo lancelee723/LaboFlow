@@ -244,6 +244,8 @@ export const tr = {
     enhancePromptTooltip: "Promptu yapay zekâ ile optimize et",
     contextGroup: "Bağlamlar",
     fileGroup: "Dosyalar",
+    expertGroup: "Uzmanlar",
+    teamGroup: "Uzman ekipler",
     enhancingPrompt: "İyileştiriliyor…",
     undoEnhancement: "İyileştirmeyi geri al",
     enhancementFailed: "İstem iyileştirilemedi",
@@ -1386,6 +1388,7 @@ export const tr = {
     phaseDone: "Tamamlandı",
     phaseFailed: "Başarısız",
     retryMember: "Yeniden dene",
+    stageLabel: "Aşama {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   

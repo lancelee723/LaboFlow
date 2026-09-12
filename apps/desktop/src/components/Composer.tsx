@@ -41,7 +41,7 @@ import {
   readComposerDraft,
   writeComposerDraft,
 } from "../lib/composer-draft-cache";
-import { api, type ExpertListItem } from "../lib/api";
+import { api, type ExpertListItem, type ExpertTeamListItem } from "../lib/api";
 import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
@@ -75,6 +75,7 @@ import {
   IconCheck,
   IconBot,
   IconGraduationCap,
+  IconUsers,
   IconSearch,
   IconListChecks,
   IconSparkles,
@@ -687,6 +688,7 @@ export function Composer({
   const [plusSkills, setPlusSkills] = useState<UserSkillRecord[] | null>(null);
   const [plusExpertMode, setPlusExpertMode] = useState(false);
   const [plusExperts, setPlusExperts] = useState<ExpertListItem[] | null>(null);
+  const [plusTeams, setPlusTeams] = useState<ExpertTeamListItem[] | null>(null);
   const plusRef = useRef<HTMLDivElement | null>(null);
 
   /** Recent conversations for the "+" context picker (self excluded). */
@@ -1203,6 +1205,18 @@ export function Composer({
       })
       .catch(() => {
         if (!cancelled) setPlusExperts([]);
+      });
+    // Teams ride along so the "+" menu mirrors the @ picker's two agent
+    // groups; the inserted `@团队名` token dispatches a team run on send.
+    api
+      .listExpertTeams()
+      .then((result) => {
+        if (!cancelled) {
+          setPlusTeams((result ?? []).filter((team) => team.enabled !== false));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPlusTeams([]);
       });
     return () => {
       cancelled = true;
@@ -2451,6 +2465,31 @@ export function Composer({
                             {t("chat.noExpertsYet")}
                           </div>
                         ) : null}
+                        {plusTeams?.length ? (
+                          <div
+                            className="composer-model-group-label"
+                            role="presentation"
+                          >
+                            {t("chat.teamGroup")}
+                          </div>
+                        ) : null}
+                        {(plusTeams ?? []).map((team) => (
+                          <button
+                            key={team.id}
+                            type="button"
+                            role="menuitem"
+                            className="composer-plus-item"
+                            title={team.description || undefined}
+                            onClick={() => {
+                              setPlusMenuOpen(false);
+                              setPlusExpertMode(false);
+                              insertComposerText(`@${team.name} `);
+                            }}
+                          >
+                            <IconUsers size={14} />
+                            <span>{team.name}</span>
+                          </button>
+                        ))}
                         {!plusExperts ? (
                           <div className="composer-plus-empty">
                             {t("chat.expertsLoading")}

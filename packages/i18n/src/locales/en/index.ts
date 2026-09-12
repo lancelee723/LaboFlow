@@ -242,6 +242,8 @@ export const en = {
     enhancePromptTooltip: "Optimize prompt with AI",
     contextGroup: "Contexts",
     fileGroup: "Files",
+    expertGroup: "Experts",
+    teamGroup: "Expert teams",
     enhancingPrompt: "Enhancing…",
     undoEnhancement: "Undo enhancement",
     enhancementFailed: "Prompt enhancement failed",
@@ -1384,6 +1386,7 @@ export const en = {
     phaseDone: "Done",
     phaseFailed: "Failed",
     retryMember: "Retry",
+    stageLabel: "Stage {{index}}/{{total}}: {{name}}",
     budgetUsage: "{{used}} / {{budget}} tokens",
     tokensUsed: "{{used}} tokens",
   
