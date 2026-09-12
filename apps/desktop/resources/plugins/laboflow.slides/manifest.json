@@ -154,7 +154,11 @@
         "key": "pipMirror",
         "type": "select",
         "default": "default",
-        "enum": ["default", "https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.aliyun.com/pypi/simple/"],
+        "enum": [
+          { "label": "默认（官方源 / Default）", "value": "default" },
+          { "label": "清华 TUNA", "value": "https://pypi.tuna.tsinghua.edu.cn/simple" },
+          { "label": "阿里云", "value": "https://mirrors.aliyun.com/pypi/simple/" }
+        ],
         "title": "Python package mirror",
         "description": "Index for PPT-Master runtime installs (pip/uv)"
       }

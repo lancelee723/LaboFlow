@@ -87,6 +87,14 @@ Phase 4 共享工作区（前置，未启动）
 | R5-8 | 组织资产下发统一走 `/org/bootstrap` 扩展字段（expertPacks / kbServers / slideTemplates / imRelay），不在客户端做组织资产 CRUD | 与 Phase 2/3 既有的组织渠道下发模式一致 |
 | R5-9 | **专家是独立 Agent，不是子代理**：专家以独立会话执行（前台召唤/后台 headless 派发），拥有会话级完整工具链（专家声明 ∩ 权限模式）；PI-Desktop 子代理机制（定义/`SUBAGENT_ASSIGNABLE_TOOLS` 白名单/Task 工具族/面板）保持原语义零改动，继续服务「任务内并发代理」场景 | 用户概念裁决（2026-09-12）：子代理=任务内处理部分事务的并发代理；专家=可独立承接完整任务的 Agent。两者不得混淆实现 |
 | R5-10 | **插件优先与最小侵入**：凡能以 bundled plugin + `contributes`（agentTools/skills/views/settings/mcpServers/services）承载的能力**不得改主干**（PPT 模块 06 整体插件化为范本）；数据/定义存储优先复用 PI-Desktop 既有惯例（`.agents/<kind>/` 定义文件、`mcp_servers` 唯一 MCP 注册表、kv 存储），**不建平行注册表、不造新标准**；对主干的必要改动收敛在本 README §2 缺口表所列各项，每项在模块 SPEC 中列出触点清单 | 避免对 PI-Desktop 本体的侵入式修改与上游漂移冲突 |
+| RP-1 | 模块 06 L2 重整采用「文件协议保真 + 确认面替换」：PPT-Master 上游项目文件协议（recommendations/result.json/design_spec/spec_lock/svg_output）零修改，Flask 确认页/实时预览替换为 LaboFlow chat 确认与原生面板/工作台 | 裁剪依赖集无 flask；阻塞确认页撞 110s 工具预算；协议保真使 re-vendor 成本最小 |
+| RP-2 | 确认强制性由工具层状态机保证（`pipeline-state.json` + 导出脚本硬校验 Stage-2），提示词仅作引导 | 失败会话 R2 实证：提示词级约束会被系统提示压过 |
+| RP-3 | PPT-Master venv 迁至插件数据目录（getDataPath），uv 优先（--seed）+ python ≥3.10 版本硬校验 + pipMirror 镜像可配 + setup 异步作业化 | 对齐 Pi 存储隔离规范与 110s 工具预算 |
+| RP-4 | 确定性脚本一律经 `ppt_script` 8 项白名单执行（argspec 对齐上游 argparse），>60s 自动转后台作业；白名单外拒绝 | 参数契约单一来源、可审计、规避权限拒绝摩擦（R4） |
+| RP-5 | L2 管线在主会话执行；跨会话续跑映射上游 split 模式；不尝试子代理 | Pi 运行时硬限制：delegate 不可分配插件工具/Skill/ToolSearch |
+| RP-6 | edge-tts（GPL）/ebooklib（AGPL）明确排除，旁白与 epub 输入降级不支持；PDF 源继续禁用 | 许可红线补全（此前仅处理 PyMuPDF/pandoc） |
+| RP-7 | L1 补课以断言固化：8 版式真实渲染（compare/timeline 原生表格 graphicFrame） | 失败会话 R3 经复核为会话时点旧资源所致，当前代码无缺口；断言防回归 |
+| RP-8 | 模块 06 重建路线 = **Claude Code 等价形态先行**：Phase A 原样恢复上游「单技能 + Bash 直调 + chat 确认」（仅补 venv 依赖层与 status/setup/job/read_doc 四工具）→ Phase B 硬门禁与白名单 → Phase C 体验层；**Phase A 为 chat 级确认仅自用/内测，组织推广在 Phase B 合入后解锁** | 保真度最高、价值最快（第 2.5 周）；R2 教训由硬门禁修补 |
 
 ## 5. 文档索引
 
@@ -122,3 +130,25 @@ Phase 4 共享工作区（前置，未启动）
 **提交轨迹**（时序，19 个功能提交）：T53.1 headless 地基 → T51.1 专家类别 → T51.2/4/5/6 专家服务+TeamRunner → T56.1-3 slides L1 → T55.3 mcp 扩展 → T55.1/6 KB 客户端+指引 → 专家中心 UI（5ad179dc）→ L2 PPT-Master vendor + kb 服务端切片（a5117501）→ 通道+适配器（3bc430b3）→ 空间服务端（95c3ed55）→ KB UI/角标（62da16a9）→ 空间客户端（e8379648）→ 组织专家包（18cde29b + e95d307d）→ 公众号中继（fc0b14bb）→ 接线提交 ×3 → 验收报告（0132aa5d）。
 
 **Gate 外部项**（需真人/真租户，见验收报告 §4）：5 顾问试点、双引擎盲评、飞书 WSS/企微帧名/公众号真实租户联调、30 天 soak。
+
+---
+
+## 执行记录（2026-09-12 晚，模块 06 L2 通道重建 · ppt-l2-rebuild 分支）
+
+失败会话「脚本稿转麦肯锡风格PPT」取证后，按 [PPT-MASTER-PLUGIN-DEVPLAN.md](06-ppt-assistant/PPT-MASTER-PLUGIN-DEVPLAN.md) v1.1 三段式完成 L2 运行时通道重建（M0 → Phase A/B/C → G），**主干触点为零**（R5-10 达成）。根因登记见 [FAILURE-RCA-2026-09-12.md](06-ppt-assistant/FAILURE-RCA-2026-09-12.md)；验收报告勘误见 [ACCEPTANCE-2026-09-12.md](ACCEPTANCE-2026-09-12.md) 模块 06 勘误节。
+
+**交付内容**
+
+- **M0 治理**：验收勘误（模块 06 L2 结论降级）；bundled 断言组（先红后绿）；106 个误提交 .pyc 清除 + `__pycache__/` 入 .gitignore；R1–R4 根因登记。
+- **Phase A 等价移植（R1/R4 销项）**：`ppt-runtime` 重构（venv 迁 getDataPath + 旧路径迁移；uv 优先 `--seed` + venv pip 回退；python ≥3.10 版本硬校验；pipMirror 镜像双 env；freeze 黑名单）；后台作业管理器（提交/取消/轮询/持久化/中断恢复）；薄壳技能 `ppt-master.md`（7 条宿主约定 + 上游正文原样，ToolSearch 可发现）+ `slides.md` 引擎路由节；工具注册 `ppt_master_status`（附 skillDir/pythonPath）/`ppt_master_setup`（异步）/`ppt_job_status`/`ppt_read_doc`（白名单+防穿越+1MiB 截断）。
+- **Phase B 硬门禁（R2 销项）**：`pipeline-state.json` 状态机（提交→用户确认→result.json 只读一次；损坏回退 pending）；`ppt_script` 8 项白名单 argspec 对齐上游 argparse（修复 §1.2 #3 参数错误）；导出三脚本硬校验 Stage-2（`PPT_STAGE_NOT_CONFIRMED`/`PPT_SPEC_LOCK_MISSING`）；确认卡面板（契约/三方向/快速豁免，zh/en）+ `openConfirmCard` 命令 + `onPanelInvoke` 桥。
+- **Phase C 体验（R3 销项）**：工作台视图（运行时状态卡/管线时间线/SVG 翻页预览/导出卡）；L1 复核——8 版式在当前代码已真实渲染（R3 为会话时点旧插件资源所致），补 graphicFrame 原生表格断言固化。
+- **G 验收**：`scripts/e2e-slides.mjs`（L1 快速路径 + L2 诊断/门禁路径，6 检查全过，跨平台无网络依赖）；AGPL 黑名单断言（fitz/PyMuPDF/pandoc/edge-tts/ebooklib/flask）进测试常驻；体积基线 66.6 MiB + 75 MiB 上限断言。
+
+**回归数据**：desktop **1428 pass / 0 fail**（基线 1353，+75；2 skip 为 PPT_IT=1 门控真机集成）；typecheck 全绿；lint 9 个违规为**既有问题**（a7a2febd team 功能引入 chat-shell.css，经分支起点复证，不在本计划范围）。真机集成（PPT_IT=1，darwin）：uv 全新 venv 17.7s 就绪（指标 ≤3 分钟）、freeze 黑名单零命中、上游 checker --help 通过。
+
+**提交轨迹**：8b160efa 计划 → 1715832c M0 → dc4a0ca7 Phase A → c52b7d5b Phase B+C → G（本提交）。
+
+**推广解锁门**（RP-8）：本阶段为 Phase C 完成态（硬门禁 + 精制面板齐备），组织推广已解锁；Phase A 单独发布时仅限自用/内测。
+
+**遗留后置项**：AI 生图密钥的组织下发方案（settings 禁存密钥）；离线 wheelhouse 下载包；templates/icons 子集化瘦身；产物版本链接入（FR-PPT-06）；组织模板包下发（T56.10）；`slides_export` 带 theme 参数被拒一次的权限引擎疑点（单独排查）。

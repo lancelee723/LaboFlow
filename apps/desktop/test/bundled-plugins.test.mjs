@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -314,6 +314,23 @@ test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", () => {
   };
   walk(resolve(vendorRoot));
   assert.deepEqual(pyc, [], "vendored tree must not contain .pyc files");
+  // Packaging footprint baseline (DEVPLAN G): the vendored corpus dominates
+  // the installer delta. Guard the ceiling so a careless vendor refresh can
+  // not silently blow up download sizes.
+  const du = (dir) => {
+    let total = 0;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) total += du(full);
+      else total += statSync(full).size;
+    }
+    return total;
+  };
+  const pluginBytes = du(resolve("resources/plugins/laboflow.slides"));
+  assert.ok(
+    pluginBytes <= 75 * 1024 * 1024,
+    `plugin footprint ${(pluginBytes / 1048576).toFixed(1)} MiB exceeds the 75 MiB packaging ceiling`,
+  );
 });
 
 test("bundled plugins are packaged and located at runtime", () => {

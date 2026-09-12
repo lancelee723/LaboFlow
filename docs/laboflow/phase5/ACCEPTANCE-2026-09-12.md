@@ -110,3 +110,19 @@ desktop +129（driver 10/slides 3/ppt-runtime 5/space 17/kb-ui+citations 12/chan
 - 主干触点管控（R5-10）：index.ts 仅 T53.1 重构+各服务工厂接线+spaceOrgRequest；host-core 仅新增模块与 mcp_servers 扩展列；无平行注册表。
 - 许可：PPT-Master（MIT）pin + VENDOR_VERSION/VENDOR_README/requirements-laboflow.txt（PyMuPDF/pandoc 移除）+ laboflow_guard.py 启动断言；pptxgenjs/jszip 闭包私有 vendor + VENDOR_LICENSES.md；打包足迹守卫测试保持原断言。
 - 概念裁决 R5-9：专家=独立 Agent，子代理机制零改动（E2E 回归证明）。
+
+---
+
+## 6. 执行记录（2026-09-12 晚）：模块 06 L2 通道重建后状态更新
+
+勘误节所列缺口已在 `ppt-l2-rebuild` 分支按 DEVPLAN v1.1 修复并验收：
+
+| 勘误项 | 重建后状态 | 证据 |
+|---|---|---|
+| FR-PPT-09 L2 运行时 | **达成**：venv 落位插件数据目录（uv --seed 优先/pip 回退/≥3.10 校验/镜像可配/AGPL+GPL 黑名单断言） | 真机集成（PPT_IT=1）：全新 venv 17.7s 就绪、pip freeze 黑名单零命中、guard 通过 |
+| FR-PPT-10 管线工具 | **达成**：`ppt_master_status/setup`、`ppt_job_status`、`ppt_read_doc`、`ppt_script`（8 项白名单 argspec 对齐上游 argparse，>60s 转后台作业）全部注册且经官方 SDK validator 校验 | bundled/host 集成测试 24 用例；`PPT_SCRIPT_NOT_ALLOWED`/`PPT_SCRIPT_INVALID_ARGS` 结构化错误 |
+| FR-PPT-03 双引擎路由 | **达成**：ppt-master 薄壳技能 + slides.md 引擎路由节进入技能目录（ToolSearch 可发现）；L1/L2 并存 | 技能 frontmatter ≤240 字符断言；S10 场景待真人重放（Gate 外部项） |
+| 确认机制（原缺失） | **达成（超出原验收基线）**：`ppt_stage_submit/status` + 确认卡面板 + 导出硬门禁（未确认拒绝率 100% 三态用例） | `ppt-pipeline-state.test.mjs` 11 用例 + e2e-slides 门禁检查 |
+| L1 版式（R3 复核） | 8 版式在当前代码已真实渲染；勘误节原判「L1 缺口」系会话时点旧插件资源所致，补 graphicFrame 断言固化 | `slides-plugin.test.mjs`（compare/timeline 原生表格断言） |
+
+**回归**：desktop 1428 pass / 0 fail（+75）；typecheck 绿；lint 9 违规为既有问题（分支起点复证）。详见 phase5 README 执行记录（2026-09-12 晚节）。
