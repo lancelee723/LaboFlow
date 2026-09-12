@@ -57,6 +57,18 @@
 | FR-PPT-12/14 模板/组织包 | 上游 Create-Template 路由 + 组织模板包通道 **后置**（依赖模板蒸馏实测调优） | §4-3 |
 | 插件化裁决 R5-10 | 全部能力在插件内（主干零改动达成）；依赖私有 vendor（打包足迹守卫未动） | — |
 
+### 模块 06 勘误（2026-09-12 晚，PPT-Master 插件化重整计划 M0）
+
+上文「模块 06 PPT 制作助手 —— L1+L2 通过」中 L2 相关结论**与代码实际不符**，现予勘误（用户实测会话「脚本稿转麦肯锡风格PPT」失败后取证，证据与根因分析见 [06-ppt-assistant/PPT-MASTER-PLUGIN-DEVPLAN.md](06-ppt-assistant/PPT-MASTER-PLUGIN-DEVPLAN.md) §1）：
+
+| 原结论 | 勘误后 |
+|---|---|
+| FR-PPT-09~11 L2 运行时「通过」（5 管道测试） | **部分达成**：vendored 资产（pin aee33e5）与 venv 自举库（`lib/ppt-runtime.js`）确已入库，AGPL 三重封禁属实；但 venv 从未创建、`ppt_master_status/setup` 等工具从未注册（`main.js` 的 `registerL2Tools()` 为死代码），**运行时通道不可达**。「5 管道测试」全部 mock runner，不能支撑「通过」结论 |
+| FR-PPT-10 管线工具「T56.5」（ppt_master_status/setup、ppt_quality/finalize/export） | **未达成**：五个 L2 工具均未出现在 Agent 工具面；且已写代码的 CLI 参数与上游 argparse 不匹配（quality/finalize/export 缺位置参数、`-s` 语义误用）、超时设定超出插件工具 110s 预算 |
+| FR-PPT-03 双引擎「工具族并存」 | L1 可用；L2 不可达（见上）。路由入口（技能目录）缺失——vendored `SKILL.md` 未列入 `contributes.skills` |
+
+L1 部分结论（FR-PPT-01/02/04/07/08 与真实 PPTX 生成测试）维持不变。修复计划：`ppt-l2-rebuild` 分支按 DEVPLAN v1.1 三段式（Phase A 等价移植 → Phase B 硬门禁 → Phase C 体验层）重建，完成后在本报告追加执行记录。
+
 ### 模块 04 接入 IM 工具 —— 通道主体通过，真机项列明
 
 | PRD FR | 实现 | 证据 |
