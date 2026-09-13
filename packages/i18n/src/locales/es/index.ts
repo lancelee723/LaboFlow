@@ -1301,6 +1301,7 @@ export const es = {
     emptyMine: "Aún no hay expertos personales",
     emptyTeams: "Aún no hay equipos de expertos",
     invoke: "Invocar",
+    "summon": "Invocar",
     invokeTeam: "Invocar equipo",
     invokeTitle: "Invocar a \"{{name}}\"",
     invokeTeamTitle: "Invocar al equipo \"{{name}}\"",

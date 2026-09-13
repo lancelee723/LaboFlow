@@ -1312,6 +1312,7 @@ export const zhCN = {
     emptyMine: "还没有个人专家",
     emptyTeams: "还没有专家团",
     invoke: "召唤",
+    summon: "召唤",
     invokeTeam: "召唤团队",
     invokeTitle: "召唤「{{name}}」",
     invokeTeamTitle: "召唤团队「{{name}}」",

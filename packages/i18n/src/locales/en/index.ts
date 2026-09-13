@@ -1320,6 +1320,7 @@ export const en = {
     emptyMine: "No personal experts yet",
     emptyTeams: "No expert teams yet",
     invoke: "Summon",
+    summon: "Summon",
     invokeTeam: "Summon team",
     invokeTitle: "Summon \"{{name}}\"",
     invokeTeamTitle: "Summon team \"{{name}}\"",

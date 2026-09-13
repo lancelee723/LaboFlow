@@ -1312,6 +1312,7 @@ export const zhTW = {
     emptyMine: "還沒有個人專家",
     emptyTeams: "還沒有專家團",
     invoke: "召喚",
+    summon: "召喚",
     invokeTeam: "召喚團隊",
     invokeTitle: "召喚「{{name}}」",
     invokeTeamTitle: "召喚團隊「{{name}}」",

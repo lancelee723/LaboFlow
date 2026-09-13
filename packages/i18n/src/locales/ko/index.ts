@@ -1322,6 +1322,7 @@ export const ko = {
     emptyMine: "아직 개인 전문가가 없습니다",
     emptyTeams: "아직 전문가 팀이 없습니다",
     invoke: "소환",
+    summon: "소환",
     invokeTeam: "팀 소환",
     invokeTitle: "\"{{name}}\" 소환",
     invokeTeamTitle: "팀 \"{{name}}\" 소환",

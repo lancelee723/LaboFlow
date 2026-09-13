@@ -1322,6 +1322,7 @@ export const tr = {
     emptyMine: "Henüz kişisel uzman yok",
     emptyTeams: "Henüz uzman ekibi yok",
     invoke: "Çağır",
+    summon: "Çağır",
     invokeTeam: "Ekipi çağır",
     invokeTitle: "\"{{name}}\" çağır",
     invokeTeamTitle: "Ekip \"{{name}}\" çağır",
