@@ -36,8 +36,18 @@
     background: transparent; color: inherit;
   }
   button.primary { font-weight: 600; }
-  button.primary:not(:disabled) { background: color-mix(in srgb, currentColor 88%, transparent); color: var(--pi-bg, #fff); }
+  /* Fixed high-contrast pair: never depends on --pi vars or currentColor
+     (a missing host var once rendered this button white-on-white). */
+  button.primary:not(:disabled) { background: #2da44e; border-color: #2da44e; color: #ffffff; }
+  button.primary:not(:disabled):hover { background: #2c974b; }
   button:disabled { opacity: .45; cursor: default; }
+  #error-box {
+    border: 1px solid #d1242f; border-radius: 8px; padding: 8px 10px; margin: 8px 0;
+    color: #d1242f; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+  }
+  .subcard { margin: 6px 0 0 12px; padding: 6px 10px; border-left: 2px solid color-mix(in srgb, currentColor 25%, transparent); }
+  .keyline { display: flex; gap: 6px; align-items: baseline; }
+  .keyline .k { color: inherit; opacity: .55; flex-shrink: 0; }
   input[type="text"] {
     font: inherit; padding: 5px 8px; border-radius: 8px; flex: 1; min-width: 160px;
     border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
@@ -57,9 +67,10 @@
 <div id="meta" class="muted"></div>
 <div id="content"><p class="muted" id="t-loading"></p></div>
 
+<div id="error-box" class="hidden"></div>
 <div id="actions" class="row hidden">
-  <button id="btn-confirm" class="primary"></button>
-  <button id="btn-waive"></button>
+  <button id="btn-confirm" type="button" class="primary"></button>
+  <button id="btn-waive" type="button"></button>
   <input type="text" id="waive-reason" class="hidden">
 </div>
 <div id="toast"></div>
@@ -70,7 +81,7 @@ const bridge = window.pluginBridge;
 // 8 locales matching packages/i18n (en is the source of truth).
 const T = {
   "zh-CN": {
-    title: "PPT 设计确认", loading: "加载中…",
+    bridgeError: "确认卡与插件通信失败（可能暂时繁忙）。请关闭本窗口后从命令面板重新打开「确认卡」。", retryHint: "提交失败（通信繁忙或超时）。请重试一次；若仍失败，可让助手改用 chat 确认。", title: "PPT 设计确认", loading: "加载中…",
     nopending: "当前没有待确认的 PPT 设计方案。",
     nopendingHint: "当助手提交 Stage-1/Stage-2 设计方案时，确认卡会自动打开；也可在命令面板搜索「确认卡」。",
     stage1: "Stage-1 · 沟通契约与模板选择", stage2: "Stage-2 · 最终设计方向（三选一）",
@@ -80,7 +91,7 @@ const T = {
     dirFallback: (i) => `方向 ${i}`, missingRec: "recommendations 缺失，请让助手重新提交。",
   },
   "zh-TW": {
-    title: "PPT 設計確認", loading: "載入中…",
+    bridgeError: "確認卡與外掛通訊失敗（可能暫時忙碌）。請關閉本視窗後從命令面板重新開啟「確認卡」。", retryHint: "提交失敗（通訊忙碌或逾時）。請重試一次；若仍失敗，可讓助手改用 chat 確認。", title: "PPT 設計確認", loading: "載入中…",
     nopending: "目前沒有待確認的 PPT 設計方案。",
     nopendingHint: "當助手提交 Stage-1/Stage-2 設計方案時，確認卡會自動開啟；也可在命令面板搜尋「確認卡」。",
     stage1: "Stage-1 · 溝通契約與範本選擇", stage2: "Stage-2 · 最終設計方向（三選一）",
@@ -90,7 +101,7 @@ const T = {
     dirFallback: (i) => `方向 ${i}`, missingRec: "recommendations 缺失，請讓助手重新提交。",
   },
   en: {
-    title: "PPT design confirmation", loading: "Loading…",
+    bridgeError: "The card lost contact with the plugin (it may be busy). Close this window and reopen the confirm card from the command palette.", retryHint: "Submit failed (bridge busy or timed out). Try once more; if it still fails, ask the assistant to fall back to chat confirmation.", title: "PPT design confirmation", loading: "Loading…",
     nopending: "No PPT design is waiting for confirmation.",
     nopendingHint: "The card opens automatically when the assistant submits Stage-1/Stage-2; you can also search “confirm card” in the command palette.",
     stage1: "Stage-1 · Communication contract & template", stage2: "Stage-2 · Final design direction (pick one)",
@@ -100,7 +111,7 @@ const T = {
     dirFallback: (i) => `Direction ${i}`, missingRec: "recommendations missing — ask the assistant to resubmit.",
   },
   de: {
-    title: "PPT-Design bestätigen", loading: "Wird geladen…",
+    bridgeError: "Die Karte hat den Kontakt zum Plugin verloren (evtl. beschäftigt). Bitte Fenster schließen und die Karte über die Befehlspalette erneut öffnen.", retryHint: "Senden fehlgeschlagen (beschäftigt oder Timeout). Bitte erneut versuchen; andernfalls Chat-Bestätigung nutzen.", title: "PPT-Design bestätigen", loading: "Wird geladen…",
     nopending: "Kein PPT-Entwurf wartet auf Bestätigung.",
     nopendingHint: "Die Karte öffnet sich automatisch, wenn der Assistent Stage-1/Stage-2 einreicht; Sie können auch in der Befehlspalette „confirm card“ suchen.",
     stage1: "Stage-1 · Kommunikationsvertrag & Vorlage", stage2: "Stage-2 · Finale designrichtung (eine wählen)",
@@ -110,7 +121,7 @@ const T = {
     dirFallback: (i) => `Richtung ${i}`, missingRec: "Empfehlungen fehlen — bitten Sie den Assistenten erneut.",
   },
   es: {
-    title: "Confirmación de diseño PPT", loading: "Cargando…",
+    bridgeError: "La tarjeta perdió contacto con el plugin (puede estar ocupado). Cierre y reabra la tarjeta desde la paleta de comandos.", retryHint: "Envío fallido (ocupado o timeout). Intente de nuevo; si falla, pida confirmación por chat.", title: "Confirmación de diseño PPT", loading: "Cargando…",
     nopending: "No hay ningún diseño PPT pendiente de confirmación.",
     nopendingHint: "La tarjeta se abre automáticamente cuando el asistente envía Stage-1/Stage-2; también puede buscar «confirm card» en la paleta de comandos.",
     stage1: "Stage-1 · Contrato de comunicación y plantilla", stage2: "Stage-2 · Dirección final de diseño (elige una)",
@@ -120,7 +131,7 @@ const T = {
     dirFallback: (i) => `Dirección ${i}`, missingRec: "Faltan recomendaciones; pida al asistente que las reenvíe.",
   },
   fr: {
-    title: "Confirmation du design PPT", loading: "Chargement…",
+    bridgeError: "La carte a perdu le contact avec le plugin (occupé ?). Fermez puis rouvrez la carte depuis la palette de commandes.", retryHint: "Échec de la soumission (occupé ou délai dépassé). Réessayez ; sinon, demandez la confirmation par chat.", title: "Confirmation du design PPT", loading: "Chargement…",
     nopending: "Aucun design PPT en attente de confirmation.",
     nopendingHint: "La carte s'ouvre automatiquement lorsque l'assistant soumet Stage-1/Stage-2 ; vous pouvez aussi chercher « confirm card » dans la palette de commandes.",
     stage1: "Stage-1 · Contrat de communication et modèle", stage2: "Stage-2 · Direction de design finale (choisir une)",
@@ -130,7 +141,7 @@ const T = {
     dirFallback: (i) => `Direction ${i}`, missingRec: "Recommandations manquantes — demandez à l'assistant de les renvoyer.",
   },
   ko: {
-    title: "PPT 디자인 확인", loading: "불러오는 중…",
+    bridgeError: "카드가 플러그인과 통신에 실패했습니다(사용 중일 수 있음). 창을 닫고 명령 팔레트에서 확인 카드를 다시 여세요.", retryHint: "제출 실패(사용 중 또는 시간 초과). 다시 시도하세요. 계속 실패하면 chat 확인을 요청하세요.", title: "PPT 디자인 확인", loading: "불러오는 중…",
     nopending: "확인 대기 중인 PPT 디자인이 없습니다.",
     nopendingHint: "어시스턴트가 Stage-1/Stage-2 디자인을 제출하면 확인 카드가 자동으로 열립니다. 명령 팔레트에서 \"확인 카드\"를 검색할 수도 있습니다.",
     stage1: "Stage-1 · 커뮤니케이션 계약 및 템플릿", stage2: "Stage-2 · 최종 디자인 방향(하나 선택)",
@@ -140,7 +151,7 @@ const T = {
     dirFallback: (i) => `방향 ${i}`, missingRec: "추천 내용이 없습니다. 어시스턴트에게 다시 제출하도록 요청하세요.",
   },
   tr: {
-    title: "PPT tasarım onayı", loading: "Yükleniyor…",
+    bridgeError: "Kart eklentiyle bağlantıyı kaybetti (meşgul olabilir). Kapatıp komut paletinden kartı yeniden açın.", retryHint: "Gönderim başarısız (meşgul veya zaman aşımı). Tekrar deneyin; olmazsa chat onayı isteyin.", title: "PPT tasarım onayı", loading: "Yükleniyor…",
     nopending: "Onay bekleyen PPT tasarımı yok.",
     nopendingHint: "Asistan Stage-1/Stage-2 tasarımını gönderdiğinde kart otomatik açılır; komut paletinde \"confirm card\" da arayabilirsiniz.",
     stage1: "Stage-1 · İletişim sözleşmesi ve şablon", stage2: "Stage-2 · Nihai tasarım yönü (birini seçin)",
@@ -175,26 +186,62 @@ async function init() {
   document.getElementById("btn-confirm").textContent = t.confirm;
   document.getElementById("btn-waive").textContent = t.quick;
   document.getElementById("waive-reason").placeholder = t.reason;
-  const boot = await bridge.invoke("ppt.getBootstrap");
-  pending = boot.pending;
-  const meta = document.getElementById("meta");
-  if (boot.runtime) meta.textContent = `${t.runtime}: ${boot.runtime.stage}`;
-  if (!pending) {
+  try {
+    const boot = await bridge.invoke("ppt.getBootstrap");
+    pending = boot.pending;
+    const meta = document.getElementById("meta");
+    if (boot.runtime) meta.textContent = `${t.runtime}: ${boot.runtime.stage}`;
+    if (!pending) {
+      document.getElementById("content").innerHTML =
+        `<p class="muted">${esc(t.nopending)}</p><p class="muted">${esc(t.nopendingHint)}</p>`;
+      return;
+    }
+    data = await bridge.invoke("ppt.getState", { projectDir: pending.projectDir });
+    render();
+  } catch (error) {
     document.getElementById("content").innerHTML =
-      `<p class="muted">${esc(t.nopending)}</p><p class="muted">${esc(t.nopendingHint)}</p>`;
-    return;
+      `<p>${esc(t.bridgeError)}</p><p class="muted">${esc(String(error?.message ?? error))}</p>`;
   }
-  data = await bridge.invoke("ppt.getState", { projectDir: pending.projectDir });
-  render();
 }
 
-function kvBlock(obj) {
-  if (!obj || typeof obj !== "object") return "";
+// Deep render: agents nest the contract details (audience/intent/…) instead
+// of flattening them — dropping non-scalars once left the card showing three
+// stray lines while the chat carried the real table.
+function kvLines(obj) {
+  if (obj === null || obj === undefined) return "";
+  if (typeof obj !== "object") {
+    return `<div class="keyline"><span class="k"></span><span>${esc(obj)}</span></div>`;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .map((item, i) => {
+        const label = item && typeof item === "object" && !Array.isArray(item)
+          ? esc(item.name ?? item.title ?? item.label ?? `#${i + 1}`)
+          : `#${i + 1}`;
+        const inner = item && typeof item === "object" && !Array.isArray(item)
+          ? kvLines(item)
+          : `<div class="keyline"><span class="k"></span><span>${esc(item)}</span></div>`;
+        return `<div class="subcard"><b>${label}</b>${inner}</div>`;
+      })
+      .join("");
+  }
   return Object.entries(obj)
-    .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
-    .map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`)
+    .filter(([, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => {
+      if (typeof v === "object") {
+        // Agents wrap contract items as { value: "…" } — flatten that wrapper
+        // into a plain labeled line instead of a nested card.
+        const keys = Object.keys(v);
+        if (keys.length === 1 && (keys[0] === "value" || keys[0] === "text") && typeof v[keys[0]] !== "object") {
+          return `<div class="keyline"><span class="k">${esc(k)}</span><span>${esc(v[keys[0]])}</span></div>`;
+        }
+        return `<div class="subcard"><b>${esc(k)}</b>${kvLines(v)}</div>`;
+      }
+      return `<div class="keyline"><span class="k">${esc(k)}</span><span>${esc(v)}</span></div>`;
+    })
     .join("");
 }
+const kvBlock = (obj) => kvLines(obj);
 
 function render() {
   const stage = pending.stage;
@@ -218,17 +265,39 @@ function render() {
   document.getElementById("actions").classList.remove("hidden");
 }
 
+function showError(message) {
+  const box = document.getElementById("error-box");
+  box.textContent = message;
+  box.classList.remove("hidden");
+}
+
 async function submit(waive) {
   const reason = document.getElementById("waive-reason").value.trim();
-  if (waive && !reason) { toast(t.needReason); document.getElementById("waive-reason").classList.remove("hidden"); return; }
-  document.getElementById("btn-confirm").disabled = true;
-  document.getElementById("btn-waive").disabled = true;
-  const result = await bridge.invoke("ppt.confirmStage", {
-    projectDir: pending.projectDir, stage: pending.stage, waive, waiveReason: reason || null,
-  });
-  if (result.error) { toast(result.error); document.getElementById("btn-confirm").disabled = false; document.getElementById("btn-waive").disabled = false; return; }
-  document.getElementById("content").innerHTML = `<p>${esc(t.done)}</p>`;
-  document.getElementById("actions").classList.add("hidden");
+  if (waive && !reason) { showError(t.needReason); document.getElementById("waive-reason").classList.remove("hidden"); return; }
+  const btnConfirm = document.getElementById("btn-confirm");
+  const btnWaive = document.getElementById("btn-waive");
+  btnConfirm.disabled = true;
+  btnWaive.disabled = true;
+  document.getElementById("error-box").classList.add("hidden");
+  try {
+    const result = await bridge.invoke("ppt.confirmStage", {
+      projectDir: pending.projectDir, stage: pending.stage, waive, waiveReason: reason || null,
+    });
+    if (result && result.error) {
+      showError(String(result.error));
+    } else {
+      document.getElementById("content").innerHTML = `<p>${esc(t.done)}</p>`;
+      document.getElementById("actions").classList.add("hidden");
+      return;
+    }
+  } catch (error) {
+    // Bridge timeouts / host errors must never brick the card: show the
+    // reason inline and give the buttons back.
+    showError((t.retryHint ?? "Submit failed.") + "\n" + String(error?.message ?? error));
+  } finally {
+    btnConfirm.disabled = false;
+    btnWaive.disabled = false;
+  }
 }
 
 document.getElementById("btn-confirm").addEventListener("click", () => submit(false));

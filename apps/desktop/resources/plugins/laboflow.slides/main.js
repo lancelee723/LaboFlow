@@ -55,6 +55,10 @@ let jobManager = null;
 let activeSetupJobId = null;
 /** Last submitted stage awaiting user action in the confirm card. */
 let pendingConfirm = null;
+/** Runtime status cache: detectRuntime spawns guard + pip check (seconds);
+ * the panel channel times out at 30s and the agent may be racing us. */
+let runtimeStatusCache = null;
+let runtimeStatusCacheAt = 0;
 
 function getPluginDir() {
   // The plugin host loads main.js from <pluginDir>/main.js.
@@ -505,6 +509,54 @@ function registerStageTools() {
 
 // ───────────────────────── Panel bridge (confirm card + workbench) ─────────────────────────
 
+async function detectRuntimeCached(maxAgeMs = 5_000) {
+  const now = Date.now();
+  if (runtimeStatusCache && now - runtimeStatusCacheAt < maxAgeMs) return runtimeStatusCache;
+  runtimeStatusCache = await detectRuntime(runtimeDeps());
+  runtimeStatusCacheAt = now;
+  return runtimeStatusCache;
+}
+
+/**
+ * The plugin process can reload between submit and user action (hot reload,
+ * crash): pendingConfirm lives in memory only. Recover the waiting stage from
+ * the pipeline state files on disk so the card never shows "nothing pending"
+ * while a project actually awaits confirmation.
+ */
+async function recoverPendingFromDisk() {
+  if (pendingConfirm) return pendingConfirm;
+  try {
+    const workspace = await pi.workspace.get();
+    const projectsDir = join(String(workspace?.path ?? ""), "projects");
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    let best = null;
+    for (const entry of readdirSync(projectsDir, { withFileTypes: true }) ?? []) {
+      if (!entry.isDirectory()) continue;
+      const stateFile = join(projectsDir, entry.name, "laboflow", "pipeline-state.json");
+      let state;
+      try {
+        state = JSON.parse(readFileSync(stateFile, "utf8"));
+      } catch {
+        continue;
+      }
+      for (const stage of ["stage1", "stage2"]) {
+        if (state?.stages?.[stage]?.status === "submitted") {
+          const mtime = statSync(stateFile).mtimeMs;
+          if (!best || mtime > best.mtime) {
+            best = { projectDir: join(projectsDir, entry.name), stage, mtime };
+          }
+        }
+      }
+    }
+    if (best) {
+      pendingConfirm = { projectDir: best.projectDir, stage: best.stage, submittedAt: null, recovered: true };
+    }
+  } catch {
+    /* no workspace / no projects dir — nothing to recover */
+  }
+  return pendingConfirm;
+}
+
 function projectListings(projectDir) {
   const safeList = (dir, exts) => {
     try {
@@ -536,8 +588,8 @@ function projectListings(projectDir) {
 export async function onPanelInvoke(channel, payload = {}) {
   switch (channel) {
     case "ppt.getBootstrap": {
-      const runtime = await detectRuntime(runtimeDeps());
-      return { pending: pendingConfirm, runtime, projects: pendingConfirm ? [pendingConfirm.projectDir] : [] };
+      const [runtime, pending] = await Promise.all([detectRuntimeCached(), recoverPendingFromDisk()]);
+      return { pending, runtime, projects: pending ? [pending.projectDir] : [] };
     }
     case "ppt.getState": {
       const projectDir = String(payload.projectDir ?? "");
@@ -578,7 +630,7 @@ export async function onPanelInvoke(channel, payload = {}) {
       return { ok: true, state: verdict.state };
     }
     case "ppt.runtimeStatus":
-      return { runtime: await detectRuntime(runtimeDeps()) };
+      return { runtime: await detectRuntimeCached() };
     case "ppt.setup": {
       const submitted = await startSetupJob();
       return { jobId: submitted.id ?? submitted.jobId, reused: !!submitted.reused };
