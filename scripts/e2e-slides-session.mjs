@@ -241,7 +241,12 @@ async function main() {
       created.length === 1 && existsSync(join(projectsRoot, created[0], "svg_output")),
       created.join(","),
     );
-    const projectDir = join(projectsRoot, created[0] ?? "");
+    if (created.length !== 1) {
+      console.error("init did not scaffold exactly one project — aborting the replay");
+      process.exitCode = 1;
+      return;
+    }
+    const projectDir = join(projectsRoot, created[0]);
 
     // 5. Stage-2 submission opens the user gate.
     const submit = await callPluginTool(host, sessionId, "ppt_stage_submit", {
