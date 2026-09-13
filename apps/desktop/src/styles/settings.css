@@ -2559,15 +2559,15 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
 }
 
 .ext-field-label .required-mark {
   color: var(--error);
-  font-size: 14px;
-  line-height: 1;
+  font-size: var(--text-md);
+  line-height: var(--leading-none);
   transform: translateY(-2px);
 }
 
@@ -2583,10 +2583,10 @@
   margin-left: auto;
   padding: 0 6px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 16px;
+  font-size: var(--text-3xs);
+  line-height: var(--leading-prose);
 }
 
 /* Skills multi-select dropdown (AgentMultiSelect). */
@@ -2602,7 +2602,7 @@
   min-height: 34px;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   background: var(--bg-primary);
   cursor: pointer;
   text-align: left;
@@ -2617,12 +2617,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .agent-multi-placeholder {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .agent-multi-count {
@@ -2630,10 +2630,10 @@
   margin-left: auto;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 18px;
+  font-size: var(--text-3xs);
+  line-height: var(--leading-prose);
 }
 
 .agent-multi-pop {
@@ -2647,7 +2647,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   background: var(--bg-primary);
   box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
 }
@@ -2661,9 +2661,9 @@
   width: 100%;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-2xs);
   background: var(--bg-secondary, transparent);
-  font-size: 12px;
+  font-size: var(--text-2xs);
 }
 
 .agent-multi-list {
@@ -2676,9 +2676,9 @@
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-2xs);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-2xs);
 }
 
 .agent-multi-opt:hover {
@@ -2699,12 +2699,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-3xs);
 }
 
 .agent-multi-empty {
   padding: 12px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-2xs);
   text-align: center;
 }
