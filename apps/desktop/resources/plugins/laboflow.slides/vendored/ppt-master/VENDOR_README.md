@@ -9,4 +9,4 @@
 - Integration contract: LaboFlow drives this skill through its script
   boundaries only (scripts/*.py); the SKILL.md corpus guides the agent. Do not
   modify vendored files; upgrades replace this directory and rerun the
-  adapter tests (apps/desktop/test/ppt-master-guard.test.mjs).
+  adapter tests (apps/desktop/test/ppt-master-runtime.test.mjs + test/bundled-plugins.test.mjs (Slides section)).

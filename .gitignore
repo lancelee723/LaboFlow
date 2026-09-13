@@ -50,3 +50,5 @@ coverage/
 electron.vite.config.*.mjs
 app 输出目录：slides 插件手工测试产物，不入库
 apps/desktop/slides/
+*.pyc
+__pycache__/

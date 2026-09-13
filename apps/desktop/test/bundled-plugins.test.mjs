@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -201,6 +201,136 @@ test("Token Insights ships as an ordinary bundled plugin", () => {
   assert.match(insightsMain, /pi\.plugin\.getDataPath/);
   assert.match(insightsPanel, /window\.pluginBridge/);
   assert.doesNotMatch(insightsPanel, /require\(|ipcRenderer|webview/);
+});
+
+/**
+ * LaboFlow Slides (module 06): L1 pptxgenjs baseline + L2 vendored PPT-Master.
+ *
+ * The L2 channel failed acceptance once (tools defined but never registered,
+ * vendored SKILL.md invisible to the agent, stale CLI arg contracts). These
+ * assertions pin the rebuild contract from
+ * docs/laboflow/phase5/06-ppt-assistant/PPT-MASTER-PLUGIN-DEVPLAN.md:
+ * every L2 tool the runtime registers must be declared, the PPT-Master skill
+ * corpus must be reachable through contributes.skills, and the vendored tree
+ * must stay AGPL-clean and pyc-free.
+ */
+test("Slides ships the L1+L2 tool surface it registers", () => {
+  const slidesManifest = JSON.parse(read("resources/plugins/laboflow.slides/manifest.json"));
+  const slidesMain = read("resources/plugins/laboflow.slides/main.js");
+  assert.equal(slidesManifest.id, "laboflow.slides");
+  const declaredTools = slidesManifest.contributes.agentTools.map((t) => t.name);
+  for (const tool of [
+    "slides_plan",
+    "slides_export",
+    "ppt_master_status",
+    "ppt_master_setup",
+    "ppt_job_status",
+    "ppt_read_doc",
+    "ppt_script",
+    "ppt_stage_submit",
+    "ppt_stage_status",
+  ]) {
+    assert.ok(declaredTools.includes(tool), `manifest must declare ${tool}`);
+    assert.ok(
+      new RegExp(`name:\\s*"${tool}"`).test(slidesMain),
+      `main.js must register ${tool}`,
+    );
+  }
+  // The old dead-code path (defined but never registered) must stay gone.
+  assert.doesNotMatch(slidesMain, /registerL2Tools/);
+  assert.match(slidesMain, /pi\.agent\.registerTool/);
+  // Phase B/C surfaces: the confirm card is a user panel, the workbench a
+  // docked view, and the palette entry only OPENS the card (confirmation is
+  // never a one-keystroke action).
+  assert.equal(slidesManifest.ui.panel, "renderer/confirm-card.html");
+  assert.deepEqual(slidesManifest.contributes.views.map((v) => v.id), ["workbench"]);
+  assert.ok(existsSync(resolve("resources/plugins/laboflow.slides/renderer/workbench.html")));
+  assert.deepEqual(slidesManifest.contributes.commands.map((c) => c.id), ["openConfirmCard"]);
+  for (const permission of ["ui.panel", "ui.view", "notify"]) {
+    assert.ok(slidesManifest.permissions.includes(permission), `permission needed: ${permission}`);
+  }
+  // Sandbox hygiene for both renderer pages.
+  for (const page of ["renderer/confirm-card.html", "renderer/workbench.html"]) {
+    const source = read(`resources/plugins/laboflow.slides/${page}`);
+    assert.match(source, /meta name="pi-plugin-chrome" content="v2"/);
+    assert.doesNotMatch(source, /require\(|ipcRenderer|webview/);
+  }
+});
+
+test("Slides exposes the PPT-Master skill corpus to the agent", () => {
+  const slidesManifest = JSON.parse(read("resources/plugins/laboflow.slides/manifest.json"));
+  const skills = slidesManifest.contributes.skills.map((s) =>
+    typeof s === "string" ? s : s.path,
+  );
+  assert.ok(skills.includes("./skills/slides.md"), "L1 workflow skill must stay");
+  assert.ok(
+    skills.includes("./skills/ppt-master.md"),
+    "vendored PPT-Master needs its thin-shell skill or the agent cannot route to L2",
+  );
+  // Frontmatter contract (Pi skills spec): name + description, description<=240.
+  const skill = read("resources/plugins/laboflow.slides/skills/ppt-master.md");
+  assert.match(skill, /^---\nname:\s*\S+[\s\S]*^---/m);
+  const desc = skill.match(/^description:\s*>?-?\s*\n?([\s\S]*?)(?=^\w|^---)/m);
+  const descText = desc ? desc[1].replace(/\s+/g, " ").trim() : "";
+  assert.ok(
+    descText.length > 0 && descText.length <= 240,
+    `ppt-master skill description must be 1..240 chars, got ${descText.length}`,
+  );
+  assert.ok(skill.length <= 128 * 1024, "skill body must stay under 128 KiB");
+});
+
+test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", async () => {
+  const vendorRoot = "resources/plugins/laboflow.slides/vendored/ppt-master";
+  for (const rel of [
+    "SKILL.md",
+    "VENDOR_VERSION",
+    "LICENSE",
+    "SPONSORS.md",
+    "requirements-laboflow.txt",
+    "workflows/routing.md",
+    "workflows/generate-pptx.md",
+    "scripts/attribution_guard.py",
+    "scripts/laboflow_guard.py",
+    "scripts/svg_quality_checker.py",
+    "scripts/finalize_svg.py",
+    "scripts/svg_to_pptx.py",
+  ]) {
+    assert.ok(existsSync(resolve(`${vendorRoot}/${rel}`)), `vendored file missing: ${rel}`);
+  }
+  // The upstream requirements (PyMuPDF/edge-tts/ebooklib inside) must never be
+  // what gets installed; only the trimmed MIT list may be.
+  const req = read(`${vendorRoot}/requirements-laboflow.txt`);
+  for (const banned of ["PyMuPDF", "pandoc", "edge-tts", "ebooklib", "flask"]) {
+    assert.doesNotMatch(req, new RegExp(`^${banned}`, "m"), `${banned} must stay out of the trimmed requirements`);
+  }
+  // Running the vendored python regenerates bytecode caches on disk (the
+  // wrapper sets PYTHONDONTWRITEBYTECODE=1 but direct runs do not), so the
+  // real invariant is repository hygiene: none may be tracked in git.
+  const { execFileSync } = await import("node:child_process");
+  const repoRoot = resolve("../..");
+  const tracked = execFileSync(
+    "git",
+    ["ls-files", "apps/desktop/resources/plugins/laboflow.slides/**/*.pyc"],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 },
+  ).split("\n").filter(Boolean);
+  assert.deepEqual(tracked, [], "no .pyc files may be tracked in git");
+  // Packaging footprint baseline (DEVPLAN G): the vendored corpus dominates
+  // the installer delta. Guard the ceiling so a careless vendor refresh can
+  // not silently blow up download sizes.
+  const du = (dir) => {
+    let total = 0;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) total += du(full);
+      else total += statSync(full).size;
+    }
+    return total;
+  };
+  const pluginBytes = du(resolve("resources/plugins/laboflow.slides"));
+  assert.ok(
+    pluginBytes <= 75 * 1024 * 1024,
+    `plugin footprint ${(pluginBytes / 1048576).toFixed(1)} MiB exceeds the 75 MiB packaging ceiling`,
+  );
 });
 
 test("bundled plugins are packaged and located at runtime", () => {

@@ -133,6 +133,22 @@ test("exportDeckToBuffer produces a valid editable PPTX (zip structure + content
   for (const marker of ["华东细分市场三年内将保持两位数增长", "进入路径", "客户A CEO"]) {
     assert.ok(allSlideXml.includes(marker), `slide text missing: ${marker}`);
   }
+  // The data layouts must carry REAL objects, not flattened text: compare and
+  // timeline render native tables (graphicFrame), matrix/data keep their
+  // quadrant/metric text. This pins the R3 regression from the 2026-09-12
+  // failed session — "columns/matrix/milestones silently ignored" must stay
+  // impossible.
+  assert.ok(allSlideXml.includes("graphicFrame"), "compare/timeline must render native tables");
+  const slideXmls = slideNames.map((name) => zip.readAsText(name));
+  assert.ok(
+    slideXmls.some((xml) => xml.includes("并购") && xml.includes("graphicFrame")),
+    "compare columns must be a native table",
+  );
+  assert.ok(
+    slideXmls.some((xml) => xml.includes("尽职调查与标的筛选") && xml.includes("graphicFrame")),
+    "timeline milestones must be a native table",
+  );
+  assert.ok(slideXmls.some((xml) => xml.includes("自建")), "matrix quadrants must render");
   const notesXml = entryNames
     .filter((name) => name.startsWith("ppt/notesSlides/"))
     .map((name) => zip.readAsText(name))

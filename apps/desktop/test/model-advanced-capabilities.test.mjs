@@ -32,7 +32,12 @@ test("advanced settings choose the default thinking level among the enabled ones
   // Offering the published ladder instead of the enabled subset would store a
   // default the runtime clamps away on the next request.
   assert.match(pickerSource, /settings\.defaultThinkingLevel/);
-  assert.match(pickerSource, /const enabledLevels = sortThinkingLevels\(/);
+  // Empty stored lists inherit the published ladder (runtime parity), so the
+  // chips and the default selector always operate on effective runtime levels.
+  assert.match(
+    pickerSource,
+    /const enabledLevels = binding\.thinkingLevels\.length\s*\?\s*sortThinkingLevels\(binding\.thinkingLevels\)\s*:\s*sortThinkingLevels\(publishedLevels\)/,
+  );
   assert.match(pickerSource, /enabledLevels\.map\(\(level\) => \(/);
   assert.match(pickerSource, /defaultThinkingLevel: event\.target/);
   // Nothing to choose when a binding enables one level or none.

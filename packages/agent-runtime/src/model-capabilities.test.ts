@@ -134,6 +134,37 @@ describe("main-supplied model capabilities", () => {
     expect(cataloguedNonReasoning.supportedThinkingLevels).toEqual(["medium"]);
   });
 
+  /**
+   * Bindings seeded before the catalog knew a model carry an empty level list
+   * (the same legacy seed as the 128k context default). Those must inherit the
+   * published ladder — otherwise GLM-5.3-Flash-class models are stuck with a
+   * reasoning menu that only offers "off".
+   */
+  it("empty configured thinking levels inherit the published ladder", () => {
+    const configured = modelConfigWithBinding(knownModel(), {
+      contextWindow: 128_000,
+      maxTokens: 8_192,
+      thinkingLevels: [],
+    });
+    expect(configured.reasoning).toBe(true);
+    expect(configured.supportedThinkingLevels).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+
+    // A model with nothing published stays non-reasoning.
+    const unpublished = modelConfigWithBinding(genericModelConfig("chat-only"), {
+      contextWindow: 16_000,
+      maxTokens: 2_000,
+      thinkingLevels: [],
+    });
+    expect(unpublished.reasoning).toBe(false);
+    expect(unpublished.supportedThinkingLevels).toEqual([]);
+  });
+
   it("clamps sparse catalog capability lists using the nearest supported level", () => {
     const capabilities: ModelCapabilities = {
       supportsReasoning: true,
