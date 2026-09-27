@@ -28,7 +28,12 @@ export function useOpenPreviewTarget() {
   const openFileRef = useOpenChatFileRef();
   return useCallback(
     (target: ChatPreviewTarget) =>
-      target.kind === "file" ? openFileRef(target.path) : openHttpUrl(target.url),
+      target.kind === "file"
+        ? openFileRef(target.path, undefined, undefined, {
+            line: target.line,
+            column: target.column,
+          })
+        : openHttpUrl(target.url),
     [openFileRef],
   );
 }
@@ -150,7 +155,14 @@ export function useOpenChatFileRef() {
   );
 
   return useCallback(
-    (path: string, baseDir?: string, mimeType?: string) => {
+    (
+      path: string,
+      baseDir?: string,
+      mimeType?: string,
+      position?: { line?: number; column?: number },
+    ) => {
+      const line = position?.line;
+      const column = position?.column;
       void (async () => {
         const resolved = await resolveRef(path, baseDir);
         if (!resolved) return;
@@ -177,7 +189,7 @@ export function useOpenChatFileRef() {
           openTab(fileManagerPluginTab(resolved.path, { line, column }));
           return;
         }
-        openFile(resolved.path, mimeType);
+        openFile(resolved.path, mimeType, { line, column });
       })();
     },
     [fileViewAvailable, openFile, openTab, openUrl, resolveRef],
