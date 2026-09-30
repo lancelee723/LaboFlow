@@ -9,6 +9,7 @@ import {
   type CloseBehavior,
   type KeybindingOverrides,
   type NativeMenuAction,
+  APP_DISPLAY_NAME,
 } from "@pi-desktop/shared";
 import { installApplicationMenu } from "../application-menu";
 import { installPluginAssetProtocol } from "../plugin-asset-protocol";
@@ -203,7 +204,7 @@ export function registerApplicationStartup(deps: StartupDependencies): void {
     if (storedBehavior) state.closeBehavior = storedBehavior;
     createTray();
     app.setAboutPanelOptions({
-      applicationName: APP_NAME,
+      applicationName: APP_DISPLAY_NAME,
       applicationVersion: APP_VERSION,
       version: APP_VERSION,
     });

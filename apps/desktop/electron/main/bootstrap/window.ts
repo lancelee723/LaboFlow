@@ -8,6 +8,7 @@ import {
   IPC,
   MAC_TRAFFIC_LIGHT_POSITION,
   type CloseBehavior,
+  APP_DISPLAY_NAME,
 } from "@pi-desktop/shared";
 import type { BrowserHost } from "../browser-host";
 import type { HostProcess } from "../host-process";
@@ -164,7 +165,7 @@ export async function createWindow({
     ...(restoredBounds ?? { width: 1200, height: 800 }),
     minWidth: initialMinWidth,
     minHeight: initialMinHeight,
-    title: APP_NAME,
+    title: APP_DISPLAY_NAME,
     show: false,
     // Keep native edge/corner resizing explicit. Frameless chrome owns the
     // titlebar only; the OS remains responsible for the resize hit regions.
