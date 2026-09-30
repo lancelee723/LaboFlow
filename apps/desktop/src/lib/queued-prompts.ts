@@ -90,10 +90,10 @@ export function promoteQueuedPrompt(
 }
 
 /**
- * LaboFlow: cancel a pending "send now" — demote every promoted row back to
- * the waiting block (stop request aborted or queue drained).
+ * LaboFlow: demote every promoted row back to the waiting block — the stop
+ * request behind a "send next" was aborted or the queue is being drained.
  */
-export function clearQueuedPromptSendNow(
+export function demotePromotedQueuedPrompts(
   queues: QueuedPrompts,
   sessionId: string,
 ): QueuedPrompts {

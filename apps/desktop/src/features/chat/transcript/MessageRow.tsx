@@ -13,6 +13,8 @@ import { useOpenChatFileRef } from "../../../hooks/use-preview-target";
 import { splitChatText } from "../../../lib/chat-links";
 import { useAppStore } from "../../../stores/app-store";
 import { Markdown } from "../../../components/Markdown";
+import { CitationMarkdown } from "../../../components/kb/CitationMarkdown";
+import { kbCardKind, type KbCardKind } from "../../../components/kb/citations";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -67,6 +69,19 @@ function SkillInvocationText({ message }: { message: UiMessage }) {
   return <>{parts}</>;
 }
 
+/** 「专家」/「专家团」 header badge for host-posted expert/team cards (FR-E-16). */
+function KbCardBadge({ kind }: { kind: KbCardKind }) {
+  const { t } = useTranslation();
+  const team = kind === "team-card";
+  return (
+    <div className="kb-card-badge-row">
+      <span className={`kb-card-badge${team ? " kb-card-badge-team" : ""}`}>
+        {t(team ? "kb.cardBadgeTeam" : "kb.cardBadgeExpert")}
+      </span>
+    </div>
+  );
+}
+
 export const MessageRow = memo(function MessageRow({
   message,
   isRunning,
@@ -82,6 +97,9 @@ export const MessageRow = memo(function MessageRow({
   const activateMessageRevision = useAppStore((s) => s.activateMessageRevision);
   const deleteMessage = useAppStore((s) => s.deleteMessage);
   const isUser = message.role === "user";
+  // Expert/team dispatch cards carry a host-stored kind; badge the row
+  // and keep persisting across reloads (module 01, FR-E-16).
+  const cardKind = !isUser ? kbCardKind(message.kind) : null;
   const isSessionMessage = Boolean(message.sessionMessage);
   const editableUserMessage = isUser && !isSessionMessage;
   const workspaceRoot = useAppStore((s) => s.workspace?.path);
@@ -199,6 +217,7 @@ export const MessageRow = memo(function MessageRow({
     >
       <div className="message-col">
         {message.sessionMessage ? <SessionMessageOrigin origin={message.sessionMessage} /> : null}
+        {cardKind ? <KbCardBadge kind={cardKind} /> : null}
         {isUser || displayed ? (
           <div className="message-bubble">
             {editing && editableUserMessage ? (
@@ -305,7 +324,11 @@ export const MessageRow = memo(function MessageRow({
               </>
             ) : (
               <div className="prose-chat">
-                <Markdown source={displayed} />
+                {cardKind ? (
+                  <CitationMarkdown source={displayed} />
+                ) : (
+                  <Markdown source={displayed} />
+                )}
               </div>
             )}
           </div>

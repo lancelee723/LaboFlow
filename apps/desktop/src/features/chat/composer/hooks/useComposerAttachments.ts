@@ -112,7 +112,8 @@ export function useComposerAttachments({
       // before native paths are copied into scratch.
       const sessionId = sourceSessionId ?? (await materializeDraftSession());
       if (!sessionId) throw new Error("session unavailable");
-      const imported = await api.importFiles(sessionId, result.token);
+      const importToken = result.token;
+      const imported = await api.importFiles(sessionId, importToken);
       const chips = imported.files.map((file) => {
         const token = nextChipToken();
         return {

@@ -18,7 +18,9 @@ import {
   normalizeLargePasteThreshold,
   stripInlineComposerFileReferenceTokens,
 } from "@pi-desktop/shared";
-import { useAppStore } from "../stores/app-store";
+import { materializeDraftSession, useAppStore } from "../stores/app-store";
+import { api } from "../lib/api";
+import i18n from "i18next";
 import { latestTurnContextInspector } from "../lib/latest-turn-context";
 import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
@@ -42,6 +44,12 @@ import {
   type ComposerPrefill,
 } from "../features/chat/composer/model";
 import { editorSelectionRange } from "../features/chat/composer/editor";
+import type { SessionSummary } from "@pi-desktop/shared";
+import {
+  createFileReference,
+  nextChipToken,
+  isImageFilePath,
+} from "../features/chat/composer/editor";
 import { useComposerAttachments } from "../features/chat/composer/hooks/useComposerAttachments";
 import { useComposerCompletions } from "../features/chat/composer/hooks/useComposerCompletions";
 import { useComposerDraft } from "../features/chat/composer/hooks/useComposerDraft";
@@ -464,6 +472,61 @@ export function Composer({
       }
     },
   });
+  /**
+   * Insert plain text at the caret (plus menu actions). The execCommand path
+   * fires the editor's normal input handling, so a leading "@" opens the
+   * existing file-reference autocomplete on its own.
+   */
+  const insertComposerText = (text: string) => {
+    const editor = ref.current;
+    if (editor) {
+      editor.focus();
+      if (document.execCommand("insertText", false, text)) return;
+    }
+    const next = `${valueRef.current}${text}`;
+    const caret = next.length;
+    applyEditorDraft(next, fileReferencesRef.current, caret);
+  };
+
+  /** ZCode-style context (FR-C-34): attach another conversation's transcript
+   * to this session as a scratch markdown file, splicing its chip at the
+   * caret the @ token just vacated. */
+  const attachSessionContext = async (
+    session: SessionSummary,
+    override?: { text: string; caret: number },
+  ) => {
+    try {
+      const ownerSessionId = referenceSessionId || (await materializeDraftSession());
+      if (!ownerSessionId) throw new Error("session unavailable");
+      const saved = await api.composerAttachSession({
+        sessionId: ownerSessionId,
+        targetSessionId: session.id,
+      });
+      const files = (saved as { files?: Array<{ path: string; name: string; ref?: string }> })
+        .files ?? [];
+      const text = override?.text ?? valueRef.current;
+      const caret = override?.caret ?? text.length;
+      const tokens = files.map(() => nextChipToken());
+      const inserted = tokens.join("");
+      const nextText =
+        override
+          ? text.slice(0, caret) + inserted + text.slice(caret)
+          : text + inserted;
+      const references = files.map((file, i) =>
+        createFileReference(file.path, file.name, ownerSessionId, {
+          kind: isImageFilePath(file.path) ? "image" : "file",
+          token: tokens[i],
+        }),
+      );
+      applyEditorDraft(nextText, references, caret + inserted.length);
+      showToast(i18n.t("chat.contextAttached", {
+        defaultValue: "Attached conversation",
+      }), { variant: "success" });
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
+    }
+  };
+
   const completions = useComposerCompletions({
     value,
     cursor,
@@ -474,6 +537,7 @@ export function Composer({
     applyEditorDraft,
     handleInput,
     invalidatePromptEnhancement,
+    onContextSession: attachSessionContext,
   });
 
   // Plugin draft and attachment actions reach this composer while it takes input.
@@ -598,6 +662,8 @@ export function Composer({
             controlsBlocked={controlsBlocked}
             pasting={pasting}
             pickAndAttach={pickAndAttach}
+            onAttachSession={attachSessionContext}
+            insertComposerText={insertComposerText}
             configureActiveSession={configureActiveSession}
             showToast={showToast}
             modelMenu={modelMenu}

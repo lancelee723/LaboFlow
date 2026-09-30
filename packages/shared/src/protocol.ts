@@ -320,6 +320,7 @@ export const IPC = {
     skillImport: "pi-desktop/skill/import",
     skillImportScan: "pi-desktop/skill/importScan",
     skillImportRun: "pi-desktop/skill/importRun",
+    pullsList: "pi-desktop/pulls/list",
     skillMarketSearch: "pi-desktop/skill/market/search",
     skillMarketFetch: "pi-desktop/skill/market/fetch",
     skillUpdate: "pi-desktop/skill/update",

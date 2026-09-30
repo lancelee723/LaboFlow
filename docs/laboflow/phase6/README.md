@@ -124,4 +124,32 @@ union 合并不可行。已改用上游版本，fork 的以下能力**暂时不�
 
 ## 4. 执行记录
 
-（每完成一项 T6 任务在此追加，沿用 phase5 惯例。）
+### T6.0 fork 能力重挂载完成（2026-09-30，当日）
+
+全部七个子任务完成并过全量回归。`test/deferred/` 目录已删除（八份测试全部
+移回主套件转绿）。主干触点清单（R5-10 登记）：
+
+| 触点 | 改动 |
+|---|---|
+| `laboflow/services.ts`（新） | org/expert/kb/channel/space/headless 八服务工厂 + 40 个 IPC handler（R5-10 主挂载面） |
+| `laboflow/settlement.ts`（新） | headless 驱动的回合结算登记/等待/消费 |
+| `index.ts` | +3 处：settlement 创建、laboflow 工厂调用（liveCallService 后）、registerIpc 内 fork 通道注册 + persona resolver 注入 |
+| `runtime/plans.ts` | `onTurnSettled` 钩子签名追加可选 `info?: { reason; errorCode }`（向后兼容） |
+| `ipc/agent-ipc.ts` | deps 可选 `resolveExpertPersona` + agentPrompt launch 时注入 personaPrompt |
+| `lib/settings-search.ts` | 恢复 experts/org/usage 三目的地 |
+| `features/settings/SettingsPage.tsx` | 三 tab 挂载 + 图标 |
+| `components/MessageRow.tsx`（features/chat/transcript） | KbCardBadge + CitationMarkdown（FR-E-16 / FR-KB-04） |
+| `hooks/use-composer-autocomplete.ts` + `ComposerAutocomplete.tsx` | @picker 专家/团队/上下文组 + 分组头 |
+| `features/chat/composer/ComposerToolbar.tsx` | plus 菜单（attach/@context/$skill/@expert/@team 四子模式） |
+| `components/Composer.tsx` | attachSessionContext + insertComposerText + onContextSession 接线 |
+| `stores/slices/queue-slice.ts` + `stores/expert-mention.ts`（新） | sendPrompt 的 @专家/@团队拦截（matchExpertMention TTL 缓存） |
+| `components/Sidebar.tsx` | SidebarOrgButton 回 footer |
+| `lib/queued-prompts.ts` | `clearQueuedPromptSendNow` 更名 `demotePromotedQueuedPrompts`（符合 promote 语义，send-state 测试的 fork 约定） |
+
+回归终态：desktop **3495 pass / 0 fail**（合并基线 3422 → +73，含 8 份 deferred
+33 用例回归）；agent-runtime 1125/1125；host-core 686/686；typecheck 0；build 绿。
+
+暂留事项：Composer plus 菜单的上下文模式使用 Toolbar 内简化的 contextSessions
+（前 8 条）；fork 原版含搜索框与 contextQuery 过滤（contextQuery 状态已接，搜索框
+渲染待 UI 打磨）；专家 foreground 的「会话绑定 persona 在重载后仍生效」依赖
+registry 持久化（已有测试覆盖）。

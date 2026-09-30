@@ -41,6 +41,10 @@ function loadComponent(name, extras = {}) {
     "../../../hooks/use-preview-target": { useOpenChatFileRef: () => () => {} },
     "../../../lib/chat-links": { splitChatText: () => [] },
     "../../../components/Markdown": { Markdown: ({ source: text }) => text },
+    "../../../components/kb/CitationMarkdown": {
+      CitationMarkdown: ({ source: text }) => text,
+    },
+    "../../../components/kb/citations": { kbCardKind: () => null },
     "../../../components/icons": new Proxy({}, { get: () => Icon }),
     "../../../components/ui": { TooltipButton },
     "./shared": shared,

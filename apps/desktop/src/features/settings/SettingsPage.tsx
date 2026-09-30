@@ -32,6 +32,9 @@ import {
   IconSparkles,
   IconCloudDown,
   IconMic,
+  IconGraduationCap,
+  IconShield,
+  IconActivity,
 } from "../../components/icons";
 import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../components/ui";
 import { ModelConfigPage } from "../../components/settings/ModelConfigPage";
@@ -45,6 +48,9 @@ import { ThemeRow } from "../../components/settings/ThemeRow";
 import { NetworkProxySection } from "../../components/settings/NetworkProxySection";
 import { ProjectsPage } from "../../pages/ProjectsPage";
 import { AgentSkillsPage } from "../../components/settings/AgentSkillsPage";
+import { AgentExpertsPage } from "../../components/settings/AgentExpertsPage";
+import { OrgSettingsPage } from "../../components/settings/OrgSettingsPage";
+import { TokenUsagePage } from "../../components/settings/TokenUsagePage";
 import { AgentMcpPage } from "../../components/settings/AgentMcpPage";
 import { AgentSubagentsPage } from "../../components/settings/AgentSubagentsPage";
 import { RemoteHostsPage } from "../../components/settings/RemoteHostsPage";
@@ -240,8 +246,11 @@ export function SettingsPage() {
       skills: <IconBookOpen size={14} />,
       mcp: <IconServer size={14} />,
       subagents: <IconBot size={14} />,
+      experts: <IconGraduationCap size={14} />,
       import: <IconDownload size={14} />,
       projects: <IconArchive size={14} />,
+      org: <IconShield size={14} />,
+      usage: <IconActivity size={14} />,
       sync: <IconCloudDown size={14} />,
       remoteHosts: <IconGlobe size={14} />,
       voice: <IconMic size={14} />,
@@ -566,6 +575,12 @@ export function SettingsPage() {
           {tab === "mcp" && <AgentMcpPage />}
 
           {tab === "subagents" && <AgentSubagentsPage />}
+
+          {tab === "experts" && <AgentExpertsPage />}
+
+          {tab === "org" && <OrgSettingsPage />}
+
+          {tab === "usage" && <TokenUsagePage />}
 
           {tab === "instructions" && <AgentInstructionsSection />}
 

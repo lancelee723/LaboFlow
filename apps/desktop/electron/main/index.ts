@@ -65,6 +65,8 @@ import {
   createProviderCatalogRuntime,
 } from "./runtime/provider-catalog";
 import { createSessionLaunchRuntime } from "./runtime/session-launch";
+import { createTurnSettlementRegistry } from "./laboflow/settlement";
+import { createLaboflowServices } from "./laboflow/services";
 import { createSessionCoordination } from "./runtime/session-coordination";
 import { createScheduledRuntime } from "./runtime/scheduled";
 import { createDesktopServices } from "./services/desktop-services";
@@ -407,6 +409,9 @@ const createdSessionLaunchRuntime = createSessionLaunchRuntime({
   normalizeThinkingLevel,
 });
 sessionLaunchRuntime = createdSessionLaunchRuntime;
+// LaboFlow T6.0.1: turn settlement registry feeding the headless driver; the
+// plan runtime's settle hook records into it (wired at createPlanRuntime).
+const laboflowSettlement = createTurnSettlementRegistry();
 const {
   refreshUserMcp,
   activeUserSkills,
@@ -717,7 +722,15 @@ const planRuntime = createPlanRuntime({
   acquireSessionOperation,
   resolveAgentRuntimeLaunch,
   isQuitting: () => mainState.quitting,
-  onTurnSettled: sessionCollaboration.settle,
+  onTurnSettled: (sessionId, turnId, info) => {
+    laboflowSettlement.recordTurnSettlement(
+      sessionId,
+      turnId,
+      { status: info?.reason ?? "error", errorCode: info?.errorCode },
+      activeTurnUsages.get(sessionId),
+    );
+    return sessionCollaboration.settle(sessionId, turnId);
+  },
 });
 const {
   finishTurn,
@@ -850,6 +863,35 @@ const liveCallService = createLiveCallService({
   },
 });
 
+// LaboFlow fork capability set (T6.0.1): org/expert/kb/channel/space services
+// with their own IPC namespace, mounted once the session launch runtime exists.
+const laboflow = createLaboflowServices({
+  getHost,
+  getSidecar,
+  logger,
+  sendToRenderer,
+  dataDir,
+  vendorOAuth,
+  resolveAgentRuntimeLaunch: (sessionId, session, settings, overrides) => {
+    if (!sessionLaunchRuntime) return Promise.reject(new Error("session launch runtime is not initialized"));
+    return sessionLaunchRuntime.resolveAgentRuntimeLaunch(sessionId, session, settings, overrides);
+  },
+  finishTurn: (sessionId, status, errorCode, options) =>
+    planRuntime.finishTurn(sessionId, status as never, errorCode, options ?? { turnId: "" }),
+  activeTurns,
+  activeTurnUsages,
+  plugins,
+  settlement: laboflowSettlement,
+  assertMainWindowSender: (event) => {
+    const mainWindow = mainState.mainWindow;
+    if (event.sender.id !== mainWindow?.webContents.id) {
+      throw Object.assign(new Error("renderer is not the main window"), {
+        errorCode: "PERMISSION_DENIED",
+      });
+    }
+  },
+});
+
 function registerIpc() {
   return registerIpcHandlers({
     traySessions: applicationLifecycle!.traySessions,
@@ -946,7 +988,43 @@ function registerIpc() {
     sendToRenderer,
     voiceService,
     liveCallService,
+    // LaboFlow T6.0.2: foreground expert persona lookup (module 01).
+    resolveExpertPersona: (sessionId: string) =>
+      laboflow.services.expertService.foregroundPersona(sessionId),
   });
+  // LaboFlow fork channels (org/expert/kb/channel/space/skill market).
+  const ipcOnError = (channel: string, error: unknown) => {
+    logger.app("runtime", "error", `laboflow handler failed: ${channel}`, {
+      data: String(error),
+    });
+  };
+  const handle: (channel: string, fn: (...args: any[]) => Promise<any>) => void = (
+    channel,
+    fn,
+  ) => {
+    ipcMain.handle(channel, async (_event, ...args) => {
+      try {
+        return await fn(...args);
+      } catch (error) {
+        ipcOnError(channel, error);
+        throw error;
+      }
+    });
+  };
+  const handleWithEvent: (
+    channel: string,
+    fn: (event: { sender: { id: number } }, ...args: any[]) => Promise<any>,
+  ) => void = (channel, fn) => {
+    ipcMain.handle(channel, async (event, ...args) => {
+      try {
+        return await fn(event as { sender: { id: number } }, ...args);
+      } catch (error) {
+        ipcOnError(channel, error);
+        throw error;
+      }
+    });
+  };
+  laboflow.registerIpc(handle, handleWithEvent);
 }
 
 // Default hardening for every web contents Electron creates, applied before

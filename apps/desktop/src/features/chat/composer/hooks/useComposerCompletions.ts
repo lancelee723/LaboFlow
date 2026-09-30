@@ -19,6 +19,7 @@ import {
   useSyncExternalStore,
   type RefObject,
 } from "react";
+import type { SessionSummary } from "@pi-desktop/shared";
 import {
   useComposerAutocomplete,
   type AutocompleteItem,
@@ -72,6 +73,7 @@ export function useComposerCompletions({
   applyEditorDraft,
   handleInput,
   invalidatePromptEnhancement,
+  onContextSession,
 }: {
   value: string;
   cursor: number;
@@ -82,6 +84,11 @@ export function useComposerCompletions({
   applyEditorDraft: (text: string, references: ComposerFileReference[], caret: number) => void;
   handleInput: (source: string, caret: number) => string;
   invalidatePromptEnhancement: () => void;
+  /** LaboFlow FR-C-34: attach a picked conversation's transcript as context. */
+  onContextSession?: (
+    session: SessionSummary,
+    override?: { text: string; caret: number },
+  ) => void | Promise<void>;
 }) {
   const host = useComposerAutocomplete({ value, cursor, composing, enabled });
   const { triggers } = useSyncExternalStore(
@@ -195,6 +202,16 @@ export function useComposerCompletions({
     const result = host.accept(index);
     if (!result) return;
     invalidatePromptEnhancement();
+    // A context pick attaches the conversation transcript via the same
+    // pipeline as the "+" menu, splicing its chip at the caret the @ token
+    // just vacated.
+    if (result.contextSession) {
+      void onContextSession?.(result.contextSession, {
+        text: result.value,
+        caret: result.cursor,
+      });
+      return;
+    }
     // File accept strips the @ token (empty insert) and used to store a
     // token-less chip above the textarea. Inline chips only paint when a
     // sentinel is in the draft, so Enter looked like the reference vanished.

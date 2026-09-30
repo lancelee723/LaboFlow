@@ -65,7 +65,13 @@ export type PlanRuntimeDependencies = {
   acquireSessionOperation: (sessionId: string) => Promise<() => void>;
   resolveAgentRuntimeLaunch: (...args: any[]) => Promise<any>;
   isQuitting: () => boolean;
-  onTurnSettled?: (sessionId: string, turnId: string) => Promise<void>;
+  /** LaboFlow T6.0.1: the headless driver consumes the settlement outcome,
+   * so the hook also carries how the turn ended (optional, additive). */
+  onTurnSettled?: (
+    sessionId: string,
+    turnId: string,
+    info?: { reason: TurnEndReason; errorCode?: string },
+  ) => Promise<void>;
 };
 
 export function createPlanRuntime({
@@ -307,7 +313,7 @@ function finishTurn(
     // Settlement of the durable turn is the trigger for the collaborators that
     // follow it; a turn with no durable end has nothing to settle.
     if (!isQuitting() && settledTurnId && typeof onTurnSettled === "function") {
-      void onTurnSettled(id, settledTurnId).catch((error: unknown) => {
+      void onTurnSettled(id, settledTurnId, { reason, errorCode }).catch((error: unknown) => {
         logger.app("persistence", "warn", "session collaboration settlement failed", {
           sessionId: id,
           data: String(error),

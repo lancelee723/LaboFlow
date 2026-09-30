@@ -23,6 +23,8 @@ import type {
   ComposerPrefill,
 } from "../../lib/composer-smart-stop";
 import { optimisticUserMessage } from "../../lib/session-transcript";
+import { matchExpertMention } from "../expert-mention";
+import { buildExpertDispatchTask } from "../../lib/expert-dispatch";
 import type { AppState } from "../app-state";
 import {
   type SessionRuntime,
@@ -392,6 +394,46 @@ export function createQueueSlice({
         }
         if (!sessionId) throw new Error(i18n.t("errors.noActiveSession"));
         if (get().pendingPlans[sessionId]?.status === "pending") return false;
+      // LaboFlow module 01 (T51.5): a prompt addressed to `@专家名`/`@团队名`
+      // starts an independent expert (or team) run instead of the normal
+      // agent turn. The run posts its completion card back into this session
+      // asynchronously; the draft's explicit context travels with the task.
+      const expertDispatch = await matchExpertMention(content);
+      if (expertDispatch) {
+        const task = buildExpertDispatchTask(expertDispatch.task, draft);
+        let dispatchedSessionId: string | undefined;
+        try {
+          const result =
+            expertDispatch.kind === "team"
+              ? await api.invokeExpertTeam({
+                  sessionId,
+                  teamId: expertDispatch.id,
+                  task,
+                })
+              : await api.invokeExpert({
+                  sessionId,
+                  expertId: expertDispatch.id,
+                  task,
+                });
+          dispatchedSessionId = result.sessionId;
+        } catch (e) {
+          get().showToast(
+            e instanceof Error ? e.message : i18n.t("expert.dispatchFailed"),
+            { variant: "error" },
+          );
+          return false;
+        }
+        get().showToast(
+          i18n.t("expert.dispatched", { expert: expertDispatch.name }),
+          { variant: "success" },
+        );
+        if (dispatchedSessionId) {
+          await get().refreshSessions();
+          await get().selectSession(dispatchedSessionId);
+        }
+        onAccepted?.(sessionId);
+        return true;
+      }
         if (get().runningSessions[sessionId]) {
           // Native Pi children have no Desktop prompt queue. Reject the send
           // here so the caller restores the draft instead of round-tripping a

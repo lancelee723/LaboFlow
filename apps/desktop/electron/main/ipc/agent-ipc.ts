@@ -32,6 +32,8 @@ export type AgentIpcDependencies = {
   approvedExecutionIdsBySession: Map<string, string>;
   claimedExecutionSessions: Map<string, string>;
   resolveAgentRuntimeLaunch: (...args: any[]) => Promise<any>;
+  /** LaboFlow T6.0.2: foreground expert persona for the session (module 01). */
+  resolveExpertPersona?: (sessionId: string) => string | undefined;
   acquireSessionOperation: (sessionId: string) => Promise<() => void>;
   finishTurn: FinishTurn;
   /**
@@ -93,6 +95,7 @@ export function registerAgentIpc({
   approvedExecutionIdsBySession,
   claimedExecutionSessions,
   resolveAgentRuntimeLaunch,
+  resolveExpertPersona,
   acquireSessionOperation,
   finishTurn,
   lockAbortReason,
@@ -439,11 +442,13 @@ export function registerAgentIpc({
       session = refreshed.session ?? session;
     }
 
-    const launch = await resolveAgentRuntimeLaunch(
-      req.sessionId,
-      session,
-      settings,
-    );
+    // LaboFlow: a foreground expert/team session keeps its bound persona on
+    // every user turn; the registry is consulted per prompt and the overrides
+    // plumbing flows personaPrompt into the sidecar.
+    const expertPersona = resolveExpertPersona?.(req.sessionId);
+    const launch = await resolveAgentRuntimeLaunch(req.sessionId, session, settings, {
+      ...(expertPersona ? { personaPrompt: expertPersona } : {}),
+    });
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 
     // Open a durable turn row, then persist the user message under it.

@@ -14,8 +14,11 @@ export type SettingsTabId =
   | "skills"
   | "mcp"
   | "subagents"
+  | "experts"
   | "import"
   | "projects"
+  | "org"
+  | "usage"
   | "sync"
   | "remoteHosts"
   | "voice"
@@ -247,6 +250,20 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     ],
   },
   {
+    id: "experts",
+    labelKey: "settings.nav.experts",
+    titleKey: "settings.experts",
+    group: "agent",
+    keywordKeys: [
+      "settings.expertsDescription",
+      "expert.tabCenter",
+      "expert.tabMine",
+      "expert.tabTeams",
+      "expert.newExpert",
+      "expert.newTeam",
+    ],
+  },
+  {
     id: "import",
     labelKey: "settings.nav.import",
     titleKey: "settings.import",
@@ -272,6 +289,33 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "project.archive",
       "project.restore",
       "project.delete",
+    ],
+  },
+  {
+    id: "org",
+    labelKey: "settings.nav.org",
+    titleKey: "settings.orgTitle",
+    group: "workspace",
+    keywordKeys: [
+      "settings.org.description",
+      "settings.org.server",
+      "settings.org.username",
+      "settings.org.role",
+      "settings.org.workspaces",
+    ],
+  },
+  {
+    id: "usage",
+    labelKey: "settings.nav.usage",
+    titleKey: "settings.usageTitle",
+    group: "data",
+    keywordKeys: [
+      "settings.usageDescription",
+      "settings.usage.totalTokens",
+      "settings.usage.peakTokens",
+      "settings.usage.currentStreak",
+      "settings.usage.longestStreak",
+      "settings.usage.totalTurns",
     ],
   },
   {

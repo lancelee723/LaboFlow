@@ -4,14 +4,17 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-const [store, hook, popup, composer, en, zhCN] = await Promise.all([
-  read("../src/stores/app-store.ts"),
+const [queueSlice, mention, hook, popup, composer, composerToolbar, en, zhCN] = await Promise.all([
+  read("../src/stores/slices/queue-slice.ts"),
+  read("../src/stores/expert-mention.ts"),
   read("../src/hooks/use-composer-autocomplete.ts"),
   read("../src/components/ComposerAutocomplete.tsx"),
   read("../src/components/Composer.tsx"),
+  read("../src/features/chat/composer/ComposerToolbar.tsx"),
   read("../../../packages/i18n/src/locales/en/index.ts"),
   read("../../../packages/i18n/src/locales/zh-CN/index.ts"),
 ]);
+const composerSurface = [composer, composerToolbar].join("\n");
 
 test("@ picker merges experts then teams ahead of contexts and files", () => {
   assert.match(hook, /kind: "expert"; expert: ExpertListItem; match: FuzzyMatch/);
@@ -49,14 +52,14 @@ test("group header keys exist across locales", () => {
 });
 
 test("plus menu mirrors the @ picker with a team section", () => {
-  assert.match(composer, /plusTeams\?\.length \? \(/);
-  assert.match(composer, /insertComposerText\(`@\$\{team\.name\} `\)/);
-  assert.match(composer, /api\s*\.listExpertTeams\(\)/);
+  assert.match(composerSurface, /plusTeams\?\.length \? \(/);
+  assert.match(composerSurface, /insertComposerText\(`@\$\{team\.name\} `\)/);
+  assert.match(composerSurface, /api\s*\.listExpertTeams\(\)/);
 });
 
 test("send path dispatches teams through invokeExpertTeam with the envelope", () => {
-  const dispatch = store.match(
-    /const expertDispatch = await matchExpertMention\(content\);[\s\S]*?return true;\n    }/,
+  const dispatch = queueSlice.match(
+    /const expertDispatch = await matchExpertMention\(content\);[\s\S]*?return true;\n\s*\}/,
   )?.[0] ?? "";
   assert.match(dispatch, /buildExpertDispatchTask\(expertDispatch\.task, draft\)/);
   assert.match(dispatch, /expertDispatch\.kind === "team"/);
@@ -68,7 +71,7 @@ test("send path dispatches teams through invokeExpertTeam with the envelope", ()
 
 test("mention resolution covers both registries, experts winning ties", () => {
   const resolver =
-    store.match(/export async function matchExpertMention\([\s\S]*?^\}/m)?.[0] ?? "";
+    mention.match(/export async function matchExpertMention\([\s\S]*?^\}/m)?.[0] ?? "";
   assert.match(resolver, /api\s*\.listExperts\(\)/);
   assert.match(resolver, /api\s*\.listExpertTeams\(\)/);
   assert.match(resolver, /expert\.enabled !== false/);

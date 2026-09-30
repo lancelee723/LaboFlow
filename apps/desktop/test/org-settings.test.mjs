@@ -15,7 +15,7 @@ const search = await readFile(
   "utf8",
 );
 const settingsPage = await readFile(
-  new URL("../src/pages/SettingsPage.tsx", import.meta.url),
+  new URL("../src/features/settings/SettingsPage.tsx", import.meta.url),
   "utf8",
 );
 const protocol = await readFile(
@@ -64,7 +64,7 @@ test("settings exposes the organization destination end to end", () => {
 
 test("phase 3: org provider sync and live quota panel", async () => {
   const main = await readFile(
-    new URL("../electron/main/index.ts", import.meta.url),
+    new URL("../electron/main/laboflow/services.ts", import.meta.url),
     "utf8",
   );
   const orgService = await readFile(

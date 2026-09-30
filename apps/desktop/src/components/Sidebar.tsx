@@ -61,6 +61,7 @@ import {
 } from "../lib/sidebar-resize";
 import { BrandLogo } from "./BrandLogo";
 import { NotificationCenter } from "./NotificationCenter";
+import { SidebarOrgButton } from "./SidebarOrgButton";
 import { ProjectEditDialog } from "./ProjectEditDialog";
 import { useArmedDelete } from "../hooks/use-armed-delete";
 import { ProjectDeleteDialog } from "./ProjectDeleteDialog";
@@ -2525,6 +2526,13 @@ export function Sidebar({
             >
               <IconClock size={14} aria-hidden />
             </TooltipButton>
+            <SidebarOrgButton
+              onOpenSettings={() => {
+                setPage("settings");
+                setSettingsTab("org");
+              }}
+              onBeforeOpen={() => closeMenus(false)}
+            />
             <NotificationCenter onBeforeOpen={() => closeMenus(false)} />
           </div>
 
