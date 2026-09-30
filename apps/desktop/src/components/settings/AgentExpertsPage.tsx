@@ -379,6 +379,10 @@ export function AgentExpertsPage() {
     source === "preset" ? "neutral" : source === "org" ? "warning" : "success";
 
   const openInvoke = (expert: ExpertListItem) => {
+    // Expert and team invoke dialogs are mutually exclusive: a stale teamTarget
+    // would flip the dialog into team mode (title, submit path).
+    setTeamTarget(null);
+    setTeamTask("");
     setInvokeTask(expert.examples[0] ?? "");
     setInvokeTarget(expert);
   };
@@ -724,6 +728,8 @@ export function AgentExpertsPage() {
             size="sm"
             variant="primary"
             onClick={() => {
+              setInvokeTarget(null);
+              setInvokeTask("");
               setTeamTask("");
               setTeamTarget(team);
             }}

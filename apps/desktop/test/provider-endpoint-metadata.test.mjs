@@ -12,6 +12,7 @@
  * chain: discovery, endpoint resolution, catalog anchoring, and the hand-typed
  * id channel.
  */
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import test from "node:test";
@@ -22,7 +23,7 @@ const { registerProviderIpc } = await import("../electron/main/ipc/provider-ipc.
 const { ModelsDevCatalog } = await import("../electron/main/models-dev-catalog.ts");
 const { IPC } = await import("@pi-desktop/shared");
 
-const catalogPath = new URL("../resources/models.dev/api.json", import.meta.url).pathname;
+const catalogPath = fileURLToPath(new URL("../resources/models.dev/api.json", import.meta.url));
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {

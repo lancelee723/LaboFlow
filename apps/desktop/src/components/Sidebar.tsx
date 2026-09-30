@@ -12,6 +12,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { TooltipButton, cx } from "./ui";
+import { decideKbEntry } from "./kb/kbUrls";
+import type { KbUrlEntry } from "@pi-desktop/shared";
+import { IconFolderOpen } from "./icons";
 
 /** Default number of most-recent sessions shown per project group before the rest fold. */
 const MAX_VISIBLE_SESSIONS = 10;
@@ -269,6 +272,7 @@ export function Sidebar({
   const setProjectSort = useAppStore((s) => s.setProjectSort);
   const reorderProjects = useAppStore((s) => s.reorderProjects);
   const showToast = useAppStore((s) => s.showToast);
+  const openUrlInWorkPanel = useAppStore((s) => s.openUrlInWorkPanel);
   const version = useAppStore((s) => s.version);
   const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const setSettingsAnchor = useAppStore((s) => s.setSettingsAnchor);
@@ -290,6 +294,9 @@ export function Sidebar({
     top: number;
     left: number;
   } | null>(null);
+  // LaboFlow module 05 (FR-KB-06/07): quick knowledge-base entry — one
+  // configured URL opens the work-panel browser; several show a tiny picker.
+  const [kbPicker, setKbPicker] = useState<KbUrlEntry[] | null>(null);
   const {
     card: sessionHoverCard,
     show: revealSessionHoverCard,
@@ -1093,6 +1100,30 @@ export function Sidebar({
         {status === "failed" ? <IconCircleAlert size={11} aria-hidden /> : null}
       </span>
     );
+  };
+
+  /** LaboFlow module 05 (FR-KB-06/07): knowledge-base quick entry. */
+  const openKbEntry = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    closeMenus(false);
+    let urls: KbUrlEntry[] = [];
+    try {
+      urls = await api.listKbUrls();
+    } catch (error) {
+      reportError(error);
+      return;
+    }
+    const decision = decideKbEntry(urls);
+    if (decision.action === "empty") {
+      showToast(t("kb.emptyToast"));
+      return;
+    }
+    if (decision.action === "open") {
+      openUrlInWorkPanel(decision.url);
+      return;
+    }
+    setMenuPosition({ top: rect.bottom + 6, left: rect.left });
+    setKbPicker(urls);
   };
 
   const reportError = useCallback(
@@ -2526,6 +2557,16 @@ export function Sidebar({
             >
               <IconClock size={14} aria-hidden />
             </TooltipButton>
+            <TooltipButton
+              type="button"
+              className="icon-btn icon-btn-square"
+              data-action="quick-kb"
+              tooltip={t("kb.title")}
+              ariaLabel={t("kb.title")}
+              onClick={(event) => void openKbEntry(event)}
+            >
+              <IconFolderOpen size={14} />
+            </TooltipButton>
             <SidebarOrgButton
               onOpenSettings={() => {
                 setPage("settings");
@@ -2561,6 +2602,38 @@ export function Sidebar({
         </div>
       </div>
       {renderFloatingMenu()}
+      {kbPicker ? (
+        portalToBody(
+          <div
+            className="sidebar-row-menu sidebar-floating-menu sidebar-kb-menu"
+            role="menu"
+            aria-label={t("kb.pickerTitle")}
+            style={{ position: "fixed", top: menuPosition?.top ?? 0, left: menuPosition?.left ?? 0 }}
+          >
+            <div className="sidebar-popover-title">{t("kb.pickerTitle")}</div>
+            {kbPicker.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                role="menuitem"
+                data-action="kb-open-url"
+                title={entry.url}
+                onClick={() => {
+                  closeMenus(false);
+                  setKbPicker(null);
+                  openUrlInWorkPanel(entry.url);
+                }}
+              >
+                <IconFolderOpen size={14} />
+                <span>{entry.name}</span>
+                <span className={`kb-source-badge ${entry.source === "org" ? "org" : "user"}`}>
+                  {entry.source === "org" ? t("kb.sourceOrg") : t("kb.sourceUser")}
+                </span>
+              </button>
+            ))}
+          </div>,
+        )
+      ) : null}
       {sessionHoverCard ? (
         <SessionHoverCard
           key={sessionHoverCard.session.id}

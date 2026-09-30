@@ -3,6 +3,7 @@ import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const verifyScript = new URL(
@@ -84,7 +85,7 @@ exit 0
 }
 
 function runNotarize(release, bin, log, extraEnv = {}) {
-  return spawnSync("bash", [notarizeScript.pathname, release], {
+  return spawnSync("bash", [fileURLToPath(notarizeScript), release], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -191,7 +192,7 @@ test("the notarization step fails closed without team-scoped credentials", async
   const missing = { ...process.env, ...NOTARY_ENV, NOTARY_LOG: log };
   delete missing.APPLE_ID;
   delete missing.APPLE_APP_SPECIFIC_PASSWORD;
-  const missingResult = spawnSync("bash", [notarizeScript.pathname, release], {
+  const missingResult = spawnSync("bash", [fileURLToPath(notarizeScript), release], {
     encoding: "utf8",
     env: missing,
   });
@@ -241,7 +242,7 @@ test("macOS release verification requires a notarized Developer ID app and DMG",
 
   // The local lane passes the bare common name; the script must still match the
   // prefixed Authority line codesign prints.
-  const result = spawnSync("bash", [verifyScript.pathname, release], {
+  const result = spawnSync("bash", [fileURLToPath(verifyScript), release], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -282,7 +283,7 @@ test("macOS release verification rejects a Developer ID app without notarization
     ["codesign", "spctl", "xcrun"].map((name) => chmod(join(bin, name), 0o755)),
   );
 
-  const result = spawnSync("bash", [verifyScript.pathname, release], {
+  const result = spawnSync("bash", [fileURLToPath(verifyScript), release], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
@@ -312,7 +313,7 @@ test("macOS release verification accepts the prefixed identity form", async (t) 
     ["codesign", "spctl", "xcrun"].map((name) => chmod(join(bin, name), 0o755)),
   );
 
-  const result = spawnSync("bash", [verifyScript.pathname, release], {
+  const result = spawnSync("bash", [fileURLToPath(verifyScript), release], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -345,7 +346,7 @@ test("macOS release verification rejects a different signing identity", async (t
     ["codesign", "spctl", "xcrun"].map((name) => chmod(join(bin, name), 0o755)),
   );
 
-  const result = spawnSync("bash", [verifyScript.pathname, release], {
+  const result = spawnSync("bash", [fileURLToPath(verifyScript), release], {
     encoding: "utf8",
     env: {
       ...process.env,
