@@ -1,3 +1,4 @@
+import { readAppSource } from "./helpers/source-contracts.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -6,7 +7,7 @@ import { loadStyles } from "./helpers/styles.mjs";
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 const [app, main, splash, css, english, chinese] = await Promise.all([
-  read("../src/App.tsx"),
+  readAppSource(),
   read("../src/main.tsx"),
   read("../src/components/StartupSplash.tsx"),
   loadStyles(),
@@ -54,7 +55,7 @@ test("crash and empty-home title copy is catalog-backed in English and Chinese",
   assert.match(chinese, /uiCrashed:\s*"界面出现了问题"/);
   assert.match(app, /i18n\.t\("app\.uiCrashed"\)/);
   assert.match(main, /crashCatalog\.app\.uiCrashed/);
-  assert.doesNotMatch(main, /PI-Desktop failed to start UI/);
+  assert.doesNotMatch(main, /LaboFlow failed to start UI/);
   assert.match(chinese, /emptyTitle:\s*"今天想做点什么？"/);
   assert.match(english, /emptyTitleTemporary:\s*"What would you like to explore temporarily\?"/);
   assert.match(chinese, /emptyTitleTemporary:\s*"临时聊点什么？"/);

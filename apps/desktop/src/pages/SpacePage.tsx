@@ -337,9 +337,8 @@ export function SpacePage() {
               <Button
                 variant="primary"
                 onClick={() => {
-                  const setSettingsTab = useAppStore.getState().setSettingsTab;
+                  // TODO(sync-v0.15.10 Task 0): org settings tab pending re-wire
                   useAppStore.getState().setPage("settings");
-                  setSettingsTab("org");
                 }}
               >
                 {t("settings.nav.org")}

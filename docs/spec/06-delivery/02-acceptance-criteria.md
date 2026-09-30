@@ -48,7 +48,8 @@ MVP passes when:
 - [x] Plan and Goal Bash prompt under Ask/Accept edits and run without confirmation
   under explicit Auto — auto:`test:e2e:plan` E2E-105 + host-core permission tests
 - [x] Agent mode uses permission policy for Write/Edit/Bash — manual:M3
-- [x] Permission timeout (120s) becomes deny — manual:M3 (D005)
+- [x] Local permission cards remain pending until an explicit decision or
+  cancellation; tool execution budgets remain enforced — unit/host-core: issue #1214 (D636)
 - [x] Read/Glob/Grep work inside the project — auto:`test:e2e` (glob tool)
 - [x] Write/Edit/Bash trigger an inline, session-scoped confirmation card — manual:M3
 - [x] Background events and permission requests never activate or cover another
@@ -126,6 +127,7 @@ MVP passes when:
 - [x] Plugin can register and serve at least one agent tool — auto:`test:e2e` (E2E-024 dispatch roundtrip)
 - [x] Disabling removes commands and tools — auto:`test:e2e` (plugin disable)
 - [x] A plugin exception does not crash the app — manual:M4
+- [ ] A plugin observes exactly one turn-end event per host turn — draft:E2E-PLUGIN-turn-ended-once-per-host-turn (not run locally; requires `test:e2e`)
 
 ### H. Diagnostics
 - [x] Errors expose stable codes — auto:`test:e2e` (fatal-path assertions)

@@ -22,6 +22,17 @@ type PluginManifestV1 = {
  name: string;
  version: string; // semver
  description?: string;
+ /**
+  * 展示文案的多语言表：当应用语言命中其中某个 locale 时用它替换
+  * `name` / `description`（见 §3.1）。扁平字段仍是作者自己的语言，也是最终回退。
+  */
+ i18n?: {
+   [locale: string]: {
+     name?: string;
+     description?: string;
+     safetyNotes?: string;
+   };
+ };
  author?: string | { name: string; url?: string; email?: string };
  homepage?: string;
  repository?: string;
@@ -64,6 +75,39 @@ type PluginUiConfig = {
 };
 ```
 
+### 3.1 多语言标签（`i18n`）
+
+`name`、`description` 和 `safetyNotes` 都是展示文案，插件可以用顶层 `i18n` 块按
+locale 声明。扩展页、插件启动器和市场（从 catalog 条目读取同一个块）显示的是**应用
+语言**对应的条目，而不是作者自己写的那一种：
+
+```json
+{
+  "name": "小清新待办",
+  "description": "作者原话",
+  "i18n": {
+    "en": { "name": "Todo List", "description": "A calm todo list" },
+    "zh-CN": { "name": "小清新待办", "description": "轻盈的待办清单", "safetyNotes": "只写自己的数据" }
+  }
+}
+```
+
+规则：
+
+1. `en` 与 `zh-CN` 是契约 locale。所有中文壳 locale（`zh`、`zh-CN`、`zh-Hans`、
+   `zh-SG`）读 `zh-CN`，其余读 `en`。插件不必为其他已发布壳 locale 提供翻译，
+   因此 `zh-TW` 读英文，而不是拿半份 `zh-CN` 猜测（ADR 0182）。
+2. 插件仓库的校验器要求两个 locale 与三个字段齐全，但宿主是宽容的：缺 locale、
+   缺字段或空字符串会按字段依次回退到另一个契约 locale，再回退到作者扁平的
+   `name` / `description`。
+3. 解析发生在宿主里，依据桌面壳下发的语言（`settings.language`，为 `auto` 时是
+   系统语言）。存储行保留作者原文，因此切换语言只改变读取结果，绝不改写注册表。
+4. 该块是展示元数据。格式错误（不是 locale → 对象的对象）会让 manifest 校验失败；
+   条目里未知的 locale 与未知字段一律忽略。
+5. 该块只服务身份文案（`name`、`description`、`safetyNotes`）。插件自有文案——面板、
+   视图、widget、生成式设置、toast、运行时命令标题——不在这里翻译。宿主只发布当前
+   语言（`pi.app.getLocale`、`appearance:changed`），由插件自行本地化（ADR 0280）。
+
 ## 4. 贡献
 
 ```ts
@@ -71,12 +115,17 @@ type PluginContributes = {
  commands?: PluginCommandContrib[];
  agentTools?: PluginAgentToolContrib[];
  skills?: Array<string | PluginSkillContrib>; // relative paths, or metadata overrides
+ agentExtensions?: string[]; // 在 agent sidecar 内运行的 ExtensionAPI 模块；需要 `agent.extension`（规格 16）
+ providers?: PluginProviderContrib[]; // 宿主拥有的 provider 行；需要 `provider.register`（规格 13）
  settings?: PluginSettingContrib[];
  themes?: PluginThemeContrib[];
+ windowAppearance?: PluginWindowAppearanceContrib; // 原生窗口背景；需要 `ui.window.appearance`
  mcpServers?: PluginMcpServerContrib[];
  services?: PluginServiceContrib[];
- bus?: PluginBusContrib;
- views?: PluginViewContrib[];
+  bus?: PluginBusContrib;
+  views?: PluginViewContrib[];
+  sessionSources?: PluginSessionSourceContrib[];
+  globalShortcuts?: PluginGlobalShortcutContrib[]; // 需要 `keyboard.globalShortcut`
 };
 
 type PluginCommandContrib = {
@@ -99,7 +148,7 @@ type PluginAgentToolContrib = {
 
 type PluginSettingContrib = {
  key: string;
- title: string;
+ title: string; // 作者语言；生成式设置面板不做本地化
  description?: string;
  type: "string" | "number" | "boolean" | "select" | "json" | "shortcut";
  default?: unknown;
@@ -114,7 +163,19 @@ type PluginViewContrib = {
  title: string | { en: string; "zh-CN": string };
  icon?: string; // 宿主图标集中的 token；未知 token 渲染为字母瓷砖
  entry: string; // 视图 HTML 入口的相对路径
- order?: number; // 插件视图分组内的升序排序键，默认 0
+  order?: number; // 插件视图分组内的升序排序键，默认 0
+};
+
+type PluginSessionSourceContrib = {
+ id: string; // ^[a-zA-Z][a-zA-Z0-9._-]{0,63}$，插件内唯一
+ label?: string | { en: string; "zh-CN": string };
+};
+
+/** 插件声明的一个系统级快捷键（`keyboard.globalShortcut`）。 */
+type PluginGlobalShortcutContrib = {
+ id: string; // ^[a-zA-Z][a-zA-Z0-9._-]{0,63}$，插件内唯一
+ command: string; // 必须声明在 contributes.commands 里
+ default?: string; // 宿主在加载后注册的加速键；省略则由 `pi.keyboard` 稍后注册
 };
 
 type PluginThemeContrib = {
@@ -122,6 +183,13 @@ type PluginThemeContrib = {
  label: string;
  path: string; // relative `.css` file
  base?: "light" | "dark"; // palette the overrides layer on, default `dark`
+ assets?: string[]; // 插件包内相对路径或绝对路径；png/jpg/jpeg/webp/avif/svg/woff2 白名单，总和上限 4 MB；
+                    // 相对路径在插件根目录内解析，拒绝路径穿越和 `node_modules`；
+                    // 命中的 `url()` 改写为 `plugin-asset://`
+};
+
+type PluginWindowAppearanceContrib = {
+ backgroundColor?: { light?: string; dark?: string }; // #rrggbb | #rrggbbaa
 };
 
 type PluginSkillContrib = {
@@ -154,7 +222,43 @@ type PluginBusContrib = {
  publish?: string[]; // concrete topics, e.g. `build.done`
  subscribe?: string[]; // patterns, e.g. `build.*` / `build.**`
 };
+
+type PluginProviderContrib = {
+ id: string; // ^[a-zA-Z][a-zA-Z0-9_-]{0,63}$，插件内唯一
+ name: string; // 原生 provider 列表中的显示名
+ vendorKey?: string; // models.dev 供应商键，默认 `custom`
+ baseUrl?: string; // 绝对 http(s) URL
+ apiStyle?: PluginProviderApiStyle; // 线路风格，默认 `chat_completions`
+ authKind?: "api_key" | "none"; // 默认 `api_key`；`oauth` 暂被拒绝
+ models: PluginProviderModelContrib[]; // 1..64 条
+};
+
+type PluginProviderApiStyle =
+ | "chat_completions"
+ | "opencode_go"
+ | "responses"
+ | "anthropic_messages"
+ | "google_generative_ai"
+ | "openai_codex_responses"
+ | "pi_messages";
+
+type PluginProviderModelContrib = {
+ id: string; // 1..256 个字符，provider 内唯一
+ name?: string; // 模型绑定的显示标签
+ contextWindow?: number;
+ maxTokens?: number;
+ supportsImages?: boolean;
+ /** 模型可提供的规范思考档位，按声明顺序保留。 */
+ thinkingLevels?: string[];
+ /** 当该值存在于 `thinkingLevels` 时，新会话使用它。 */
+ defaultThinkingLevel?: string;
+};
 ```
+`thinkingLevels` 可选。宿主会裁剪条目、丢弃未知规范档位、去重，并保留剩余的声明顺序。
+缺失或不可用的列表会变成空绑定。只有当 `defaultThinkingLevel` 命中该模型列表中的归一化档位
+时才会保留；否则会被丢弃，普通绑定归一化会选择第一个可用档位。
+清单校验会拒绝非数组的 `thinkingLevels`、其中任何非字符串条目，或非字符串的
+`defaultThinkingLevel`；未知的字符串档位则会被接受并在归一化时丢弃。
 
 ## 5. 权限枚举
 
@@ -163,6 +267,7 @@ type PluginPermission =
  | "ui.panel"
  | "ui.view"
  | "ui.theme"
+ | "ui.window.appearance"
  | "clipboard.read"
  | "clipboard.write"
  | "notify"
@@ -171,14 +276,29 @@ type PluginPermission =
  | "fs.delete"
  | "agent.tool.register"
  | "agent.prompt.inject"
+ | "provider.register"
  | "net.fetch"
+ | "net.anyHost"
  | "shell.openExternal"
  | "mcp.server.local"
  | "mcp.server.remote"
  | "background.service"
  | "bus.publish"
  | "bus.subscribe"
- | "browser.cdp";
+ | "browser.cdp"
+ | "desktop.control"
+ | "ui.microphone"
+ | "project.create"
+ | "session.import"
+ | "session.read.own"
+ | "session.update.own"
+ | "session.delete.own"
+ | "usage.read"
+ | "audio.capture.background"
+ | "audio.playback.background"
+ | "speech.adapter.register"
+ | "keyboard.globalShortcut"
+ | "net.websocket";
 ```
 
 未知权限=验证失败。
@@ -235,6 +355,20 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 无论 `net.fetch` 怎么声明。条目是裸主机名：没有 scheme、没有端口、没有路径，
 也不允许裸 `*`。前缀 `*.` 同时覆盖该域名及其子域名。
 
+`pi.net.websocket` 听同一份列表（`net.websocket`，
+[03-plugin-api.md](/zh-CN/spec/07-plugins/03-plugin-api) §3）。该权限已实现：
+连接被限定在 `manifest.net.domains` 之内，未被声明的主机会在传输被要求
+打开任何东西之前就被拒绝。
+
+### 5.3.1 net.anyHost —— 豁免通道
+
+`"net.anyHost"` 面向端点由用户填写（自建服务器、个人域名等清单无法提前
+写明）的插件。持有该权限后，上述所有出网路径都对任意 http(s)/ws(s) 主机
+放行 —— 云元数据端点（`169.254.169.254` 等）除外，授权永远到不了那里：
+它们的应答是实例凭据。`net.domains` 已声明的主机保持现有行为，存量清单
+不受影响；未持有该权限的插件同样零变化。它与其他权限一样在安装/更新
+确认页展示，请求时不再有任何弹窗。
+
 ## 5. 1 总线主题语法
 
 主题最多是与 `[a-zA-Z0-9][a-zA-Z0-9_-]*` 匹配的点分隔段
@@ -251,6 +385,29 @@ type PluginNetDomains = string[]; // "api.example.com" 或 "*.example.com"
 }
 ```
 
+
+## 5.4 providers —— 插件声明的 provider 行
+
+`contributes.providers` 最多声明 8 个 provider，宿主会把每一项落成原生 provider
+列表中的一行，并归该插件所有（[ADR 0259](../../../adr/0259-plugin-declared-providers.md)）：
+
+- 声明的 `id` 匹配 `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 且在插件内唯一；行 id 为
+  `plugin:<pluginId>:<declaredId>`
+- `name` 必填，是设置页显示的名称
+- `baseUrl` 可选，但必须是绝对 `http(s)` URL
+- `apiStyle` 可选，默认 `chat_completions`；可取值是 provider 配置中除 `auto`
+  以外的风格
+- `authKind` 可选，为 `api_key`（默认）或 `none`
+- `models` 要求 1..64 条，id 唯一且长度为 1..256
+
+非空的 `contributes.providers` 需要高风险权限 `provider.register`
+（[13-plugin-permissions-matrix.md](/zh-CN/spec/07-plugins/13-plugin-permissions-matrix)）。
+声明会在每次插件加载时重新读取，并对其自身字段具有权威；禁用插件会保留这些行并
+将其关闭，而删除声明或卸载插件会连同已存凭据一起删除该行。
+
+`oauth` **暂不支持**：宿主还没有插件 OAuth 登录流程，因此 `oauth` 块或
+`authKind: \"oauth\"` 会在清单元数据校验阶段被拒绝。计划中的 `provider.oauth`
+权限与宿主自有的登录流程属于未来工作，当前不可用。
 ## 6. activationEvents（可选）
 
 示例：
@@ -274,7 +431,8 @@ MVP 只能实现：
 6. `main` / `ui.panel` / 技能 / `views[].entry` 路径必须存在
 7.工具`name`仅允许`[a-zA-Z][a-zA-Z0-9_]*`
 8. 贡献 ID（`themes`、`mcpServers`、`services`、`views`）必须匹配
-   `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 并在自己的列表中保持唯一
+   `[a-zA-Z][a-zA-Z0-9_-]{0,63}` 并在自己的列表中保持唯一；
+   `sessionSources` 允许额外使用 `.`
 9. `themes[].path` 必须存在且以 `.css` 结尾； `themes[].base` 可能只是
    `light` 或 `dark`
 10. `mcpServers[]` 必须准确设置一个传输字段：`stdio` 要求
@@ -284,8 +442,8 @@ MVP 只能实现：
 11. `bus.publish` 条目必须是具体主题，`bus.subscribe` 条目必须是具体主题
    有效模式（§5.1）
 12. 需要权限的贡献在权限验证时失败
-   缺少：`themes` → `ui.theme`，`views` → `ui.view`，stdio 服务器 →
-   `mcp.server.local`，远程
+   缺少：`themes` → `ui.theme`，`views` → `ui.view`，`providers` →
+   `provider.register`，stdio 服务器 → `mcp.server.local`，远程
    服务器 → `mcp.server.remote`、`services` → `background.service`、
    `bus.publish` → `bus.publish`，`bus.subscribe` → `bus.subscribe`。
 `skills` 是一个例外 - 它早于权限门，因此清单
@@ -303,6 +461,13 @@ MVP 只能实现：
 16. `views[].title` 必填；使用本地化对象时必须同时提供 `en` 与 `zh-CN`。
     `views[].icon` **不**按 token 列表校验：未知 token 会降级为字母瓷砖，
     为一个纯外观细节拒绝插件并不合理。打包检查会改为给出警告
+17. `sessionSources` id 必须匹配 `[a-zA-Z][a-zA-Z0-9._-]{0,63}` 且不能重复；
+    本地化 label 必须同时提供 `en` 和 `zh-CN`
+18. `contributes.globalShortcuts` 最多允许 8 条，且需要
+   `keyboard.globalShortcut`。每个 `id` 匹配
+   `[a-zA-Z][a-zA-Z0-9._-]{0,63}` 且唯一；`command` 必须声明在
+   `contributes.commands` 里；`default` 若存在，使用与 `shortcut` 设置相同的
+   修饰键加按键 / F 键语法
 
 ## 8. 示例：最小插件
 

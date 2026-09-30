@@ -2,7 +2,7 @@
   Token Insights panel styles.
 
   A plugin panel is its own BrowserWindow, so it cannot import the app's
-  globals.css. This file is a hand-kept mirror of the PI-Desktop design system
+  globals.css. This file is a hand-kept mirror of the LaboFlow design system
   (docs/spec/04-ux/07-ui-design-system.md §4.2/§4.3 palettes, §5 type ramp,
   §6.2 46px chrome rhythm).
 

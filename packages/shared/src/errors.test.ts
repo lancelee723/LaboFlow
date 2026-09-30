@@ -35,6 +35,7 @@ describe("result helpers", () => {
     const newlyLiveCodes = [
       "CONTEXT_COMPACTION_FAILED",
       "EMPTY_MODEL_RESPONSE",
+      "SUBAGENT_OUTPUT_TRUNCATED",
       "EDIT_TAG_REQUIRED",
       "EDIT_TAG_MISMATCH",
       "EDIT_TAG_UNKNOWN",
@@ -47,6 +48,7 @@ describe("result helpers", () => {
       "EDIT_REPAIR_AMBIGUOUS",
       "EDIT_NO_CHANGE",
       "EDIT_AMPLIFICATION_LIMIT",
+      "MODEL_ALIAS_TOO_LONG",
     ] as const;
 
     for (const code of newlyLiveCodes) {

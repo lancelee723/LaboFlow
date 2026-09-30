@@ -1,9 +1,10 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { ChatTranscript } from "./ChatTranscript";
-import { TeamRunStrip } from "./TeamRunStrip";
 import { useAppStore } from "../stores/app-store";
 import { headPermission, sessionPermissions } from "../lib/pending-permissions";
 import { headAsk } from "../lib/pending-asks";
+import { useTranscriptView } from "../hooks/use-transcript-view";
+import { TranscriptDisclosureProvider } from "../features/chat/transcript/disclosure";
 
 /**
  * One retained conversation pane (ADR 0137).
@@ -25,16 +26,9 @@ export const SessionPane = memo(function SessionPane({
   sessionId: string;
   visible: boolean;
 }) {
-  const isActiveProjection = useAppStore(
-    (state) => state.activeSessionId === sessionId,
-  );
-  const liveMessages = useAppStore((state) => state.messages);
-  const snapshot = useAppStore((state) => state.retainedTranscripts[sessionId]);
-  const messages = isActiveProjection ? liveMessages : snapshot ?? [];
-  const hasMoreBefore = useAppStore(
-    (state) => state.sessionHistory[sessionId]?.hasMoreBefore === true,
-  );
-  const loadOlderMessages = useAppStore((state) => state.loadOlderMessages);
+  const transcript = useTranscriptView(sessionId);
+  const loadTranscriptPage = useAppStore((state) => state.loadTranscriptPage);
+  const returnToLatest = useAppStore((state) => state.returnToLatestTranscript);
   const isRunning = useAppStore(
     (state) => state.runningSessions[sessionId] ?? false,
   );
@@ -48,6 +42,17 @@ export const SessionPane = memo(function SessionPane({
     Boolean(headAsk(state.pendingAsks, sessionId)),
   );
   const planningState = useAppStore((state) => state.planningStates[sessionId]);
+  const searchTarget = useMemo(
+    () =>
+      transcript.focus && transcript.parentMessage
+        ? {
+            ...transcript.focus,
+            messageId: transcript.parentMessage.id,
+            query: "",
+          }
+        : transcript.focus,
+    [transcript.focus, transcript.parentMessage],
+  );
 
   return (
     <div
@@ -60,21 +65,26 @@ export const SessionPane = memo(function SessionPane({
       aria-hidden={visible ? undefined : true}
       inert={visible ? undefined : true}
     >
-      <ChatTranscript
-        sessionId={sessionId}
-        messages={messages}
-        hasMoreBefore={hasMoreBefore}
-        onLoadOlder={() => loadOlderMessages(sessionId)}
-        isRunning={isRunning}
-        pendingPermission={pendingPermission}
-        queuedPermissions={queuedPermissions}
-        askPending={askPending}
-        planningState={planningState}
-        paneVisible={visible}
-      />
-      {/* Live expert-team execution chips (module 01 refinement); self-empty
-          unless a team run dispatched from this session is in flight. */}
-      <TeamRunStrip sessionId={sessionId} />
+      <TranscriptDisclosureProvider>
+        <ChatTranscript
+          sessionId={sessionId}
+          messages={transcript.messages}
+          hasMoreBefore={transcript.hasMoreBefore}
+          onLoadOlder={() => loadTranscriptPage(sessionId, "before")}
+          searchTarget={searchTarget}
+          readingWindow={transcript.historical}
+          hasMoreAfter={transcript.hasMoreAfter}
+          onLoadNewer={() => loadTranscriptPage(sessionId, "after")}
+          onReturnToLatest={() => returnToLatest(sessionId)}
+          navigationLoading={transcript.loading}
+          isRunning={isRunning}
+          pendingPermission={transcript.historical ? undefined : pendingPermission}
+          queuedPermissions={queuedPermissions}
+          askPending={transcript.historical ? false : askPending}
+          planningState={transcript.historical ? undefined : planningState}
+          paneVisible={visible}
+        />
+      </TranscriptDisclosureProvider>
     </div>
   );
 });

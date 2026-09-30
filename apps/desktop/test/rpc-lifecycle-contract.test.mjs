@@ -1,19 +1,24 @@
+import { readMainModule, readMainSource } from "./helpers/source-contracts.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const sidecarSource = await readFile(
-  new URL("../electron/main/agent-sidecar.ts", import.meta.url),
+  new URL("../../../packages/host-runtime/src/agent-sidecar.ts", import.meta.url),
+  "utf8",
+);
+const runtimeSidecarSource = await readFile(
+  new URL("../electron/main/runtime/sidecar.ts", import.meta.url),
   "utf8",
 );
 const hostSource = await readFile(
-  new URL("../electron/main/host-process.ts", import.meta.url),
+  new URL("../../../packages/host-runtime/src/host-process.ts", import.meta.url),
   "utf8",
 );
-const mainSource = await readFile(
-  new URL("../electron/main/index.ts", import.meta.url),
-  "utf8",
-);
+const mainSource = await readMainSource();
+const plansSource = await readMainModule("runtime/plans.ts");
+const shutdownModuleSource = await readMainModule("bootstrap/shutdown.ts");
+const mainIndexSource = await readMainModule("index.ts");
 const runtimeSource = await readFile(
   new URL("../../../packages/agent-runtime/src/runtime.ts", import.meta.url),
   "utf8",
@@ -22,10 +27,49 @@ const rpcTimeoutSource = await readFile(
   new URL("../../../packages/shared/src/rpc-timeouts.ts", import.meta.url),
   "utf8",
 );
+const agentSidecarEntrySource = await readFile(
+  new URL("../../../packages/agent-runtime/src/sidecar.ts", import.meta.url),
+  "utf8",
+);
+const e2eHostSource = await readFile(
+  new URL("../../../scripts/e2e/host.mjs", import.meta.url),
+  "utf8",
+);
+const e2eSmokeSource = await readFile(
+  new URL("../../../scripts/e2e-smoke.mjs", import.meta.url),
+  "utf8",
+);
+const codexImporterSource = await readFile(
+  new URL("../electron/main/importers/codex.ts", import.meta.url),
+  "utf8",
+);
 const apiSource = await readFile(
   new URL("../src/lib/api.ts", import.meta.url),
   "utf8",
 );
+
+test("stdio RPC readers split frames on LF only", () => {
+  for (const [name, source] of [
+    ["host-process", hostSource],
+    ["agent-sidecar", sidecarSource],
+    ["runtime sidecar", agentSidecarEntrySource],
+    ["e2e host harness", e2eHostSource],
+    ["e2e smoke host", e2eSmokeSource],
+    ["codex importer", codexImporterSource],
+  ]) {
+    assert.match(source, /readNdjsonLines/, `${name} must use LF NDJSON framing`);
+    assert.doesNotMatch(
+      source,
+      /from ["']node:readline["']/,
+      `${name} must not use readline`,
+    );
+    assert.doesNotMatch(
+      source,
+      /createInterface/,
+      `${name} must not call createInterface`,
+    );
+  }
+});
 
 test("sidecar detaches host listeners and gates every child write", () => {
   assert.match(sidecarSource, /private closeTransport\(error: Error\)/);
@@ -40,6 +84,15 @@ test("sidecar detaches host listeners and gates every child write", () => {
   );
 });
 
+test("tool diagnostics emit one bounded outcome instead of start/end spam", () => {
+  assert.match(runtimeSidecarSource, /summarizeToolResult/);
+  assert.match(runtimeSidecarSource, /tool execution completed/);
+  assert.match(runtimeSidecarSource, /tool execution failed/);
+  assert.match(runtimeSidecarSource, /tool execution interrupted/);
+  assert.doesNotMatch(runtimeSidecarSource, /logger\.app\([\s\S]*?"tool start"/);
+  assert.doesNotMatch(runtimeSidecarSource, /logger\.app\([\s\S]*?"tool end"/);
+});
+
 test("host transport closes pending calls and listeners on process death", () => {
   assert.match(hostSource, /private closed = false/);
   assert.match(hostSource, /this\.handlers\.clear\(\)/);
@@ -51,6 +104,17 @@ test("host transport closes pending calls and listeners on process death", () =>
   );
   assert.match(hostSource, /errorCode: ErrorCodes\.HOST_UNAVAILABLE,/);
   assert.match(hostSource, /private notifyExit\(/);
+});
+
+test("host transport rejects oversized request lines before writing", () => {
+  assert.match(hostSource, /MAX_HOST_STDIN_LINE_BYTES/);
+  assert.match(hostSource, /errorCode: ErrorCodes.LIMIT_EXCEEDED/);
+  assert.match(hostSource, /request line exceeds 64 MiB/);
+  assert.ok(
+    hostSource.indexOf("Buffer.byteLength(payload") <
+      hostSource.indexOf("this.child.stdin.write(payload"),
+    "oversize must be rejected before stdin.write",
+  );
 });
 
 test("host transport retries transient RPC overload with a bounded backoff", () => {
@@ -90,22 +154,26 @@ test("host disposal closes stdin, observes exit, and force-kills only after grac
   );
 });
 
-test("Bash defaults are finite and the tool advertises the effective timeout", () => {
+test("Bash execution remains bounded while permission transport has no deadline", () => {
   assert.match(runtimeSource, /DEFAULT_COMMAND_TIMEOUT_MS/);
   assert.match(runtimeSource, /defaults to a 60-second timeout/);
   assert.match(runtimeSource, /timeoutMs,\n\s+}/);
-  assert.match(rpcTimeoutSource, /DEFAULT_BASH_RPC_TIMEOUT_MS/);
-  assert.match(rpcTimeoutSource, /return DEFAULT_BASH_RPC_TIMEOUT_MS/);
-  assert.doesNotMatch(rpcTimeoutSource, /return undefined/);
+  assert.doesNotMatch(rpcTimeoutSource, /DEFAULT_BASH_RPC_TIMEOUT_MS/);
+  assert.match(rpcTimeoutSource, /if \(method === "tools\.execute"\) return undefined/);
 });
 
 test("turn ownership and execution queue wake only after durable turn settlement", () => {
-  const finishStart = mainSource.indexOf("function finishTurn(");
-  const finishEnd = mainSource.indexOf("function isRecord", finishStart);
-  const finishSource = mainSource.slice(finishStart, finishEnd);
+  const finishStart = plansSource.indexOf("function finishTurn(");
+  const finishEnd = plansSource.indexOf("async function finishApprovedExecution(", finishStart);
+  const finishSource = plansSource.slice(finishStart, finishEnd);
 
-  assert.match(mainSource, /const turnFinalizations = new Map/);
-  assert.match(finishSource, /await host\.call<[\s\S]*?\("session\.endTurn"/);
+  // The claim is addressed by the turn, not by the session alone: a late
+  // terminal event for an older turn must not join or release a newer turn's
+  // record, and the busy check can still find a session's records by prefix.
+  assert.match(plansSource, /const finalizationKey = planSubmissionTurnKey\(id, turnId\)/);
+  assert.match(plansSource, /turnFinalizations\.get\(finalizationKey\)/);
+  assert.match(plansSource, /turnFinalizations\.set\(finalizationKey, finalization\)/);
+  assert.match(finishSource, /await runtimeState\.host\.call<[\s\S]*?\("session\.endTurn"/);
   assert.ok(
     finishSource.indexOf('"session.endTurn"') <
       finishSource.lastIndexOf("activeTurns.delete"),
@@ -136,28 +204,39 @@ test("late tool metadata cleanup is scoped to the turn that started the call", (
 });
 
 test("app quit waits for one idempotent teardown before allowing the follow-up quit", () => {
-  const shutdownStart = mainSource.indexOf('app.on("before-quit"');
-  const shutdownSource = mainSource.slice(shutdownStart);
+  const shutdownSource = shutdownModuleSource.slice(
+    shutdownModuleSource.indexOf('app.on("before-quit"'),
+  );
 
-  assert.match(mainSource, /let shutdownComplete = false/);
-  assert.match(mainSource, /let shutdownPromise: Promise<void> \| null = null/);
-  assert.match(shutdownSource, /if \(shutdownComplete\) return/);
+  assert.match(shutdownModuleSource, /shutdownComplete: boolean/);
+  assert.match(shutdownModuleSource, /shutdownPromise: Promise<void> \| null/);
+  assert.match(shutdownSource, /if \(state\.shutdownComplete\) return/);
   assert.match(shutdownSource, /event\.preventDefault\(\)/);
-  assert.match(shutdownSource, /if \(shutdownPromise\) return/);
+  assert.match(shutdownSource, /if \(state\.shutdownPromise\) return/);
   assert.ok(
     shutdownSource.indexOf("event.preventDefault()") <
-      shutdownSource.indexOf("if (shutdownPromise) return"),
+      shutdownSource.indexOf("if (state.shutdownPromise) return"),
     "the first quit must be prevented before the idempotence guard returns",
   );
+  // Panel windows and docked views are the only pages that call the host and the
+  // plugin runtime over the panel bridge. Their pages are gone before either
+  // stops: a call a page already sent while its surface was closing is otherwise
+  // answered by a runtime that is already shutting down, and is reported as a
+  // bridge failure nobody can act on.
   assert.ok(
-    shutdownSource.indexOf("host?.dispose()") <
-      shutdownSource.indexOf("pluginPanels.closeAll()"),
-    "host disposal must start before other application teardown",
+    shutdownSource.indexOf("await pluginSurfacesShutdown") <
+      shutdownSource.indexOf("getHost()?.dispose()"),
+    "panel and view pages must be gone before the host stops",
+  );
+  assert.ok(
+    shutdownSource.indexOf("await pluginSurfacesShutdown") <
+      shutdownSource.indexOf("plugins.disposeAll()"),
+    "no panel page may still call a plugin runtime that is stopping",
   );
   assert.match(shutdownSource, /await hostShutdown/);
   assert.match(
     shutdownSource,
-    /await Promise\.allSettled\(\[pluginPanelShutdown, pluginShutdown, sidecarShutdown\]\)/,
+    /await Promise\.allSettled\(\[\s*pluginShutdown,\s*sidecarShutdown,\s*mcpShutdown,\s*remoteHostsShutdown,\s*\]\)/,
   );
   const releaseQuit = shutdownSource.match(
     /const releaseQuit = \(\) => \{[\s\S]*?shutdownComplete = true;[\s\S]*?app\.quit\(\);[\s\S]*?\};/,
@@ -166,12 +245,12 @@ test("app quit waits for one idempotent teardown before allowing the follow-up q
     releaseQuit,
     "the follow-up quit must run only after shutdownComplete is set",
   );
-  assert.match(shutdownSource, /void shutdownPromise\.then\(releaseQuit, releaseQuit\)/);
+  assert.match(shutdownSource, /void state\.shutdownPromise\.then\(releaseQuit, releaseQuit\)/);
 });
 
 test("settings writes validate without applying read defaults", () => {
   assert.match(mainSource, /validateSettingsWrite\(settings\)/);
-  assert.match(mainSource, /host\.call\("settings\.set", validatedSettings\)/);
+  assert.match(mainSource, /host\.call(?:<AppSettings>)?\("settings\.set", validatedSettings\)/);
   assert.doesNotMatch(mainSource, /host\.call\("settings\.set", normalizedSettings\)/);
   assert.match(apiSource, /export function validateSettingsWrite/);
   assert.match(apiSource, /invoke\(IPC\.invoke\.settingsSet, validateSettingsWrite\(settings\)\)/);
@@ -187,12 +266,12 @@ test("settings writes validate without applying read defaults", () => {
 });
 
 test("renderer notification drops silently when the render frame is disposed", () => {
-  const sendStart = mainSource.indexOf("function sendToRenderer(");
-  const sendEnd = mainSource.indexOf(
+  const sendStart = mainIndexSource.indexOf("function sendToRenderer(");
+  const sendEnd = mainIndexSource.indexOf(
     "function resetMenuRendererReady",
     sendStart,
   );
-  const sendSource = mainSource.slice(sendStart, sendEnd);
+  const sendSource = mainIndexSource.slice(sendStart, sendEnd);
   assert.ok(sendSource.includes("window.webContents.send(channel, payload)"));
   assert.ok(sendSource.includes("try {"));
   assert.ok(sendSource.includes("} catch {"));
@@ -217,7 +296,23 @@ test("sidecar crash reports carry the last stderr lines", () => {
   );
   assert.match(mainSource, /agent sidecar exited unexpectedly/);
   assert.ok(
-    mainSource.includes("data: { exitCode: code, signal, stderrTail }"),
+    mainSource.includes("stderrTail,"),
     "crash log carries the tail",
+  );
+  // The crash kind is classified once from the tail and reaches both the
+  // settlement code and the log line, so an OOM death never reads as an
+  assert.match(runtimeSidecarSource, /classifySidecarCrash\(stderrTail\)/);
+  assert.match(runtimeSidecarSource, /sidecarCrashErrorCode\(crash\.kind\)/);
+  assert.match(runtimeSidecarSource, /crashKind: crash\.kind/);
+  assert.ok(
+    runtimeSidecarSource.includes(
+      "settleCrashedSession(sessionId, crashedTurnId, crashErrorCode)",
+    ),
+    "the owning turn settles with the classified code",
+  );
+  assert.doesNotMatch(runtimeSidecarSource, /finishTurn\([^)]*"PLAN_APPROVAL_INTERRUPTED"/);
+  assert.match(
+    runtimeSidecarSource,
+    /finishTurn\(sessionId, "aborted", errorCode, \{/,
   );
 });

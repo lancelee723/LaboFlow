@@ -55,6 +55,11 @@
 - 封装时 Electron 熔断器（`runAsNode`、`nodeCliInspect` 关闭）
 - 自动安全 e2e 中的 `webSecurity` 断言
 
+远程控制的安全边界是独立的 MVP 后规格：见
+[远程控制安全](/zh-CN/spec/05-security/02-remote-control-security) 和
+[远程 Agent Control 架构](/zh-CN/spec/02-architecture/05-remote-agent-control)。
+本地安全基线不会因为远程目标规格而开放新的监听器或权限通道。
+
 ## 3. 秘密
 
 - 通过 Electron `safeStorage` 加密存储的密钥，由 host-core 管理
@@ -89,12 +94,24 @@ CDP 插件工具在 Plan 中仍被拒绝）。 Bash 在 Plan 中仍然可用：�
 结构化 title/question 字段。 Renderer 和 sidecar 状态无法写入或
 替换一个工件。
 
+## 4.1 技能市场出网
+
+渲染层不拉取技能目录或 SKILL.md。Electron 主进程按公网策略发起 HTTPS 请求（ADR 0243 / D413，由 ADR 0272 / D436 修订）：仅 `https`、共享的公网主机语法检查、`redirect: "manual"`，以及按请求实际会走的线路逐跳判定。每一跳之前，客户端都会向承载 `net.fetch` 的会话询问它自己的代理判定（`Session.resolveProxy`）：`proxied` 线路上按线路判定，因此容忍解析器自身产物的那一类（`benchmark`，TUN fake-IP）；`direct` 或读不出线路时默认保留完整的本地分类，回环、RFC1918、ULA、link-local、mapped IPv6 以及其他所有非公网类别一律拒绝。显式 `allowFakeIp` 选项仅可为透明路由器/TUN 部署额外放行 benchmark 占位地址。安装只通过 `skills.create` 写入 markdown。内联相邻 markdown 后仍受 128 KiB 宿主上限约束。
+
+用户自己填写的源地址改由 ADR 0304 判定：可以是回环或局域网目录服务，明文 `http` 由网络宽松模式允许（`networkPolicy.mode`，默认开启）。来自目录正文内部的文档 URL、以及每一次重定向目标，仍然沿用上面的公网策略。
+
+MCP 市场只接受无凭据的公网 HTTPS 源和目录端点。Main 在每一跳前向承载请求的同一 Electron session 询问代理线路。在完整的 `proxied` 线路上使用 Chromium `net.fetch`，让系统/PAC 和自定义代理能够解析 fake-IP 主机；此时容忍本地解析器的 `benchmark` fake-IP 类别，但真实私网及其他非公网类别仍然拒绝。在 `direct` 或 `unknown` 线路上保留原有 Node HTTPS 路径，把选中的公网地址固定到 socket，同时保留原主机名用于 TLS SNI 和 HTTP Host；网络宽松模式（默认开启）仅额外容忍 benchmark 答案，绝不允许其他非公网类别。重定向手动跟随、仅限 HTTPS、最多五跳，并在每次连接前重新检查。响应上限为 4 MiB，请求共享 8 秒截止时间，源、缓存和条目数量均有界。跨 origin 的用户 MCP 重定向不会转发调用方 header。
+
+手动配置的用户 MCP 仍遵循 ADR 0142，可以显式使用本地/LAN 端点；市场路径不会扩大该策略。
+
+用户自己填写的市场源地址同样由 ADR 0304 判定：可以是回环或局域网端点，明文 `http` 由网络宽松模式允许（`networkPolicy.mode`，默认开启）。源返回的任何内容——registry 记录、目录正文、重定向目标——仍然沿用上面的公网策略。
+
 ## 5. 命令执行
 
 - Bash默认需要确认（风险分级权限卡）；在
   Agent 或 Plan，显式 Auto 可以在不确认的情况下运行它
 - Bash 协议名称保持稳定，但 host-core 选择目录 shell
-（`windows-powershell`、`cmd`、`git-bash` 或 `bash`）来自持久化
+（`windows-powershell`、`windows-pwsh`、`cmd`、`git-bash` 或 `bash`）来自持久化
   `defaultCommandShell` 受平台支持。设置写入拒绝
   unavailable/wrong-platform ID。如果一个坚持的选择后来变成
   不可用，目录分辨率故意回退到第一个
@@ -134,15 +151,17 @@ CDP 插件工具在 Plan 中仍被拒绝）。 Bash 在 Plan 中仍然可用：�
   GitHub 的最新稳定版本而不是同通道预发布 pin。
 - Feed 清单将工件与电子构建器哈希绑定。一个错误，
   无法安装提要、哈希不匹配或无效的更新程序状态。
-- 打包的 macOS 仅供手动使用：它检测释放并打开固定的
-  发布页面，但从未在应用程序中下载或安装它。启用签名
-  macOS 应用内渠道需要稍后的明确决策和资格。
-- D126 标签版本发布 Windows NSIS 和 Linux AppImage 安装程序以及
-  他们的更新清单，激活那些应用内通道。平台签约、
-  回滚和分阶段推出资格仍处于发布后续阶段。
+- 打包的 macOS、Windows NSIS 和 Linux AppImage 从 GitHub Releases 源应用内下载并安装。Linux deb/rpm 和 Windows ZIP 只检测新版本并打开固定发布页；旧 Windows 便携版 exe 在存在 `PORTABLE_EXECUTABLE_FILE` 时仍保持手动更新。
+- D126 标签版本发布 Windows NSIS 和 Linux AppImage 安装程序及其更新清单，以及 Linux deb/rpm 包和 Windows 便携版 ZIP。NSIS、AppImage 与打包的 macOS 走应用内通道。便携版 ZIP 使用通知加链接交付，并且不写入 `latest.yml`。macOS 标签工件在上传前完成 Developer ID 签名、公证和装订；回滚和分阶段推出仍是发布后续工作。
 - 客户端不携带 GitHub 令牌。私人或其他无法访问的提要
   关闭失败；自动故障保持在环境状态，显式检查会暴露
   错误。
+- 未签名 macOS 分发包为可信来源保留范围明确的首次启动兜底路径。DMG 是双图标安装，
+  不再放入该说明。ZIP 安装包包含文本说明和可执行助手：它只搜索
+  `/Applications/PI-Desktop.app` 和 `~/Applications/PI-Desktop.app`，并在删除前先校验
+  `CFBundleIdentifier=net.aiuo.pi-desktop`，再删除唯一的 `com.apple.quarantine` 属性并
+  打开应用。它不接受任意路径，不提升权限，也不替代 Developer ID 签名或公证。说明给出
+  手动的 `com.apple.quarantine` 命令，并说明已签名/公证版本无需执行。
 - 本地化产品“新增内容”文本 (D164/D345) 在 Main 中从
   已发布变更日志目录并附加到 `UpdateState.releaseNotes`。的
   渲染器无法提供注释 URL、提要或远程主体；缺少目录
@@ -150,7 +169,31 @@ CDP 插件工具在 Plan 中仍被拒绝）。 Bash 在 Plan 中仍然可用：�
 - 开发者 ID + 公证通道仍记录在
   [发布运行手册](/zh-CN/spec/06-delivery/06-release-runbook)。
 
-## 8. 主机进程攻击面
+## 8. 本地 MCP 控制面
+
+本地 MCP 控制服务是明确的自动化边界，不是通用的远程控制监听器：
+
+- 默认关闭，只有设置 `PI_DESKTOP_MCP_CONTROL=1` 才会启动。
+- 只绑定 `127.0.0.1`，若监听地址不是回环则拒绝启动。不存在绑定局域网或公网接口的
+  配置路径，也不会重新打开被延后的远程 Gateway / WebUI 范围。
+- 校验请求中提供的 `Origin`，只允许本地回环主机名，以阻止远程网页通过 DNS
+  rebinding 访问；非浏览器客户端可以省略 `Origin`。
+- 在 Electron 用户数据目录持久化随机的 256 位 bearer token。token 和连接清单在
+  支持的平台上使用 `0600` 权限写入，关闭时清单会标记为非活动。
+- 排除密钥 get/set/delete 通道、provider/OAuth/MCP 密钥写入路径、设置写入，以及
+  渲染器专属的原生选择器/对话框通道（包括 `plugin/loadDev`）。分发前剥离密钥形态
+  字段。操作目录是显式的，新增加的 IPC 处理器不会自动暴露。
+- 调用委托给现有主进程 IPC 处理器，因此主机可用性、工作区边界、权限检查、输入
+  校验和脱敏日志仍是权威边界。通用危险操作、session/configure（权限模式）和破坏性
+  命名工具要求显式的 `confirm: true`。该标志是 Agent 确认，不是用户弹窗。
+- 请求和序列化结果（包括 `structuredContent`）有大小上限。服务启动失败不会阻止
+  桌面启动。
+
+使用该端点的 Agent 对其调用的操作拥有与运行中桌面相同的本地用户权限。用户必须
+保护用户数据目录和 token；该端点不面向不受信任的本地用户或远程客户端。
+`confirm: true` 不会向可见桌面请求批准。
+
+## 9. 主机进程攻击面
 
 - host-core 在 stdio 上向 Electron 主进程讲述 NDJSON JSON-RPC
   仅；它不绑定任何网络端口
@@ -163,7 +206,7 @@ CDP 插件工具在 Plan 中仍被拒绝）。 Bash 在 Plan 中仍然可用：�
   遏制依赖于权限层、目录身份、进程组/
   作业树关闭和工作区沙箱而不是操作系统沙箱
 
-## 9. 威胁模型（总结）
+## 10. 威胁模型（总结）
 
 | 威胁 | 缓解措施 |
 |---|---|
@@ -171,8 +214,9 @@ CDP 插件工具在 Plan 中仍被拒绝）。 Bash 在 Plan 中仍然可用：�
 | 即时注入破坏性工具的使用 | 主机拥有的持久模式策略、权限确认、路径边界、秘密隔离 |
 | 依赖性中毒 | 锁定文件、几个 dep、本机模块审查 |
 | 恶意本地插件 | 声明的权限、无秘密访问、MVP 后跟踪的进程隔离 (ADR 0008) |
+| 技能市场 SSRF（用户源 URL） | 主进程公网 HTTPS 分类器 + DNS + 逐跳 redirect；渲染层 CSP 禁止该 fetch（ADR 0243） |
 
-## 10. 安检门
+## 11. 安检门
 
 1. Renderer 不能 `require('fs')`（沙箱 + 无节点集成） — 已验证
 2. Plan Write/Edit/plugin 调用不能在任何权限模式下运行；重击是
@@ -188,3 +232,5 @@ approve/reject-only 和计划的 Plan 在 artifact/queue 工作之前被拒绝
    pending/queued/running 工作；经批准的中断会离开会话 Agent
 9. 无效的设置和过时的 shell ID/dialect 无法关闭； Bash 输出流
    单独和 timeout/abort 杀死完整的进程树
+10. 本地 MCP 控制只允许回环、经过 bearer 认证、默认关闭且有界，不能暴露密钥写入
+    或原生选择器，并且更改会话权限模式需要确认

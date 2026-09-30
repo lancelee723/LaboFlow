@@ -1,7 +1,9 @@
 import {
   effectiveContextWindow,
-  modelIdsMatch,
+  modelWireIdsEqual,
+  type ContextUsageDisplay,
   type MessageUsage,
+  type ModelBinding,
   type ModelInfo,
   type ProviderPublic,
   type ToolTokenUsage,
@@ -22,6 +24,21 @@ export function usageTokenTotal(usage: MessageUsage): number {
   return positiveTokenCount(usage.inputTokens) + positiveTokenCount(usage.outputTokens);
 }
 
+/**
+ * Occupancy of one model request, matching OpenCode's context widget:
+ * `input + output + reasoning + cache.read + cache.write` on that request.
+ * Cache reads from earlier tool-loop calls are not occupancy.
+ */
+export function contextOccupancyTokens(usage: MessageUsage): number {
+  const occupancy =
+    positiveTokenCount(usage.inputTokens) +
+    positiveTokenCount(usage.outputTokens) +
+    positiveTokenCount(usage.reasoningTokens) +
+    positiveTokenCount(usage.cacheReadTokens) +
+    positiveTokenCount(usage.cacheWriteTokens);
+  return occupancy > 0 ? occupancy : usageTokenTotal(usage);
+}
+
 export function latestMessageUsage(messages: UiMessage[]): MessageUsage | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index].usage) return messages[index].usage;
@@ -39,16 +56,27 @@ function providerContextWindow(provider: ProviderPublic | undefined): number | u
   return value > 0 ? value : undefined;
 }
 
+/**
+ * The saved binding for a model, reduced to the fields the window resolver
+ * needs. The provenance travels with the value, so a catalog snapshot follows
+ * models.dev while a hand-edited number stays the user's.
+ */
 function bindingContextWindow(
   provider: ProviderPublic | undefined,
   modelId: string | undefined,
-): number | undefined {
+): Pick<ModelBinding, "contextWindow" | "contextWindowSource"> | undefined {
   if (!provider || !modelId) return undefined;
   const binding = provider.models?.find((candidate) =>
-    modelIdsMatch(candidate.id, modelId),
+    candidate.id.trim().toLowerCase() === modelId.trim().toLowerCase(),
   );
-  const value = positiveTokenCount(binding?.contextWindow);
-  return value > 0 ? value : undefined;
+  if (!binding) return undefined;
+  const value = positiveTokenCount(binding.contextWindow);
+  return value > 0
+    ? {
+        contextWindow: value,
+        contextWindowSource: binding.contextWindowSource,
+      }
+    : undefined;
 }
 
 export function resolveContextWindow(
@@ -60,19 +88,24 @@ export function resolveContextWindow(
   const provider = providers.find((candidate) => candidate.id === providerId);
   const catalogModel = modelId
     ? providerId
-      ? providerModels[providerId]?.find((model) => modelIdsMatch(model.modelId, modelId))
+      ? providerModels[providerId]?.find((model) => modelWireIdsEqual(model.modelId, modelId))
       : Object.values(providerModels)
           .flat()
-          .find((model) => modelIdsMatch(model.modelId, modelId))
+          .find((model) => modelWireIdsEqual(model.modelId, modelId))
     : undefined;
   const catalogWindow = modelContextWindow(catalogModel);
+  const configured = bindingContextWindow(provider, modelId);
   const configuredWindow = effectiveContextWindow(
     catalogWindow,
-    bindingContextWindow(provider, modelId),
+    configured?.contextWindow,
+    configured?.contextWindowSource,
   );
   if (configuredWindow) return configuredWindow;
 
-  const providerWindow = providerContextWindow(provider);
+  // An enriched provider window may describe a different configured model.
+  const providerWindow = !modelId || !provider?.models?.length
+    ? providerContextWindow(provider)
+    : undefined;
   return providerWindow ?? DEFAULT_CONTEXT_WINDOW;
 }
 
@@ -90,7 +123,7 @@ export function calculateContextUsage(
   contextWindow: number,
 ): ContextUsage {
   const safeWindow = positiveTokenCount(contextWindow) || DEFAULT_CONTEXT_WINDOW;
-  const usedTokens = usageTokenTotal(usage);
+  const usedTokens = contextOccupancyTokens(usage);
   const usedRatio = Math.min(1, usedTokens / safeWindow);
   const remainingRatio = 1 - usedRatio;
   const usedPercent = Math.round(usedRatio * 100);
@@ -103,6 +136,49 @@ export function calculateContextUsage(
     usedPercent,
     remainingPercent: 100 - usedPercent,
   };
+}
+
+/**
+ * Which figure the composer ring and its summary lead with (D398). Absent or
+ * unrecognised values keep the remaining-capacity default, so a persisted
+ * typo never blanks the trigger.
+ */
+export function resolveContextUsageDisplay(value: unknown): ContextUsageDisplay {
+  return value === "used" ? "used" : "remaining";
+}
+
+export type ContextUsageView = {
+  display: ContextUsageDisplay;
+  /** Percentage the trigger, heading, and popover lead with. */
+  percent: number;
+  /** Token count matching `percent`. */
+  tokens: number;
+  /** Ring arc fill, 0–1, matching `percent`. */
+  ratio: number;
+};
+
+/**
+ * Pick the leading percentage/token pair for the configured display mode.
+ * Capacity colors stay on `ContextUsage.remainingPercent` in both modes, so
+ * "used 78%" still warns when only 22% is left.
+ */
+export function contextUsageView(
+  usage: ContextUsage,
+  display: ContextUsageDisplay,
+): ContextUsageView {
+  return display === "used"
+    ? {
+        display,
+        percent: usage.usedPercent,
+        tokens: usage.usedTokens,
+        ratio: usage.usedRatio,
+      }
+    : {
+        display,
+        percent: usage.remainingPercent,
+        tokens: usage.remainingTokens,
+        ratio: usage.remainingRatio,
+      };
 }
 
 function serializedLength(value: unknown): number {

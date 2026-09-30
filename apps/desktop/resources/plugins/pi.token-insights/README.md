@@ -36,7 +36,7 @@ showing a wall of zeros.
 ## Follows the app
 
 The panel is its own window, so it cannot inherit the app's stylesheet. Instead
-the plugin reads PI-Desktop's own appearance record and the panel mirrors it:
+the plugin reads LaboFlow's own appearance record and the panel mirrors it:
 
 - light, dark, or **a theme contributed by another plugin** — the panel adopts
   that theme's `--ds-*` palette, including its accent
@@ -49,7 +49,7 @@ If the appearance cannot be read (older runtime, moved data directory), the
 panel follows your system colour scheme and the theme/language switches in its
 own appearance menu — never a blank page.
 
-The panel opts into PI-Desktop's v3 paint-through chrome, so its own titlebar
+The panel opts into LaboFlow's v3 paint-through chrome, so its own titlebar
 draws inside the host's 46px band. The host window-control capsule keeps
 floating over the top-right corner, so the titlebar reserves that 104px corner:
 the appearance and refresh buttons stay clear of the capsule and clickable, and
@@ -90,7 +90,7 @@ only.
 
 ## Notes
 
-- For PI-Desktop, completed-turn totals from `pi.sqlite` fill in subagent spend
+- For LaboFlow, completed-turn totals from `pi.sqlite` fill in subagent spend
   that never landed on assistant `meta.usage`. Transcript rows still drive
   model/provider rankings; the extra is labelled Subagent. Days where the
   transcript already matches the turn total are unchanged.

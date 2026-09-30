@@ -7,14 +7,80 @@ import {
 } from "./fs-policy.js";
 import { validateMcpServer } from "./mcp-config.js";
 import { parseNetDomains, type PluginNetDomain } from "./net-policy.js";
+import {
+  isThemeAssetPath,
+  normalizeThemeAssetPath,
+  THEME_ASSET_EXTENSIONS,
+} from "./theme-css.js";
+import {
+  validatePluginThemeVariableDeclaration,
+  type PluginThemeVariableContrib,
+} from "./theme-variables.js";
 
+/**
+ * Manifest id shape frozen by docs/spec/07-plugins/02-plugin-manifest-schema.md:
+ * a lowercase dotted namespace such as `demo.hello` or `pi.browser`.
+ */
+export const PLUGIN_ID_PATTERN = /^[a-z0-9]+(\.[a-z0-9_-]+)+$/;
+
+/** `author` may be a display string or a contact object (manifest schema §2). */
+export type PluginManifestAuthor =
+  | string
+  | string
+  | { name: string; email?: string; url?: string };
+
+/**
+ * One locale's display strings (`manifest.i18n`).
+ *
+ * `en` and `zh-CN` are the contract locales: the shell reads `zh-CN` for every
+ * Chinese locale and English for everything else. Every field is optional, and
+ * a partially translated block falls back per field, so a missing one keeps the
+ * author's own `name` / `description` instead of blanking it out.
+ */
+export type PluginDisplayI18n = {
+  name?: string;
+  description?: string;
+  safetyNotes?: string;
+};
+
+/** Locale id → display strings, as a plugin declares them in `manifest.i18n`. */
+export type PluginI18nMap = Record<string, PluginDisplayI18n>;
 export type PluginManifest = {
   schemaVersion: number;
   id: string;
   name: string;
   version: string;
   description?: string;
-  author?: string;
+  /**
+   * Display strings per locale. The flat `name`/`description` above stay the
+   * author's own language and remain the fallback; the shell shows the entry
+   * matching the app language and only reads these two contract locales.
+   */
+  i18n?: PluginI18nMap;
+  author?: PluginManifestAuthor;
+  homepage?: string;
+  repository?: string;
+  /**
+   * Renderer entry (ES module path relative to the plugin root). Declaring it
+   * requires the `renderer.extension` permission; the module loads into the
+   * host renderer and registers UI slot components through `pi.slots`.
+   */
+  renderer?: string;
+  /**
+   * Outbound actions the renderer components may dispatch
+   * (`PLUGIN_RENDERER_ACTIONS`). Declaring fewer is safe; an action outside
+   * this list is refused with `PLUGIN_ACTION_UNDECLARED`. A word this host does
+   * not implement still installs, so a manifest written for a newer host
+   * loads, and is refused at dispatch with `PLUGIN_ACTION_UNKNOWN`. Requires
+   * `renderer.extension`.
+   */
+  rendererActions?: string[];
+  /**
+   * Methods the plugin's `onRendererCall` answers for `plugin.call`.
+   * Whitelist: an undeclared method is refused with `PLUGIN_CALL_NO_HANDLER`.
+   * Requires `renderer.extension`.
+   */
+  rendererCallMethods?: string[];
   main: string;
   icon?: string;
   /**
@@ -28,6 +94,19 @@ export type PluginManifest = {
     width?: number;
     height?: number;
     title?: PluginLocalizedString | string;
+    /**
+     * Panel placement. `"panel"` (default) keeps the host-owned 46px titlebar
+     * band and its three-control capsule. `"widget"` opens the same sandboxed
+     * page as a transparent, frameless floating surface: no band, no capsule,
+     * a drag map over the whole window, and a host context menu that closes,
+     * minimizes, or pins it. A widget may be smaller than a panel — see
+     * `PLUGIN_PANEL_MIN_SIZE` / `PLUGIN_PANEL_WIDGET_MIN_SIZE` in the host.
+     */
+    shape?: "panel" | "widget";
+    /** Floating widget placement only: keep the surface above other windows. */
+    alwaysOnTop?: boolean;
+    /** Overrides the per-shape default: panels are resizable, widgets are not. */
+    resizable?: boolean;
   };
   contributes?: {
     commands?: Array<{
@@ -40,17 +119,50 @@ export type PluginManifest = {
       name: string;
       description: string;
       risk?: "low" | "medium" | "high";
+      /**
+       * Action names that may run in Plan or Goal mode. Omitted or empty
+       * means the tool is hidden from the model in those modes (ADR 0211).
+       * Only meaningful when the schema has an `action` enum and every
+       * entry is a value of that enum; the host enforces the restriction
+       * even if a plugin mis-declares, so misuse is caught at execute time.
+       */
+      planSafeActions?: readonly string[];
       schema?: unknown;
     }>;
     /** Relative skill paths, or entries that override the parsed metadata. */
     skills?: Array<string | PluginSkillContrib>;
+    /**
+     * ExtensionAPI modules (the pi CLI extension contract) that run inside the
+     * agent process with the agent's own access. Requires the
+     * `agent.extension` permission; each path is a `.ts` / `.js` file inside
+     * the plugin directory (spec 07-plugins/16).
+     */
+    agentExtensions?: string[];
+    /**
+     * Providers this plugin adds to Settings' provider list. Requires the
+     * `provider.register` permission; each row is read-only for the user and
+     * refreshed from this manifest on every load.
+     */
+    providers?: PluginProviderContrib[];
     settings?: PluginSettingContrib[];
     themes?: PluginThemeContrib[];
+    /** A host-rendered, image-card theme selector in Settings → Extensions. */
+    scenicThemes?: PluginScenicThemesContrib;
+    /** Native window background for this plugin's themes (ADR 0248). */
+    windowAppearance?: PluginWindowAppearanceContrib;
     mcpServers?: PluginMcpServerContrib[];
     services?: PluginServiceContrib[];
     bus?: PluginBusContrib;
     /** Surfaces the plugin docks inside the host's work panel. */
     views?: PluginViewContrib[];
+    /** External session namespaces this plugin may import and own. */
+    sessionSources?: PluginSessionSourceContrib[];
+    /**
+     * System-wide accelerators this plugin may own (`keyboard.globalShortcut`).
+     * Each entry maps one accelerator to one of the plugin's own commands; the
+     * host registers, conflict-checks, and releases it with the plugin.
+     */
+    globalShortcuts?: PluginGlobalShortcutContrib[];
   };
   permissions?: string[];
   /**
@@ -70,13 +182,179 @@ export type PluginManifest = {
   activationEvents?: string[];
 };
 
-/** A plugin-provided label. Shell UI may add locales; plugins still ship en + zh-CN. */
+/**
+ * Host-owned chrome labels (`ui.title`, views, destinations, session sources).
+ * Do not use this for plugin-owned copy; read `pi.app.getLocale` instead
+ * (ADR 0280). Shell UI may add locales; plugins still ship en + zh-CN.
+ */
 export type PluginLocalizedString = {
   en: string;
   "zh-CN": string;
 };
 
 /** Resolve a plugin label using the active LaboFlow locale. */
+export type PluginSessionSourceContrib = {
+  id: string;
+  label?: string | PluginLocalizedString;
+};
+
+export type PluginSessionMessage =
+  | { role: "user"; content: string; createdAt: string }
+  | {
+      role: "assistant";
+      content: string;
+      createdAt: string;
+      modelId?: string;
+      providerId?: string;
+    }
+  | {
+      role: "tool";
+      content: string;
+      createdAt: string;
+      toolName: string;
+      toolCallId: string;
+      toolStatus: "success" | "error";
+      toolArgs?: unknown;
+      toolResult?: unknown;
+    };
+
+export type PluginSessionImportInput = {
+  source: string;
+  externalId: string;
+  title: string;
+  /** Explicit host project created through `pi.project.create`; omitted stays unbound. */
+  projectId?: number | null;
+  projectPath?: string | null;
+  modelId?: string | null;
+  providerId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: PluginSessionMessage[];
+};
+
+export type PluginSessionImportResult = {
+  sessionId: string;
+  imported: boolean;
+  skipped: boolean;
+};
+
+export type PluginSessionBatchImportInput = {
+  source: string;
+  sessions: Array<Omit<PluginSessionImportInput, "source">>;
+  mode?: "skip" | "fail";
+};
+
+export type PluginSessionBatchImportResult = {
+  results: Array<{
+    externalId: string;
+    sessionId: string | null;
+    status: "imported" | "skipped" | "failed";
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+  imported: number;
+  skipped: number;
+  failed: number;
+};
+
+export type PluginProjectRecord = {
+  projectId: number;
+  path: string;
+  name: string;
+};
+
+export type PluginSessionListItem = {
+  sessionId: string;
+  title: string;
+  source: string;
+  externalId: string;
+  projectId: number | null;
+  messageCount: number;
+  originKind: "imported" | "created";
+  bound: { workspace: boolean; model: boolean };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PluginSessionListResult = {
+  items: PluginSessionListItem[];
+  nextCursor?: string;
+};
+
+export type PluginSessionGetResult = {
+  sessionId: string;
+  title: string;
+  source: string;
+  externalId: string;
+  originKind: "imported" | "created";
+  projectId: number | null;
+  projectPath: string | null;
+  modelId: string | null;
+  providerId: string | null;
+  history: {
+    projectPath: string | null;
+    modelId: string | null;
+    providerId: string | null;
+  };
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * One completed turn as a flat fact row (`usage.read`). The host serves raw
+ * counters — per-turn tokens and identifiers only; no message body ever
+ * crosses the bridge, and every dashboard shape (streaks, heatmaps, shares)
+ * stays the plugin's own computation.
+ */
+export type PluginUsageTurn = {
+  turnId: string;
+  sessionId: string;
+  sessionTitle: string | null;
+  projectId: number | null;
+  providerId: string | null;
+  modelId: string | null;
+  startedAt: number;
+  endedAt: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+};
+
+/**
+ * A keyset-paginated page of completed turns, ordered by `endedAt`
+ * ascending. `nextCursor` is opaque: pass it back as `cursor` to fetch the
+ * next page; it is `null` when the window is exhausted.
+ */
+export type PluginUsageTurnPage = {
+  turns: PluginUsageTurn[];
+  nextCursor: string | null;
+};
+
+export type PluginSessionMessageResult = {
+  id: string;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  contentTruncated?: boolean;
+  createdAt: string;
+  origin: "external";
+  tool?: {
+    name: string;
+    callId: string;
+    status: "success" | "error";
+    args?: unknown;
+    result?: unknown;
+  };
+};
+
+export type PluginSessionMessageListResult = {
+  items: PluginSessionMessageResult[];
+  nextCursor?: string;
+};
+
+/** Resolve a plugin label using the active PI-Desktop locale. */
 export function resolvePluginLocalizedString(
   value: string | PluginLocalizedString | undefined,
   locale: string | undefined,
@@ -112,7 +390,9 @@ export type PluginSettingOption = {
 
 export type PluginSettingContrib = {
   key: string;
+  /** Author-language label for the generated sheet. Not a locale map (ADR 0280). */
   title: string;
+  /** Author-language help text for the generated sheet. */
   description?: string;
   type: PluginSettingType;
   default?: unknown;
@@ -143,7 +423,127 @@ export type PluginThemeContrib = {
   path: string;
   /** Base palette the overrides are layered on. Defaults to `dark`. */
   base?: "light" | "dark";
+  /**
+   * Package-relative or absolute paths (extension whitelist, 4 MB summed) this theme's CSS may
+   * reference with `url()`. The host rewrites each matching reference to its own
+   * `plugin-asset://` scheme; anything not declared here is still refused.
+   */
+  assets?: string[];
+  /** Values accepted by the typed `pi.themes.setVariables` API. */
+  variables?: PluginThemeVariableContrib[];
 };
+
+/**
+ * Data only: the host owns every DOM node, style, and interaction for this
+ * Settings destination so a scenic canvas never sits behind a plugin document.
+ */
+export type PluginScenicThemesContrib = {
+  id: string;
+  label: PluginLocalizedString;
+  description: PluginLocalizedString;
+  keywords?: PluginLocalizedString[];
+  icon: "palette";
+  themes: PluginScenicThemeCardContrib[];
+};
+
+export type PluginScenicThemeCardContrib = {
+  themeId: string;
+  label: PluginLocalizedString;
+  description: PluginLocalizedString;
+  previewAsset: string;
+};
+
+/** Wire format a contributed provider may declare. Absent means `chat_completions`. */
+export const PLUGIN_PROVIDER_API_STYLES = [
+  "chat_completions",
+  "opencode_go",
+  "responses",
+  "anthropic_messages",
+  "google_generative_ai",
+  "openai_codex_responses",
+  "pi_messages",
+] as const;
+
+export type PluginProviderApiStyle = (typeof PLUGIN_PROVIDER_API_STYLES)[number];
+
+/**
+ * Credential a contributed provider accepts. Absent means `api_key`. `oauth`
+ * is deliberately absent: a plugin OAuth provider needs a Host-owned login
+ * flow that does not exist yet, so a declaration asking for one is refused
+ * instead of materializing a row nobody can sign in to.
+ */
+export const PLUGIN_PROVIDER_AUTH_KINDS = ["api_key", "none"] as const;
+
+export type PluginProviderAuthKind = (typeof PLUGIN_PROVIDER_AUTH_KINDS)[number];
+
+/** Upper bound on `contributes.providers` entries one plugin may declare. */
+export const MAX_PLUGIN_PROVIDERS_PER_PLUGIN = 8;
+
+/** Upper bound on the model list of one contributed provider. */
+export const MAX_PLUGIN_PROVIDER_MODELS = 64;
+
+/** One model a contributed provider exposes to the model picker. */
+export type PluginProviderModelContrib = {
+  /** Model id sent on the wire, 1..256 characters. */
+  id: string;
+  /** Label shown in the picker; the id when omitted. */
+  name?: string;
+  /** Context window in tokens; the runtime default when omitted. */
+  contextWindow?: number;
+  /** Max output tokens; the runtime default when omitted. */
+  maxTokens?: number;
+  /** Whether the model accepts image input. */
+  supportsImages?: boolean;
+  /**
+   * Thinking levels the picker may offer for this model, most restrictive
+   * first (e.g. `["off", "low", "high"]`). Names outside the canonical set are
+   * dropped. Omit for a model that exposes no reasoning control.
+   */
+  thinkingLevels?: string[];
+  /**
+   * Which of `thinkingLevels` a new session opens on. Ignored unless it names
+   * one of them. Omit to let the runtime pick the first available level.
+   */
+  defaultThinkingLevel?: string;
+};
+
+/**
+ * One provider a plugin adds to Settings' provider list. The plugin supplies
+ * the endpoint and model catalog; the user's API key stays in the host and is
+ * never handed to the plugin. The row appears as `plugin:<pluginId>:<id>` and
+ * is read-only in Settings.
+ */
+export type PluginProviderContrib = {
+  /** Plugin-local id matching [a-zA-Z][a-zA-Z0-9_-]{0,63}, unique per plugin. */
+  id: string;
+  /** Display name for the provider row; required and non-empty. */
+  name: string;
+  /** Vendor the row is attributed to; `custom` when omitted. */
+  vendorKey?: string;
+  /** Endpoint the runtime reaches; must be an absolute http(s) URL. */
+  baseUrl?: string;
+  apiStyle?: PluginProviderApiStyle;
+  authKind?: PluginProviderAuthKind;
+  /** 1..64 models with unique ids. */
+  models: PluginProviderModelContrib[];
+};
+
+/**
+ * Native window chrome a theme may ask for. Only honoured while one of this
+ * plugin's themes is the selected theme, and only with the
+ * `ui.window.appearance` grant.
+ */
+export type PluginWindowAppearanceContrib = {
+  /** `#rrggbb` or `#rrggbbaa`, applied per resolved palette. */
+  backgroundColor?: { light?: string; dark?: string };
+};
+
+/** The only colour form a contributed window background may take. */
+export const WINDOW_BACKGROUND_COLOR_PATTERN = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+
+export function isWindowBackgroundColor(value: unknown): value is string {
+  return typeof value === "string" && WINDOW_BACKGROUND_COLOR_PATTERN.test(value);
+}
 
 export type PluginMcpServerContrib = {
   id: string;
@@ -171,6 +571,33 @@ export type PluginBusContrib = {
   publish?: string[];
   /** Topic patterns this plugin may subscribe to. */
   subscribe?: string[];
+};
+/** One system-wide accelerator a plugin declares (`keyboard.globalShortcut`). */
+export type PluginGlobalShortcutContrib = {
+  /** Local id, unique inside the plugin; also the handle later handed back. */
+  id: string;
+  /**
+   * Command to run, which must be declared in `contributes.commands`. A
+   * shortcut carries no payload and can only reach this plugin's own commands.
+   */
+  command: string;
+  /**
+   * Accelerator the host registers until the user overrides it. The host
+   * reports an OS-reserved or already-claimed accelerator as a registration
+   * error rather than silently replacing the other owner.
+   */
+  default?: string;
+};
+
+/** One accelerator the host currently holds for this plugin. */
+export type PluginGlobalShortcut = {
+  id: string;
+  accelerator: string;
+  command: string;
+  /** False when the OS or another owner holds the accelerator instead. */
+  registered: boolean;
+  /** Why registration failed, when it did. */
+  error?: string;
 };
 
 /**
@@ -241,10 +668,54 @@ export type PluginCommand = {
   run: () => Promise<void> | void;
 };
 
+export type PluginSpeechRole = "transcribe" | "synthesize";
+
+export type PluginSpeechHandleInput = {
+  protocol: string;
+  role: PluginSpeechRole;
+  modelId: string;
+  voice?: string;
+  format?: string;
+  extra?: Record<string, string>;
+  text?: string;
+  language?: string;
+  audio?: { mimeType: string; data: string };
+};
+
+export type PluginSpeechHandleResult =
+  | { kind: "text"; text: string }
+  | { kind: "audio"; mimeType: string; data: string }
+  | {
+      kind: "http";
+      call: {
+        url: string;
+        method?: "GET" | "POST";
+        headers?: Record<string, string>;
+        body?: unknown;
+        parse: "bytes" | "json-text" | "json-path" | "openai-transcription" | "openai-chat-audio";
+        jsonPath?: string;
+      };
+    };
+
+export type PluginSpeechAdapter = {
+  protocol: string;
+  label: string;
+  roles: PluginSpeechRole[];
+  handle: (input: PluginSpeechHandleInput) => Promise<PluginSpeechHandleResult> | PluginSpeechHandleResult;
+};
+
 export type PluginTool = {
   name: string;
   description: string;
   risk?: "low" | "medium" | "high";
+  /**
+   * Action names that may run in Plan or Goal mode. Omitted or empty
+   * means the tool is hidden from the model in those modes (ADR 0211).
+   * Only meaningful when the schema has an `action` enum and every
+   * entry is a value of that enum; the host enforces the restriction
+   * even if a plugin mis-declares, so misuse is caught at execute time.
+   */
+  planSafeActions?: readonly string[];
   schema?: unknown;
   execute: (args: unknown, ctx?: PluginToolExecContext) => Promise<unknown> | unknown;
 };
@@ -252,6 +723,8 @@ export type PluginTool = {
 export type PluginToolExecContext = {
   sessionId?: string;
   turnId?: string;
+  /** Durable session operating mode. Host-core is authoritative (ADR 0211). */
+  mode?: "agent" | "plan" | "goal";
   /** Executor model for this session, `providerId/modelId`. Configuration, not transcript. */
   modelKey?: string;
   thinkingLevel?: string;
@@ -265,6 +738,12 @@ export type PluginModelInfo = {
   providerName: string;
   modelId: string;
   label: string;
+  /** User-configured display alias; the key remains the model identity. */
+  alias?: string;
+  /** Whether the user enabled this binding for AI-driven delegation. */
+  availableForSubagents?: boolean;
+  /** The host's default launch model, when it is present in this ready catalog. */
+  isDefault?: boolean;
   supportsReasoning: boolean;
   thinkingLevels: string[];
 };
@@ -376,6 +855,116 @@ export type PluginFsRange = {
   totalSize: number;
 };
 
+export type PluginDesktopOperation = {
+  id: string;
+  description: string;
+  risk: "read" | "write" | "dangerous";
+};
+
+export type PluginDesktopInvokeInput = {
+  operation: string;
+  args?: unknown[];
+  confirm?: boolean;
+};
+/** One capturable audio endpoint (`audio.capture.background`). */
+export type PluginAudioInputDevice = {
+  /** Opaque host id; `""` names the system default input. */
+  deviceId: string;
+  label: string;
+  /** The entry the host picks when `deviceId` is omitted. */
+  isDefault: boolean;
+};
+
+/** A capture the host is holding for this plugin. */
+export type PluginAudioCaptureState = {
+  active: boolean;
+  streamId?: string;
+  deviceId?: string;
+  label?: string;
+  sampleRate?: number;
+  channels?: number;
+  startedAtMs?: number;
+  /** Frames the host dropped because the plugin did not drain its queue in time. */
+  droppedFrames: number;
+};
+
+/** One PCM frame delivered through `pi.audio.onInputFrame`. */
+export type PluginAudioInputFrame = {
+  streamId: string;
+  /** Monotonic per stream; a gap means dropped frames, not reordered ones. */
+  sequence: number;
+  timestampMs: number;
+  sampleRate: number;
+  channels: number;
+  format: "pcm16";
+  /** Little-endian signed 16-bit samples, interleaved when `channels` is 2. */
+  data: Uint8Array;
+};
+
+export type PluginAudioOpenInputOptions = {
+  /** From `pi.audio.getInputDevices`; omitted means the system default. */
+  deviceId?: string;
+  sampleRate?: number;
+  channels?: number;
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+};
+
+/** An open capture (`pi.audio.openInput`). */
+export type PluginAudioInputSession = {
+  streamId: string;
+  sampleRate: number;
+  channels: number;
+  deviceId?: string;
+  label?: string;
+};
+
+export type PluginAudioOpenOutputOptions = {
+  sampleRate: number;
+  channels?: number;
+  format?: "pcm16";
+};
+
+/** An open playback queue (`pi.audio.openOutput`). */
+export type PluginAudioOutputSession = {
+  streamId: string;
+  sampleRate: number;
+  channels: number;
+  format: "pcm16";
+};
+
+/** Input for `pi.net.websocket.connect` (`net.websocket`). */
+export type PluginWebSocketConnectInput = {
+  /** Absolute `ws://` / `wss://` URL; its host must be in `manifest.net.domains`. */
+  url: string;
+  headers?: Record<string, string>;
+  protocols?: string[];
+  timeoutMs?: number;
+};
+
+export type PluginWebSocketOpenEvent = { socketId: string; protocol: string };
+
+export type PluginWebSocketMessageEvent = {
+  socketId: string;
+  /** Text frames arrive as `string`; binary frames arrive as bytes. */
+  data: string | Uint8Array;
+};
+
+export type PluginWebSocketCloseEvent = {
+  socketId: string;
+  code: number;
+  reason: string;
+  /** False when the connection failed rather than closed cleanly. */
+  wasClean: boolean;
+};
+
+export type PluginWebSocketErrorEvent = {
+  socketId: string;
+  code: string;
+  message: string;
+};
+
 /** Classified preview returned by `fs.readPreview`. */
 export type PluginFsPreview = {
   kind: "text" | "image" | "binary" | "tooLarge";
@@ -386,10 +975,60 @@ export type PluginFsPreview = {
   size: number;
 };
 
+/**
+ * The appearance the host is currently showing. Mirrors `PluginAppearance` in
+ * the desktop's plugin panel chrome; keep the two shapes identical.
+ */
+export type PluginAppearance = {
+  /** Raw preference: "light" | "dark" | "system" | "plugin:<pluginId>:<themeId>". */
+  theme: string;
+  /** Resolved palette: "light" | "dark", or "system" when unresolved. */
+  base: "light" | "dark" | "system";
+  /** Active app language tag (e.g. "en", "zh-CN"). */
+  locale: string;
+  /** The active contributed theme, when the preference selects one. */
+  pluginTheme: { id: string; base: "light" | "dark"; css: string } | null;
+};
+
+/** Built-in theme preference, or a registered `plugin:<pluginId>:<themeId>` id. */
+export type AppThemePreferenceId = "system" | "light" | "dark" | `plugin:${string}`;
+
+/** Runtime theme payload for `pi.themes.upsert`. Sanitized with the load-time rules. */
+export type PluginThemeUpsertInput = {
+  /** Local theme id (same rules as `contributes.themes[].id`). */
+  id: string;
+  label: string;
+  base: "light" | "dark";
+  css: string;
+};
+
+/** Lightweight theme row returned by `pi.themes.list`. */
+export type PluginThemeSummary = {
+  /** Full namespaced id: `plugin:<pluginId>:<themeId>`. */
+  id: string;
+  themeId: string;
+  label: string;
+  base: "light" | "dark";
+};
+
 export type PluginHostApi = {
   app: {
     getVersion: () => Promise<string>;
+    /** Active app language. Plugin-owned UI localizes from this (ADR 0280). */
     getLocale: () => Promise<string>;
+    getAppearance: () => Promise<PluginAppearance>;
+    /**
+     * Apply the host's app theme preference (`ui.theme`). Accepts a built-in
+     * preference or a currently registered plugin theme id.
+     */
+    setTheme: (themeId: AppThemePreferenceId) => Promise<void>;
+  };
+  /** Runtime theme registry for the calling plugin only (`ui.theme`). */
+  themes: {
+    upsert: (input: PluginThemeUpsertInput) => Promise<void>;
+    remove: (themeId: string) => Promise<void>;
+    list: () => Promise<PluginThemeSummary[]>;
+    setVariables: (themeId: string, values: Record<string, number | string>) => Promise<void>;
   };
   plugin: {
     getId: () => string;
@@ -402,6 +1041,10 @@ export type PluginHostApi = {
     register: (command: PluginCommand) => Promise<void>;
     unregister: (id: string) => Promise<void>;
   };
+  speech: {
+    registerAdapter: (adapter: PluginSpeechAdapter) => Promise<void>;
+    unregisterAdapter: (protocol: string) => Promise<void>;
+  };
   ui: {
     openPanel: (opts?: { title?: string }) => Promise<void>;
     closePanel: () => Promise<void>;
@@ -413,8 +1056,47 @@ export type PluginHostApi = {
       input: PluginNativeNotificationInput,
     ) => Promise<PluginNativeNotificationResult>;
   };
+  project: {
+    create: (input: { path: string }) => Promise<PluginProjectRecord>;
+  };
   workspace: {
     get: () => Promise<{ path: string; name: string } | null>;
+  };
+  /** Reviewed host operations shared with the local MCP control plane. */
+  desktop: {
+    listOperations: () => Promise<PluginDesktopOperation[]>;
+    invoke: (input: PluginDesktopInvokeInput) => Promise<unknown>;
+  };
+  /**
+   * Background microphone capture and streaming playback
+   * (`audio.capture.background`, `audio.playback.background`). The host owns
+   * the device: plugins exchange PCM frames and never see a device handle.
+   */
+  audio: {
+    getInputDevices: () => Promise<PluginAudioInputDevice[]>;
+    openInput: (options?: PluginAudioOpenInputOptions) => Promise<PluginAudioInputSession>;
+    closeInput: (streamId: string) => Promise<void>;
+    /** Which plugin currently holds an input, if any. */
+    getCaptureState: () => Promise<PluginAudioCaptureState>;
+    /** Frames arrive at capture pace; a handler that falls behind drops frames. */
+    onInputFrame: (handler: (frame: PluginAudioInputFrame) => void) => void;
+    offInputFrame: (handler: (frame: PluginAudioInputFrame) => void) => void;
+    openOutput: (options: PluginAudioOpenOutputOptions) => Promise<PluginAudioOutputSession>;
+    /** Queues PCM16 for playback; rejects when the queue is full. */
+    writeOutput: (input: { streamId: string; data: Uint8Array }) => Promise<void>;
+    /** Drops queued but unplayed audio — the barge-in primitive. */
+    stopOutput: (streamId: string) => Promise<void>;
+    closeOutput: (streamId: string) => Promise<void>;
+  };
+  /** System-wide accelerators, registered and released by the host (`keyboard.globalShortcut`). */
+  keyboard: {
+    registerGlobalShortcut: (input: {
+      id: string;
+      accelerator: string;
+      command: string;
+    }) => Promise<PluginGlobalShortcut>;
+    unregisterGlobalShortcut: (id: string) => Promise<void>;
+    listGlobalShortcuts: () => Promise<PluginGlobalShortcut[]>;
   };
   /**
    * Paths are relative to the rule's root: the workspace by default, or the
@@ -469,6 +1151,49 @@ export type PluginHostApi = {
   };
   session: {
     getLlmContext: () => Promise<PluginLlmContext>;
+    list: (input?: {
+      limit?: number;
+      cursor?: string;
+      source?: string;
+      updatedAfter?: string;
+    }) => Promise<PluginSessionListResult>;
+    get: (input: { sessionId: string }) => Promise<PluginSessionGetResult>;
+    listMessages: (input: {
+      sessionId: string;
+      limit?: number;
+      cursor?: string;
+      order?: "asc" | "desc";
+      contentLimit?: number;
+    }) => Promise<PluginSessionMessageListResult>;
+    import: (input: PluginSessionImportInput) => Promise<PluginSessionImportResult>;
+    importBatch: (input: PluginSessionBatchImportInput) => Promise<PluginSessionBatchImportResult>;
+    rename: (input: { sessionId: string; title: string }) => Promise<{ updated: boolean }>;
+    delete: (input: {
+      sessionId: string;
+      mode?: "trash" | "purge";
+    }) => Promise<{ deleted: boolean }>;
+  };
+  /**
+   * Read-only completed-turn facts served by the host (`usage.read`). Flat
+   * counters and identifiers only — no message body, no write path, and no
+   * dashboard shape: streaks, heatmaps, and rankings stay the plugin's own
+   * computation on top of these rows.
+   */
+  usage: {
+    listTurns: (input?: {
+      /** Inclusive window start in epoch ms. Default: `toMs` minus 30 days. */
+      fromMs?: number;
+      /** Inclusive window end in epoch ms. Default: now. Window span ≤ 365 days. */
+      toMs?: number;
+      /** Limit rows to one durable project id. */
+      projectId?: number | null;
+      /** Limit rows to one session id. */
+      sessionId?: string;
+      /** Opaque page cursor from the previous `nextCursor`. */
+      cursor?: string;
+      /** 1..=500 rows per page; default 200. */
+      limit?: number;
+    }) => Promise<PluginUsageTurnPage>;
   };
   services: {
     /**
@@ -522,6 +1247,16 @@ export type PluginHostApi = {
       body?: string;
       timeoutMs?: number;
     }) => Promise<{ status: number; headers: Record<string, string>; bodyText: string }>;
+    /**
+     * Real-time bidirectional sockets (`net.websocket`). A connect is confined
+     * to `manifest.net.domains` exactly like `fetch`, and the host closes every
+     * socket the plugin still holds when it unloads.
+     */
+    websocket: {
+      connect: (input: PluginWebSocketConnectInput) => Promise<{ socketId: string }>;
+      send: (input: { socketId: string; data: string | Uint8Array }) => Promise<void>;
+      close: (input: { socketId: string; code?: number; reason?: string }) => Promise<void>;
+    };
   };
   events: {
     on: (event: string, handler: (...args: unknown[]) => void) => void;
@@ -534,12 +1269,26 @@ export type PluginModule = {
   onUnload?: () => Promise<void> | void;
   /** Optional fixed-channel operations for an isolated plugin panel. */
   onPanelInvoke?: (channel: string, payload: unknown) => Promise<unknown> | unknown;
+  /**
+   * Answers the renderer entry's `plugin.call` for a method listed in
+   * `manifest.rendererCallMethods`. `args` defaults to `{}`; the answer must
+   * be JSON. Throw an `Error` with a `code` to hand that code to the caller.
+   */
+  onRendererCall?: (method: string, args: unknown) => Promise<unknown> | unknown;
 };
+
+/** Upper bound on ExtensionAPI modules one plugin may contribute. */
+export const MAX_AGENT_EXTENSIONS_PER_PLUGIN = 8;
+/** Upper bound on system-wide accelerators one plugin may declare. */
+export const MAX_GLOBAL_SHORTCUTS_PER_PLUGIN = 8;
 
 export const PLUGIN_PERMISSIONS = [
   "ui.panel",
   "ui.view",
+  "ui.microphone",
   "ui.theme",
+  "ui.settings",
+  "ui.window.appearance",
   "clipboard.read",
   "clipboard.write",
   "notify",
@@ -549,9 +1298,28 @@ export const PLUGIN_PERMISSIONS = [
   "agent.tool.register",
   "agent.prompt.inject",
   "agent.complete",
+  "agent.extension",
+  // Renderer slots (`docs/plugin-plan/ui/`): the entry module loads into the
+  // host renderer's own document, so the surface it can touch is the
+  // renderer itself. One umbrella permission, like `agent.extension`.
+  "renderer.extension",
+  "provider.register",
+  "desktop.control",
   "models.list",
+  "project.create",
   "session.read",
+  "session.import",
+  "session.read.own",
+  "session.update.own",
+  "session.delete.own",
+  // Read-only usage facts (pi.usage.listTurns):
+  // completed-turn counters and session titles, never message bodies.
+  "usage.read",
+  // Install-time escape hatch from the net.domains allowlist (issue #1201):
+  // user-typed endpoints, e.g. a self-hosted server, that no manifest written
+  // ahead of time can name. Enforced by net-policy's grant-aware checks.
   "net.fetch",
+  "net.anyHost",
   "shell.openExternal",
   "mcp.server.local",
   "mcp.server.remote",
@@ -559,6 +1327,13 @@ export const PLUGIN_PERMISSIONS = [
   "bus.publish",
   "bus.subscribe",
   "browser.cdp",
+  // Background device access. `ui.microphone` stays panel-scoped: these two are
+  // what a service may use with no page open.
+  "audio.capture.background",
+  "audio.playback.background",
+  "speech.adapter.register",
+  "keyboard.globalShortcut",
+  "net.websocket",
 ] as const;
 
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number];
@@ -584,14 +1359,34 @@ export function validateManifest(raw: unknown): {
   if (typeof m.main !== "string" || !m.main) {
     return { ok: false, error: "manifest.main is required" };
   }
+  const mainError = relativePathError(m.main, "manifest.main");
+  if (mainError) return { ok: false, error: mainError };
+  const rendererError = manifestRendererError(m);
+  if (rendererError) return { ok: false, error: rendererError };
   if (typeof m.schemaVersion !== "number") {
     return { ok: false, error: "manifest.schemaVersion is required" };
   }
   if (m.enabledByDefault !== undefined && typeof m.enabledByDefault !== "boolean") {
     return { ok: false, error: "manifest.enabledByDefault must be a boolean" };
   }
+  const authorError = manifestAuthorError(m.author);
+  if (authorError) return { ok: false, error: authorError };
+  for (const field of ["homepage", "repository"] as const) {
+    const value = (m as Record<string, unknown>)[field];
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) {
+      return { ok: false, error: `manifest.${field} must be a non-empty string` };
+    }
+  }
+  const i18nError = manifestI18nError((m as Record<string, unknown>).i18n);
+  if (i18nError) return { ok: false, error: i18nError };
   const ui = m.ui as
-    | { title?: unknown }
+    | {
+        title?: unknown;
+        panel?: unknown;
+        shape?: unknown;
+        alwaysOnTop?: unknown;
+        resizable?: unknown;
+      }
     | null
     | undefined;
   if (ui !== undefined) {
@@ -600,8 +1395,58 @@ export function validateManifest(raw: unknown): {
     }
     const titleError = localizedStringError(ui.title, "manifest.ui.title");
     if (titleError) return { ok: false, error: titleError };
+    if (ui.panel !== undefined) {
+      if (typeof ui.panel !== "string" || !ui.panel.trim()) {
+        return { ok: false, error: "manifest.ui.panel must be a non-empty string" };
+      }
+      const panelError = relativePathError(ui.panel, "manifest.ui.panel");
+      if (panelError) return { ok: false, error: panelError };
+    }
+    if (ui.shape !== undefined && ui.shape !== "panel" && ui.shape !== "widget") {
+      return { ok: false, error: "manifest.ui.shape must be \"panel\" or \"widget\"" };
+    }
+    for (const key of ["alwaysOnTop", "resizable"] as const) {
+      const value = ui[key];
+      if (value !== undefined && typeof value !== "boolean") {
+        return { ok: false, error: `manifest.ui.${key} must be a boolean` };
+      }
+    }
   }
   const contributesError = validateContributions(m.contributes);
+  if (
+    !contributesError &&
+    (m.contributes?.agentExtensions?.length ?? 0) > 0 &&
+    !(m.permissions ?? []).includes("agent.extension")
+  ) {
+    return { ok: false, error: "contributes.agentExtensions requires the agent.extension permission" };
+  }
+  if (
+    !contributesError &&
+    (m.contributes?.providers?.length ?? 0) > 0 &&
+    !(m.permissions ?? []).includes("provider.register")
+  ) {
+    return { ok: false, error: "contributes.providers requires the provider.register permission" };
+  }
+  if (
+    !contributesError &&
+    m.contributes?.windowAppearance !== undefined &&
+    !(m.permissions ?? []).includes("ui.window.appearance")
+  ) {
+    return {
+      ok: false,
+      error: "contributes.windowAppearance requires the ui.window.appearance permission",
+    };
+  }
+  if (
+    !contributesError &&
+    (m.contributes?.globalShortcuts?.length ?? 0) > 0 &&
+    !(m.permissions ?? []).includes("keyboard.globalShortcut")
+  ) {
+    return {
+      ok: false,
+      error: "contributes.globalShortcuts requires the keyboard.globalShortcut permission",
+    };
+  }
   if (contributesError) {
     return { ok: false, error: contributesError };
   }
@@ -647,7 +1492,54 @@ export function validateContributions(
 
   const settings = contributes.settings ?? [];
   const settingKeys = new Set<string>();
-  const commandIds = new Set((contributes.commands ?? []).map((command) => command.id));
+  const commands = contributes.commands ?? [];
+  if (!Array.isArray(commands)) return "contributes.commands must be an array";
+  const commandIds = new Set<string>();
+  for (const command of commands) {
+    if (!command || typeof command !== "object") {
+      return "contributes.commands entries must be objects";
+    }
+    if (typeof command.id !== "string" || !command.id.trim()) {
+      return "contributes.commands entries need an id";
+    }
+    if (typeof command.title !== "string" || !command.title.trim()) {
+      return `command "${command.id}" requires a title`;
+    }
+    if (commandIds.has(command.id)) return `duplicate command id "${command.id}"`;
+    commandIds.add(command.id);
+  }
+  const shortcuts = contributes.globalShortcuts ?? [];
+  if (!Array.isArray(shortcuts)) return "contributes.globalShortcuts must be an array";
+  if (shortcuts.length > MAX_GLOBAL_SHORTCUTS_PER_PLUGIN) {
+    return `contributes.globalShortcuts is limited to ${MAX_GLOBAL_SHORTCUTS_PER_PLUGIN} entries`;
+  }
+  const shortcutIds = new Set<string>();
+  for (const shortcut of shortcuts) {
+    if (!shortcut || typeof shortcut !== "object") {
+      return "contributes.globalShortcuts entries must be objects";
+    }
+    if (
+      typeof shortcut.id !== "string" ||
+      !/^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/.test(shortcut.id)
+    ) {
+      return "contributes.globalShortcuts entries need an id matching [a-zA-Z][a-zA-Z0-9._-]{0,63}";
+    }
+    if (shortcutIds.has(shortcut.id)) {
+      return `duplicate global shortcut id "${shortcut.id}"`;
+    }
+    shortcutIds.add(shortcut.id);
+    if (typeof shortcut.command !== "string" || !shortcut.command.trim()) {
+      return `global shortcut "${shortcut.id}" requires a command`;
+    }
+    // A shortcut may only reach its own plugin's commands, so the command has
+    // to exist here rather than be resolved later against the whole registry.
+    if (!commandIds.has(shortcut.command)) {
+      return `global shortcut "${shortcut.id}" references an undeclared command`;
+    }
+    if (shortcut.default !== undefined && !isValidShortcutShape(shortcut.default)) {
+      return `global shortcut "${shortcut.id}" has an invalid default`;
+    }
+  }
   for (const setting of settings) {
     if (!setting || typeof setting !== "object") {
       return "contributes.settings entries must be objects";
@@ -718,6 +1610,123 @@ export function validateContributions(
     if (pathError) return pathError;
   }
 
+  const agentExtensions = contributes.agentExtensions ?? [];
+  if (!Array.isArray(agentExtensions)) return "contributes.agentExtensions must be an array";
+  if (agentExtensions.length > MAX_AGENT_EXTENSIONS_PER_PLUGIN) {
+    return `contributes.agentExtensions allows at most ${MAX_AGENT_EXTENSIONS_PER_PLUGIN} entries`;
+  }
+  for (const entry of agentExtensions) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      return "contributes.agentExtensions entries must be paths";
+    }
+    const pathError = relativePathError(entry, "contributes.agentExtensions path");
+    if (pathError) return pathError;
+    if (!/\.(ts|mts|js|mjs)$/.test(entry)) {
+      return "contributes.agentExtensions entries must be .ts or .js files";
+    }
+  }
+
+  const declaredProviders = contributes.providers ?? [];
+  if (!Array.isArray(declaredProviders)) return "contributes.providers must be an array";
+  if (declaredProviders.length > MAX_PLUGIN_PROVIDERS_PER_PLUGIN) {
+    return `contributes.providers allows at most ${MAX_PLUGIN_PROVIDERS_PER_PLUGIN} entries`;
+  }
+  const providerIds = new Set<string>();
+  for (const provider of declaredProviders) {
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+      return "contributes.providers entries must be objects";
+    }
+    if (typeof provider.id !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(provider.id)) {
+      return "provider declaration id is missing or invalid";
+    }
+    if (providerIds.has(provider.id)) {
+      return `duplicate provider declaration id "${provider.id}"`;
+    }
+    providerIds.add(provider.id);
+    if (typeof provider.name !== "string" || !provider.name.trim()) {
+      return `provider "${provider.id}" requires a name`;
+    }
+    if (
+      provider.vendorKey !== undefined &&
+      (typeof provider.vendorKey !== "string" || !provider.vendorKey.trim())
+    ) {
+      return `provider "${provider.id}" vendorKey must be a non-empty string`;
+    }
+    if (provider.baseUrl !== undefined) {
+      if (typeof provider.baseUrl !== "string") {
+        return `provider "${provider.id}" baseUrl must be a string`;
+      }
+      // The runtime reaches this endpoint, so only an absolute http(s) URL
+      // may be declared.
+      if (!(provider.baseUrl.startsWith("http://") || provider.baseUrl.startsWith("https://"))) {
+        return `provider "${provider.id}" baseUrl must be an http(s) URL`;
+      }
+    }
+    if (provider.apiStyle !== undefined) {
+      if (typeof provider.apiStyle !== "string") {
+        return `provider "${provider.id}" apiStyle must be a string`;
+      }
+      if (!(PLUGIN_PROVIDER_API_STYLES as readonly string[]).includes(provider.apiStyle)) {
+        return `provider "${provider.id}" has unsupported apiStyle ${provider.apiStyle}`;
+      }
+    }
+    if (provider.authKind !== undefined) {
+      if (typeof provider.authKind !== "string") {
+        return `provider "${provider.id}" authKind must be a string`;
+      }
+      if (!(PLUGIN_PROVIDER_AUTH_KINDS as readonly string[]).includes(provider.authKind)) {
+        return `provider "${provider.id}" has unsupported authKind ${provider.authKind}`;
+      }
+    }
+    // A Host-owned plugin login flow does not exist yet, so a declaration that
+    // asks for one is refused rather than turned into a row nobody can sign in
+    // to.
+    if ((provider as { oauth?: unknown }).oauth !== undefined) {
+      return `provider "${provider.id}" declares oauth; plugin OAuth providers are not supported in this release`;
+    }
+    if (!Array.isArray(provider.models)) {
+      return `provider "${provider.id}" requires models`;
+    }
+    if (provider.models.length === 0 || provider.models.length > MAX_PLUGIN_PROVIDER_MODELS) {
+      return `provider "${provider.id}" declares 1 to ${MAX_PLUGIN_PROVIDER_MODELS} models`;
+    }
+    const modelIds = new Set<string>();
+    for (const model of provider.models) {
+      if (!model || typeof model !== "object" || Array.isArray(model)) {
+        return `provider "${provider.id}" model entries must be objects`;
+      }
+      const modelId = typeof model.id === "string" ? model.id.trim() : "";
+      if (!modelId || modelId.length > 256) {
+        return `provider "${provider.id}" has a model without a valid id`;
+      }
+      if (modelIds.has(modelId)) {
+        return `provider "${provider.id}" declares model ${modelId} twice`;
+      }
+      modelIds.add(modelId);
+      if (model.name !== undefined && (typeof model.name !== "string" || !model.name.trim())) {
+        return `provider "${provider.id}" model ${modelId} name must be a non-empty string`;
+      }
+      for (const field of ["contextWindow", "maxTokens"] as const) {
+        const value = model[field];
+        if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+          return `provider "${provider.id}" model ${modelId} ${field} must be a positive integer`;
+        }
+      }
+      if (model.supportsImages !== undefined && typeof model.supportsImages !== "boolean") {
+        return `provider "${provider.id}" model ${modelId} supportsImages must be a boolean`;
+      }
+      if (
+        model.thinkingLevels !== undefined &&
+        (!Array.isArray(model.thinkingLevels) || model.thinkingLevels.some((level) => typeof level !== "string"))
+      ) {
+        return `provider "${provider.id}" model ${modelId} thinkingLevels must be an array of strings`;
+      }
+      if (model.defaultThinkingLevel !== undefined && typeof model.defaultThinkingLevel !== "string") {
+        return `provider "${provider.id}" model ${modelId} defaultThinkingLevel must be a string`;
+      }
+    }
+  }
+
   const themeIds = new Set<string>();
   for (const theme of contributes.themes ?? []) {
     if (!theme || typeof theme !== "object") return "contributes.themes entries must be objects";
@@ -733,6 +1742,86 @@ export function validateContributions(
     if (pathError) return pathError;
     if (theme.base !== undefined && theme.base !== "light" && theme.base !== "dark") {
       return `theme "${theme.id}" base must be "light" or "dark"`;
+    }
+    if (theme.assets !== undefined) {
+      if (!Array.isArray(theme.assets)) {
+        return `theme "${theme.id}" assets must be an array`;
+      }
+      const assetPaths = new Set<string>();
+      for (const asset of theme.assets) {
+        if (typeof asset !== "string" || !isThemeAssetPath(asset)) {
+          return `theme "${theme.id}" asset must be a package-relative or absolute ${THEME_ASSET_EXTENSIONS.join(
+            "/",
+          )} path`;
+        }
+        // `bg.png` and `./bg.png` are one asset, so compare the normalized form.
+        const normalized = normalizeThemeAssetPath(asset);
+        if (assetPaths.has(normalized)) {
+          return `theme "${theme.id}" declares "${asset}" twice`;
+        }
+        assetPaths.add(normalized);
+      }
+    }
+    if (theme.variables !== undefined) {
+      if (!Array.isArray(theme.variables)) return `theme "${theme.id}" variables must be an array`;
+      const variables = new Set<string>();
+      for (const variable of theme.variables) {
+        if (!validatePluginThemeVariableDeclaration(variable)) {
+          return `theme "${theme.id}" has an invalid variable declaration`;
+        }
+        if (variables.has(variable.name)) return `theme "${theme.id}" declares variable "${variable.name}" twice`;
+        variables.add(variable.name);
+      }
+    }
+  }
+
+  const scenicThemes = contributes.scenicThemes;
+  if (scenicThemes !== undefined) {
+    if (!scenicThemes || typeof scenicThemes !== "object" || Array.isArray(scenicThemes)) return "contributes.scenicThemes must be an object";
+    if (typeof scenicThemes.id !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(scenicThemes.id)) return "contributes.scenicThemes id must match [a-zA-Z][a-zA-Z0-9_-]{0,63}";
+    const localized = (value: unknown) => Boolean(value && typeof value === "object" && typeof (value as PluginLocalizedString).en === "string" && typeof (value as PluginLocalizedString)["zh-CN"] === "string");
+    if (!localized(scenicThemes.label)) return "contributes.scenicThemes requires a localized label";
+    if (!localized(scenicThemes.description)) return "contributes.scenicThemes requires a localized description";
+    if (scenicThemes.keywords !== undefined && (!Array.isArray(scenicThemes.keywords) || !scenicThemes.keywords.every(localized))) return "contributes.scenicThemes keywords must be localized";
+    if (scenicThemes.icon !== "palette") return "contributes.scenicThemes has an unsupported icon";
+    if (!Array.isArray(scenicThemes.themes) || scenicThemes.themes.length < 1 || scenicThemes.themes.length > 12) return "contributes.scenicThemes themes must contain 1 to 12 cards";
+    const themeIds = new Set<string>();
+    for (const card of scenicThemes.themes) {
+      if (!card || typeof card !== "object") return "contributes.scenicThemes theme cards must be objects";
+      if (typeof card.themeId !== "string" || !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(card.themeId)) return "contributes.scenicThemes card themeId must be valid";
+      if (themeIds.has(card.themeId)) return `contributes.scenicThemes duplicates themeId "${card.themeId}"`;
+      themeIds.add(card.themeId);
+      if (!localized(card.label)) return "contributes.scenicThemes card requires a localized label";
+      if (!localized(card.description)) return "contributes.scenicThemes card requires a localized description";
+      if (typeof card.previewAsset !== "string" || !isThemeAssetPath(card.previewAsset)) return "contributes.scenicThemes card previewAsset must be an image path";
+    }
+  }
+
+  const windowAppearance = contributes.windowAppearance;
+  if (windowAppearance !== undefined) {
+    if (
+      typeof windowAppearance !== "object" ||
+      windowAppearance === null ||
+      Array.isArray(windowAppearance)
+    ) {
+      return "contributes.windowAppearance must be an object";
+    }
+    const backgroundColor = windowAppearance.backgroundColor;
+    if (backgroundColor !== undefined) {
+      if (
+        typeof backgroundColor !== "object" ||
+        backgroundColor === null ||
+        Array.isArray(backgroundColor)
+      ) {
+        return "contributes.windowAppearance.backgroundColor must be an object";
+      }
+      for (const key of ["light", "dark"] as const) {
+        const value = backgroundColor[key];
+        if (value === undefined) continue;
+        if (typeof value !== "string" || !WINDOW_BACKGROUND_COLOR_PATTERN.test(value)) {
+          return `contributes.windowAppearance.backgroundColor.${key} must be #rrggbb or #rrggbbaa`;
+        }
+      }
     }
   }
 
@@ -760,6 +1849,28 @@ export function validateContributions(
     }
     // `icon` is intentionally unchecked: an unknown token degrades to a letter
     // tile, so rejecting one would break a plugin over a cosmetic detail.
+  }
+
+  const sessionSourceIds = new Set<string>();
+  for (const source of contributes.sessionSources ?? []) {
+    if (!source || typeof source !== "object") {
+      return "contributes.sessionSources entries must be objects";
+    }
+    if (
+      typeof source.id !== "string" ||
+      !/^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/.test(source.id)
+    ) {
+      return "session source id must match [a-zA-Z][a-zA-Z0-9._-]{0,63}";
+    }
+    if (sessionSourceIds.has(source.id)) {
+      return `duplicate session source id "${source.id}"`;
+    }
+    sessionSourceIds.add(source.id);
+    const labelError = localizedStringError(source.label, `session source "${source.id}" label`);
+    if (labelError) return labelError;
+    if (typeof source.label === "string" && !source.label.trim()) {
+      return `session source "${source.id}" label must not be empty`;
+    }
   }
 
   const serverIds = new Set<string>();
@@ -834,6 +1945,89 @@ function localizedStringError(value: unknown, field: string): string | undefined
   return undefined;
 }
 
+function manifestAuthorError(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") {
+    return value.trim() ? undefined : "manifest.author must not be empty";
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "manifest.author must be a string or { name, email?, url? }";
+  }
+  const author = value as Record<string, unknown>;
+  if (typeof author.name !== "string" || !author.name.trim()) {
+    return "manifest.author.name is required";
+  }
+  for (const field of ["email", "url"] as const) {
+    if (author[field] !== undefined && typeof author[field] !== "string") {
+      return `manifest.author.${field} must be a string`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * `manifest.i18n` is display metadata: locale id → the strings that locale
+ * shows. Shape errors are refused because a malformed block would silently
+ * leave the shell on the author's own language with no way to tell why; a
+ * locale or field a plugin does not translate is fine and falls back.
+ */
+function manifestI18nError(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "manifest.i18n must be an object of locale → { name?, description?, safetyNotes? }";
+  }
+  for (const [locale, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return `manifest.i18n.${locale} must be an object`;
+    }
+    for (const field of ["name", "description", "safetyNotes"] as const) {
+      const text = (entry as Record<string, unknown>)[field];
+      if (text !== undefined && typeof text !== "string") {
+        return `manifest.i18n.${locale}.${field} must be a string`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Upper bounds for the renderer-slot declarations one plugin may carry. */
+export const MAX_RENDERER_ACTIONS_PER_PLUGIN = 16;
+export const MAX_RENDERER_CALL_METHODS_PER_PLUGIN = 32;
+
+/**
+ * `manifest.renderer` and its two whitelists. The entry is a relative
+ * `.js`/`.mjs` module, the whitelists are bounded arrays of non-empty strings
+ * that mean nothing without the entry, and any of it requires the
+ * `renderer.extension` permission. Unknown action words are accepted here so a
+ * manifest written for a newer host still loads; dispatch refuses them.
+ */
+function manifestRendererError(m: Partial<PluginManifest>): string | undefined {
+  for (const [field, max] of [
+    ["rendererActions", MAX_RENDERER_ACTIONS_PER_PLUGIN],
+    ["rendererCallMethods", MAX_RENDERER_CALL_METHODS_PER_PLUGIN],
+  ] as const) {
+    const value: unknown = m[field];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !entry.trim())) {
+      return `manifest.${field} must be an array of non-empty strings`;
+    }
+    if (value.length > max) return `manifest.${field} allows at most ${max} entries`;
+  }
+  const declaresWhitelist = Boolean(m.rendererActions?.length || m.rendererCallMethods?.length);
+  if (m.renderer === undefined && !declaresWhitelist) return undefined;
+  if (!m.permissions?.includes("renderer.extension")) {
+    return "renderer modules require the renderer.extension permission";
+  }
+  if (m.renderer === undefined) return "renderer whitelists require manifest.renderer";
+  if (typeof m.renderer !== "string" || !m.renderer.trim()) {
+    return "manifest.renderer must be a non-empty string";
+  }
+  const pathError = relativePathError(m.renderer, "manifest.renderer");
+  if (pathError) return pathError;
+  if (!/\.m?js$/.test(m.renderer)) return "manifest.renderer must be a .js or .mjs module";
+  return undefined;
+}
+
 function relativePathError(value: string, field: string): string | undefined {
   if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith("/") || value.startsWith("\\")) {
     return `${field} must not be an absolute path`;
@@ -884,10 +2078,31 @@ export {
   type ParsedSkillDoc,
 } from "./skills.js";
 export {
+  decodeCssEscapes,
+  findThemeCssUrlReferences,
+  isExternalThemeAssetPath,
+  isThemeAssetPath,
+  maskNonCodeCss,
+  normalizeThemeAssetPath,
   sanitizeThemeCss,
+  themeAssetUrl,
+  THEME_ASSET_EXTENSIONS,
+  THEME_ASSET_MAX_BYTES,
+  THEME_ASSET_SCHEME,
   THEME_CSS_MAX_BYTES,
+  type ThemeCssAssetResolver,
   type ThemeCssResult,
+  type ThemeCssUrlReference,
 } from "./theme-css.js";
+export {
+  formatPluginThemeVariables,
+  isPluginThemeVariableName,
+  normalizePluginThemeVariableValues,
+  validatePluginThemeVariableDeclaration,
+  validatePluginThemeVariables,
+  type PluginThemeVariableContrib,
+  type PluginThemeVariableValues,
+} from "./theme-variables.js";
 export {
   busTopicAllowed,
   isValidBusTopic,
@@ -907,12 +2122,18 @@ export {
   type McpValidationResult,
 } from "./mcp-config.js";
 export {
+  isLocalNetDomain,
+  isMetadataNetHost,
   isNetHostAllowed,
+  isNetSocketUrlAllowedWithGrant,
   isNetUrlAllowed,
+  isNetUrlAllowedWithGrant,
   parseNetDomains,
   type PluginNetDomain,
+  type PluginNetEgressGrant,
 } from "./net-policy.js";
 export {
+  fsGlobIgnoresCase,
   isDeniedFsPath,
   isFsPathInScope,
   isWholeTreePattern,
@@ -924,9 +2145,79 @@ export {
   FS_DENY_FILE_PATTERNS,
   LEGACY_FS_PERMISSIONS,
   PLUGIN_FS_MODES,
+  type MatchFsGlobOptions,
   type PluginFsMode,
   type PluginFsPolicy,
   type PluginFsRoot,
   type PluginFsRule,
   type ResolvedFsAccess,
 } from "./fs-policy.js";
+
+export {
+  PLUGIN_RENDERER_SCHEME,
+  PLUGIN_RENDERER_SLOTS,
+  PLUGIN_SLOT_POSITIONS,
+  PLUGIN_RENDERER_ACTIONS,
+  PLUGIN_INSERT_TEXT_MAX_BYTES,
+  blockRendererLanguageKey,
+  slotRegistrationRefusal,
+  type PiRendererApi,
+  type PiRendererModule,
+  type PluginRendererSlot,
+  type PluginSlotPosition,
+  type PluginSlotMessage,
+  type PluginActionSlotProps,
+  type PluginEntryExtraSlotProps,
+  type PluginToolCardStatus,
+  type PluginToolCardSlotProps,
+  type PluginBlockRendererSlotProps,
+  type PluginComposerControlSlotProps,
+  type PluginSlotComponent,
+  type PluginActionSlotRegistration,
+  type PluginEntryExtraSlotRegistration,
+  type PluginToolCardSlotRegistration,
+  type PluginBlockRendererSlotRegistration,
+  type PluginComposerControlSlotRegistration,
+  type PluginSlotRegistration,
+  type PluginDisposer,
+  type PluginLayer,
+  type PluginRendererActionName,
+  type PluginRendererActionMap,
+  type PluginRendererDispatch,
+  type PluginCallPayload,
+  type PluginInsertTextPayload,
+  type PluginSlotErrorCode,
+  type PluginRendererErrorCode,
+  type PluginSlotRefusal,
+  type PluginComponentSlot,
+} from "./renderer.js";
+
+export {
+  PLUGIN_COMPOSER_TRIGGERS,
+  PLUGIN_TRIGGER_MAX_ITEMS,
+  PLUGIN_TRIGGER_TIMEOUT_MS,
+  PLUGIN_MARK_LABEL_MAX_CHARS,
+  PLUGIN_TRIGGER_DETAIL_MAX_CHARS,
+  PLUGIN_MARK_SEND_MAX_BYTES,
+  PLUGIN_DRAFT_MAX_MARKS,
+  PLUGIN_DRAFT_TEXT_MAX_BYTES,
+  PLUGIN_DRAFT_MARK_CHAR,
+  PLUGIN_ATTACHMENT_MAX_BYTES,
+  PLUGIN_ATTACHMENTS_MAX,
+  composerTriggerKey,
+  type PluginComposerTrigger,
+  type PluginTriggerQuery,
+  type PluginTriggerItem,
+  type PluginComposerTriggerRegistration,
+  type PluginDraftMark,
+  type PluginDraftSnapshot,
+  type PluginDraftMarkInput,
+  type PluginReadDraftPayload,
+  type PluginReplaceDraftPayload,
+  type PluginDraftWriteResult,
+  type PluginAttachmentAddPayload,
+  type PluginAttachmentRef,
+  type PluginAttachment,
+  type PluginAttachmentListPayload,
+  type PluginDraftListener,
+} from "./renderer-composer.js";

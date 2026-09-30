@@ -4,12 +4,13 @@ import {
   type ModelBinding,
   type ModelInfo,
   type ModelModality,
-  type ThinkingLevel,
 } from "@pi-desktop/shared";
 import type { ModelConfig, ThinkingCapabilitySet } from "./thinking-level.js";
 
 export {
+  agentThinkingLevel,
   clampThinkingLevel,
+  omitThinkingModel,
   type ModelConfig,
   type ThinkingCapabilitySet,
 } from "./thinking-level.js";
@@ -68,6 +69,9 @@ export function capabilitiesFromModelInfo(model?: ModelInfo | null): ModelCapabi
  * configured thinking-level list is the same kind of generic seed — the
  * published catalog ladder wins, otherwise models discovered before the
  * catalog knew them would be stuck with reasoning "off" forever.
+ * come from the user's binding. Only a context window explicitly marked as
+ * catalog-sourced follows a published correction; an unmarked legacy value is
+ * preserved because it may be the user's exact 128k override.
  */
 export function modelConfigWithBinding(
   model: ModelConfig,
@@ -75,24 +79,75 @@ export function modelConfigWithBinding(
     | Pick<
         ModelBinding,
         | "contextWindow"
+        | "contextWindowSource"
         | "maxTokens"
         | "thinkingLevels"
+        | "thinkingProtocol"
         | "supportsImages"
         | "supportsDocuments"
+        | "nativeWebSearch"
       >
     | null,
 ): ModelConfig {
+  // A generic discovery row carries no trusted capability restriction. Keep
+  // all levels selectable unless the user stored a non-empty override.
+  // This is an effective runtime policy, not published catalog metadata.
+  if (model.source === "generic" && !binding?.thinkingLevels.length) {
+    model = {
+      ...model,
+      reasoning: true,
+      supportedThinkingLevels: [...THINKING_LEVELS],
+      thinkingLevelMap: {
+        ...model.thinkingLevelMap,
+        xhigh: model.thinkingLevelMap?.xhigh ?? "xhigh",
+        max: model.thinkingLevelMap?.max ?? "max",
+      },
+    };
+  }
   if (!binding) return model;
   const configuredLevels = binding.thinkingLevels ?? [];
   const publishedLevels = model.supportedThinkingLevels ?? [];
-  const enabledThinkingLevels = configuredLevels.length
-    ? THINKING_LEVELS.filter((level) => configuredLevels.includes(level))
-    : THINKING_LEVELS.filter((level) => publishedLevels.includes(level));
+  const enabledThinkingLevels =
+    model.source === "generic" && configuredLevels.length === 0
+      ? [...THINKING_LEVELS]
+      : configuredLevels.length
+        ? THINKING_LEVELS.filter((level) => configuredLevels.includes(level))
+        : THINKING_LEVELS.filter((level) => publishedLevels.includes(level));
+  const thinkingLevelMap = { ...(model.thinkingLevelMap ?? {}) };
+  const compat = binding.thinkingProtocol
+    ? {
+        ...(model.compat ?? {}),
+        forceAdaptiveThinking: binding.thinkingProtocol === "adaptive",
+      }
+    : model.compat;
+  // pi-ai treats xhigh/max as unsupported when their adapter-facing mapping
+  // is absent or null. The explicit binding is authoritative, so an enabled
+  // extended level without a catalog translation must pass through as-is.
+  for (const level of ["xhigh", "max"] as const) {
+    if (
+      enabledThinkingLevels.includes(level) &&
+      thinkingLevelMap[level] == null
+    ) {
+      thinkingLevelMap[level] = level;
+    }
+  }
+  const publishedContextWindow = model.source === "generic"
+    ? undefined
+    : model.contextWindow;
   const contextWindow =
-    effectiveContextWindow(model.contextWindow, binding.contextWindow) ??
-    model.contextWindow;
+    effectiveContextWindow(
+      publishedContextWindow,
+      binding.contextWindow,
+      binding.contextWindowSource,
+    ) ?? model.contextWindow;
+  const catalogContextWindow =
+    model.catalogContextWindow ??
+    (model.source === "models.dev" && model.contextWindow > 0
+      ? model.contextWindow
+      : undefined);
   return {
     ...model,
+    ...(catalogContextWindow !== undefined ? { catalogContextWindow } : {}),
     contextWindow,
     limit: {
       ...(model.limit ?? {}),
@@ -101,7 +156,13 @@ export function modelConfigWithBinding(
     maxTokens: binding.maxTokens,
     reasoning: enabledThinkingLevels.some((level) => level !== "off"),
     supportedThinkingLevels: enabledThinkingLevels,
+    ...(binding.thinkingProtocol
+      ? { thinkingProtocol: binding.thinkingProtocol }
+      : {}),
+    ...(compat ? { compat } : {}),
+    ...(Object.keys(thinkingLevelMap).length > 0 ? { thinkingLevelMap } : {}),
     ...modalityOverride(model, binding),
+    ...(binding.nativeWebSearch === true ? { webSearch: true } : {}),
   };
 }
 

@@ -4,8 +4,8 @@
  * tested away from React and IME timing.
  *
  * Grammar mirrors the pi CLI editor:
- * - "/" opens command mode only as the very first character of the draft,
- *   while the cursor is still inside that first whitespace-free token.
+ * - "/" opens all commands in the first token. Later whitespace-delimited
+ *   slash tokens offer Skills only; app commands still require the first token.
  * - "@" opens file mode when the token containing the cursor starts with
  *   "@" and the character before it is start-of-input, whitespace, or one
  *   of the pi delimiters (" ' =). A `@"` prefix starts a quoted token that
@@ -45,6 +45,22 @@ const WHITESPACE = new Set([" ", "\t", "\n", "\r"]);
 /** Characters that end the token scan-back, per pi's autocomplete. */
 const DELIMITERS = new Set([" ", "\t", "\n", "\r", '"', "'", "="]);
 
+/** U+3001 IDEOGRAPHIC COMMA — the mark a Chinese IME gives for "/" (D405). */
+export const IDEOGRAPHIC_COMMA = "、";
+
+/**
+ * A Chinese IME types "、" where an ASCII "/" is meant, and switching input
+ * methods to reach the slash menu breaks the flow of writing (issue #65). The
+ * first character of an otherwise empty draft is rewritten to "/" so the
+ * ordinary command menu opens; a mark anywhere later in the draft is text and
+ * is left untouched.
+ */
+export function rewriteIdeographicCommaTrigger(value: string): string {
+  return value.startsWith(IDEOGRAPHIC_COMMA)
+    ? `/${value.slice(1)}`
+    : value;
+}
+
 function isBoundary(value: string, index: number): boolean {
   if (index <= 0) return true;
   return DELIMITERS.has(value[index - 1]);
@@ -57,19 +73,21 @@ export function detectTrigger(
 ): ComposerTrigger | null {
   if (cursor < 0 || cursor > value.length) return null;
 
-  // Slash mode: draft starts with "/", cursor inside the first token.
-  if (value.startsWith("/") && cursor >= 1) {
-    const head = value.slice(1, cursor);
-    let hasWhitespace = false;
-    for (const ch of head) {
-      if (WHITESPACE.has(ch)) {
-        hasWhitespace = true;
-        break;
-      }
+  // Only the token under the cursor can open the menu. A later slash is a
+  // Skill reference, not a second app command.
+  let slashStart = cursor;
+  while (slashStart > 0 && !WHITESPACE.has(value[slashStart - 1])) slashStart -= 1;
+  if (value[slashStart] === "/" && cursor > slashStart) {
+    let tokenEnd = cursor;
+    if (slashStart > 0) {
+      while (tokenEnd < value.length && !WHITESPACE.has(value[tokenEnd])) tokenEnd += 1;
     }
-    if (!hasWhitespace) {
-      return { mode: "slash", query: head, tokenStart: 0, tokenEnd: cursor };
-    }
+    return {
+      mode: "slash",
+      query: value.slice(slashStart + 1, cursor),
+      tokenStart: slashStart,
+      tokenEnd,
+    };
   }
 
   // File mode, quoted form first: @"query with spaces
@@ -111,6 +129,23 @@ export function detectTrigger(
   return null;
 }
 
+export type SkillMention = { start: number; end: number; id: string };
+
+/** Resolve complete slash tokens against the active Skill catalog at send time. */
+export function findSkillMentions(
+  content: string,
+  skillIds: ReadonlyMap<string, string>,
+): SkillMention[] {
+  const mentions: SkillMention[] = [];
+  for (const match of content.matchAll(/(^|\s)\/([^\s]+)/g)) {
+    const id = skillIds.get(match[2]);
+    if (!id) continue;
+    const start = match.index + match[1].length;
+    mentions.push({ start, end: start + match[2].length + 1, id });
+  }
+  return mentions;
+}
+
 /** Insertion text for an accepted slash command: `/name ` ready for args. */
 export function formatCommandInsert(name: string): string {
   return `/${name} `;
@@ -136,13 +171,16 @@ export function fileReferenceLabel(path: string, preferredName?: string): string
   return normalized.slice(normalized.lastIndexOf("/") + 1) || candidate;
 }
 
+/** What serialization reads of a reference's plugin part (`send` of a mark). */
+type ComposerReferencePluginPart = { readonly kind?: string; readonly send?: string };
+
 /**
  * Serialize renderer-owned file references only at send time. The textarea can
  * stay compact while the persisted/model-facing prompt keeps exact @ paths.
  */
 export function serializeComposerFileReferences(
   draft: string,
-  references: ReadonlyArray<{ path: string; token?: string }>,
+  references: ReadonlyArray<{ path: string; token?: string; plugin?: ComposerReferencePluginPart }>,
 ): string {
   const content = serializeInlineComposerFileReferences(draft, references);
   const paths = references
@@ -158,17 +196,20 @@ export function serializeComposerFileReferences(
 /**
  * Resolve only inline generated tokens (legacy @name strings or single
  * sentinel characters backing atomic chips). Each resolved token keeps one
- * separating space so adjacent chips never fuse their @paths together.
+ * separating space so adjacent chips never fuse their @paths together. A
+ * plugin mark's token resolves to the text it sends (`plugin.send`) instead
+ * of a path.
  */
 export function serializeInlineComposerFileReferences(
   draft: string,
-  references: ReadonlyArray<{ path: string; token?: string }>,
+  references: ReadonlyArray<{ path: string; token?: string; plugin?: ComposerReferencePluginPart }>,
 ): string {
   let content = draft;
   for (const reference of references) {
     const token = reference.token?.trim();
     if (!token || !content.includes(token)) continue;
-    const insert = formatFileInsert(reference.path, "file").trim();
+    const send = reference.plugin?.send;
+    const insert = typeof send === "string" ? send : formatFileInsert(reference.path, "file").trim();
     let index = content.indexOf(token);
     while (index !== -1) {
       const nextChar = content[index + token.length];
@@ -182,6 +223,80 @@ export function serializeInlineComposerFileReferences(
     }
   }
   return content.trim();
+}
+
+/** Remove renderer-only inline reference tokens before text-only enhancement. */
+export function stripInlineComposerFileReferenceTokens(
+  draft: string,
+  references: ReadonlyArray<{ token?: string }>,
+): string {
+  const tokens = references
+    .map((reference) => reference.token?.trim())
+    .filter((token): token is string => Boolean(token))
+    .sort((a, b) => b.length - a.length);
+  let content = draft;
+  for (const token of tokens) content = content.replaceAll(token, "");
+  return content;
+}
+
+/**
+ * Restore inline reference chips around an enhanced text-only draft. The
+ * model must never be trusted to preserve private renderer sentinels; tokens
+ * keep their order and approximate relative text position instead.
+ */
+export function restoreInlineComposerFileReferenceTokens(
+  sourceDraft: string,
+  enhancedDraft: string,
+  references: ReadonlyArray<{ token?: string }>,
+): string {
+  const tokens = references
+    .map((reference) => reference.token?.trim())
+    .filter((token): token is string => Boolean(token))
+    .sort((a, b) => b.length - a.length);
+  if (!tokens.length) return enhancedDraft;
+
+  const occurrences: Array<{ sourceIndex: number; token: string; textOffset: number }> = [];
+  for (const token of tokens) {
+    let sourceIndex = sourceDraft.indexOf(token);
+    while (sourceIndex !== -1) {
+      occurrences.push({
+        sourceIndex,
+        token,
+        textOffset: Array.from(
+          stripInlineComposerFileReferenceTokens(sourceDraft.slice(0, sourceIndex), references),
+        ).length,
+      });
+      sourceIndex = sourceDraft.indexOf(token, sourceIndex + token.length);
+    }
+  }
+  if (!occurrences.length) return enhancedDraft;
+  occurrences.sort((a, b) => a.sourceIndex - b.sourceIndex);
+
+  const cleanEnhanced = stripInlineComposerFileReferenceTokens(enhancedDraft, references);
+  const enhancedChars = Array.from(cleanEnhanced);
+  const sourceTextLength = Array.from(
+    stripInlineComposerFileReferenceTokens(sourceDraft, references),
+  ).length;
+  const insertions = new Map<number, string[]>();
+  let previousTarget = 0;
+  for (const occurrence of occurrences) {
+    const target = sourceTextLength
+      ? Math.round((occurrence.textOffset / sourceTextLength) * enhancedChars.length)
+      : 0;
+    const insertionIndex = Math.max(previousTarget, Math.min(enhancedChars.length, target));
+    const group = insertions.get(insertionIndex) ?? [];
+    group.push(occurrence.token);
+    insertions.set(insertionIndex, group);
+    previousTarget = insertionIndex;
+  }
+
+  const result: string[] = [];
+  for (let index = 0; index <= enhancedChars.length; index += 1) {
+    const group = insertions.get(index);
+    if (group) result.push(...group);
+    if (index < enhancedChars.length) result.push(enhancedChars[index]!);
+  }
+  return result.join("");
 }
 
 /** Replace the trigger token with `insert`, returning the new draft+cursor. */

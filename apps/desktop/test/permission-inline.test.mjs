@@ -1,3 +1,10 @@
+import {
+  readAppSource,
+  readStoreModuleSync,
+  readStoreSource,
+  readTranscriptSource,
+  readComposerSource,
+} from "./helpers/source-contracts.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -6,7 +13,6 @@ import {
   clearSessionPermissions,
   enqueuePermission,
   headPermission,
-  permissionSecondsLeft,
   queuedPermissionCount,
   removePermission,
   removePermissionForToolCall,
@@ -22,19 +28,25 @@ import {
 import { createNavigationIntentController } from "../src/lib/navigation-intent.ts";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
-const [appSource, chatSurfaceSource, sessionPaneSource, composerSource, transcriptSource, cardSource, askCardSource, storeSource, browserSource, messageStyleSource] =
+const [appSource, chatSurfaceSource, sessionPaneSource, composerSource, transcriptSource, cardSource, askCardSource, storeSource, browserSource, messageStyleSource, composerStyleSource] =
   await Promise.all([
-    read("../src/App.tsx"),
+    readAppSource(),
     read("../src/components/ChatSurface.tsx"),
     read("../src/components/SessionPane.tsx"),
-    read("../src/components/Composer.tsx"),
-    read("../src/components/ChatTranscript.tsx"),
+    readComposerSource(),
+    readTranscriptSource(),
     read("../src/components/PermissionCard.tsx"),
     read("../src/components/AskToolCard.tsx"),
-    read("../src/stores/app-store.ts"),
+    readStoreSource(),
     read("../src/components/workpanel/PluginViewTab.tsx"),
     read("../src/styles/messages.css"),
+    read("../src/styles/composer.css"),
   ]);
+
+const eventsSource = readStoreModuleSync("slices/events-slice.ts");
+const interactionSource = readStoreModuleSync("slices/interaction-slice.ts");
+const transcriptSliceSource = readStoreModuleSync("slices/transcript-slice.ts");
+const sessionRuntimeSource = readStoreModuleSync("runtime/session-runtime.ts");
 
 function permission(sessionId, requestId, extra = {}) {
   return {
@@ -45,7 +57,6 @@ function permission(sessionId, requestId, extra = {}) {
     argsPreview: { path: `${sessionId}.txt` },
     risk: "high",
     reason: "Modify a workspace file",
-    receivedAt: 1_000,
     ...extra,
   };
 }
@@ -93,15 +104,15 @@ test("a finished tool call clears its request from anywhere in the queue", () =>
   const second = permission("session-a", "request-second");
   const queues = enqueuePermission(enqueuePermission({}, first), second);
 
-  // The host answers an expired request itself, so a queued card that was
-  // never shown still has to leave the queue on `tool_end`.
-  const afterExpiry = removePermissionForToolCall(
+  // A cancelled request that was never shown still has to leave the queue on
+  // `tool_end`.
+  const afterCancellation = removePermissionForToolCall(
     queues,
     "session-a",
     "tool-request-second",
   );
-  assert.equal(headPermission(afterExpiry, "session-a"), first);
-  assert.equal(queuedPermissionCount(afterExpiry, "session-a"), 0);
+  assert.equal(headPermission(afterCancellation, "session-a"), first);
+  assert.equal(queuedPermissionCount(afterCancellation, "session-a"), 0);
   assert.equal(
     removePermissionForToolCall(queues, "session-a", "tool-unknown"),
     queues,
@@ -151,7 +162,7 @@ test("asktool card is a stepwise, non-expiring composer question surface", () =>
   assert.match(composerSource, /headAsk\(s\.pendingAsks/);
   assert.doesNotMatch(transcriptSource, /AskToolCard/);
   // Each retained pane subscribes to its own session's ask queue (ADR 0137).
-  assert.match(sessionPaneSource, /askPending=\{askPending\}/);
+  assert.match(sessionPaneSource, /askPending=\{transcript\.historical \? false : askPending\}/);
   assert.match(sessionPaneSource, /headAsk\(state\.pendingAsks, sessionId\)/);
   assert.match(storeSource, /event\.type === "asktool_request"/);
   assert.match(askCardSource, /current\.multiSelect/);
@@ -162,13 +173,27 @@ test("asktool card is a stepwise, non-expiring composer question surface", () =>
   assert.match(messageStyleSource, /\.asktool-options[\s\S]*?overflow-y:\s*auto/);
   assert.match(messageStyleSource, /\.asktool-options[\s\S]*?max-height:\s*min\(320px,\s*36dvh\)/);
   assert.match(messageStyleSource, /\.asktool-options[\s\S]*?overscroll-behavior-y:\s*contain/);
+  // The card is a dock surface, not an in-flow tile: it paints the composer
+  // plate with its shadow and its rows are inlaid on that plate (issue #360).
+  assert.match(
+    composerStyleSource,
+    /\.composer-stack > \.asktool-card \{[^}]*background: var\(--ds-bg-composer\)/,
+  );
+  assert.match(
+    composerStyleSource,
+    /\.composer-stack > \.asktool-card \{[^}]*box-shadow: var\(--ds-shadow-composer\)/,
+  );
+  assert.doesNotMatch(messageStyleSource, /\.asktool-option \{[^}]*--ds-raised/);
+  assert.match(messageStyleSource, /\.asktool-option \{[^}]*background: var\(--ds-tile-deep\)/);
+  assert.match(
+    messageStyleSource,
+    /\.asktool-custom-input \{[^}]*background: var\(--ds-tile-deep\)/,
+  );
 });
 
-test("permission countdown uses its absolute receipt time", () => {
-  assert.equal(permissionSecondsLeft(1_000, 1_000), 120);
-  assert.equal(permissionSecondsLeft(1_000, 61_001), 60);
-  assert.equal(permissionSecondsLeft(1_000, 121_000), 0);
-  assert.equal(permissionSecondsLeft(1_000, 180_000), 0);
+test("permission approval stays pending until an explicit decision", () => {
+  assert.doesNotMatch(cardSource, /setInterval|permissionSecondsLeft|role="timer"/);
+  assert.doesNotMatch(eventsSource, /receivedAt/);
 });
 
 test("permission approval is an inline transcript card, never a global dialog", () => {
@@ -181,7 +206,7 @@ test("permission approval is an inline transcript card, never a global dialog", 
   assert.match(chatSurfaceSource, /headPermission\(state\.pendingPermissions/);
   assert.match(
     sessionPaneSource,
-    /pendingPermission=\{pendingPermission\}/,
+    /pendingPermission=\{transcript\.historical \? undefined : pendingPermission\}/,
   );
   assert.match(
     sessionPaneSource,
@@ -196,7 +221,7 @@ test("permission approval is an inline transcript card, never a global dialog", 
   assert.match(cardSource, /requestAnimationFrame/);
   assert.match(cardSource, /showToast/);
   assert.doesNotMatch(cardSource, /<section[^>]*aria-live=/);
-  assert.match(cardSource, /permissionSecondsLeft\(permission\.receivedAt\)/);
+  assert.doesNotMatch(cardSource, /permissionSecondsLeft|permission\.receivedAt/);
   assert.match(browserSource, /blocking overlay/);
   assert.doesNotMatch(browserSource, /permission dialog/);
 });
@@ -225,7 +250,7 @@ test("background permission events update only session-scoped state", () => {
     /pendingPermissions:\s*PermissionQueues/,
   );
   assert.doesNotMatch(storeSource, /permission\?:\s*ToolPermissionRequest/);
-  const backgroundBlock = storeSource.match(
+  const backgroundBlock = eventsSource.match(
     /if \(envelope\.sessionId !== get\(\)\.activeSessionId\)[\s\S]*?return;/,
   )?.[0];
   assert.ok(backgroundBlock);
@@ -235,7 +260,7 @@ test("background permission events update only session-scoped state", () => {
     /selectSession|activeSessionId:\s*|messages:\s*|page:\s*/,
   );
   assert.match(
-    storeSource,
+    interactionSource,
     /resolvePermission: async \(sessionId, requestId, decision\)/,
   );
   // Only the request on screen is answerable, and a late answer clears that
@@ -246,7 +271,8 @@ test("background permission events update only session-scoped state", () => {
     /removePermission\([\s\S]*state\.pendingPermissions,[\s\S]*sessionId,[\s\S]*requestId/,
   );
   assert.match(storeSource, /removePermissionForToolCall\(/);
-  const abortBlock = storeSource.match(/abort: async[\s\S]*?\n  openProject:/)?.[0] ?? "";
+  const abortStart = transcriptSliceSource.indexOf("abort: async");
+  const abortBlock = transcriptSliceSource.slice(abortStart);
   assert.match(abortBlock, /Promise\.allSettled/);
   assert.match(abortBlock, /decision: "deny"/);
   // Every open request is denied: a queued delegate would otherwise keep its
@@ -279,18 +305,18 @@ test("new navigation intents invalidate older asynchronous commits", async () =>
 test("session and page navigation share the latest-intent guard", () => {
   assert.match(storeSource, /createNavigationIntentController/);
   assert.doesNotMatch(storeSource, /sessionSelectionQueue/);
-  assert.match(storeSource, /let sessionWorkspaceQueue: Promise<void>/);
+  assert.match(sessionRuntimeSource, /let sessionWorkspaceQueue: Promise<unknown>/);
   assert.match(
     storeSource,
-    /const detailPromise = loadSessionDetail\(id,\s*\{/,
+    /const detailPromise = runtime\.loadSessionDetail\(id,\s*\{/,
   );
-  assert.match(storeSource, /opts\?\.navigationIntent \?\? beginNavigationIntent\(\)/);
-  assert.match(storeSource, /sessionWorkspaceQueue\.then/);
+  assert.match(storeSource, /opts\?\.navigationIntent \?\? runtime\.beginNavigationIntent\(\)/);
+  assert.match(sessionRuntimeSource, /sessionWorkspaceQueue\.then/);
   assert.ok(
     storeSource.match(/navigationIntentIsCurrent\(intent\)/g)?.length >= 12,
     "navigation intent must be checked after asynchronous boundaries",
   );
-  assert.match(storeSource, /setPage: \(page, opts\) => \{\s*beginNavigationIntent\(\)/);
+  assert.match(interactionSource, /setPage: \(page, opts\) => \{\s*runtime\.beginNavigationIntent\(\)/);
   assert.match(storeSource, /activateProject: async \(path, opts\)/);
   assert.match(storeSource, /clearProject: async \(opts\)/);
 });

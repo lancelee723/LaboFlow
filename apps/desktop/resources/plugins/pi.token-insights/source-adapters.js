@@ -8,7 +8,7 @@ const { createInterface } = require("node:readline");
 const path = require("node:path");
 
 const SOURCE_LABELS = {
-  "pi-desktop": "PI-Desktop",
+  "pi-desktop": "LaboFlow",
   "claude-code": "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
@@ -264,7 +264,7 @@ function localDayKey(timestamp) {
 }
 
 /**
- * Fold host completed-turn totals into the PI-Desktop JSONL scan.
+ * Fold host completed-turn totals into the LaboFlow JSONL scan.
  *
  * Transcript assistant rows stay the model/provider ranking. When a durable
  * turn's total exceeds those rows (subagent spend that never landed on

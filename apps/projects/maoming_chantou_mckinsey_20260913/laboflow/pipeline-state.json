@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "project": null,
+  "stages": {
+    "stage1": {
+      "status": "submitted",
+      "submittedAt": "2026-09-13T02:04:48.372Z",
+      "surface": "panel"
+    },
+    "stage2": {
+      "status": "pending"
+    },
+    "spec_gate1": {
+      "status": "pending"
+    },
+    "spec_gate2": {
+      "status": "pending"
+    }
+  }
+}

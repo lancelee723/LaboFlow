@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -19,6 +20,10 @@ pub const PROTOCOL_VERSION: u32 = 11;
 pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BASH_ABORT_TOMBSTONE_TTL: Duration = Duration::from_secs(60);
 const MAX_BASH_ABORT_TOMBSTONES: usize = 1024;
+const PLUGIN_IMPORT_RATE_WINDOW: Duration = Duration::from_secs(60);
+const PLUGIN_IMPORT_RATE_LIMIT: usize = 10;
+const PLUGIN_BATCH_IMPORT_RATE_LIMIT: usize = 5;
+const PLUGIN_DELETE_RATE_LIMIT: usize = 20;
 
 pub struct AppState {
     pub data_dir: std::path::PathBuf,
@@ -37,6 +42,12 @@ pub struct AppState {
     pub user_subagents: UserSubagentRegistry,
     pub user_experts: UserExpertRegistry,
     pub user_teams: UserTeamRegistry,
+    /// One reconciliation worker per local vault. The lock is separate from
+    /// the AppState mutex so WebDAV I/O never monopolizes the host state lock.
+    pub config_sync_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Process-local status for the single active sync worker. It is never
+    /// persisted and only drives the renderer's transient "syncing" state.
+    pub config_sync_in_progress: Arc<AtomicBool>,
     pub started_at: Instant,
     pub handshook: bool,
     pub shutting_down: bool,
@@ -45,6 +56,11 @@ pub struct AppState {
     /// executionId -> responder for plugin tool dispatches awaiting the
     /// desktop runner (Electron main executes the plugin JS and resolves).
     pub plugin_execs: HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>,
+    /// Rolling plugin session API brakes. These are intentionally process-local;
+    /// a restart is already a natural rate-window boundary.
+    pub plugin_import_rates: HashMap<String, Vec<Instant>>,
+    pub plugin_batch_import_rates: HashMap<String, Vec<Instant>>,
+    pub plugin_delete_rates: HashMap<String, Vec<Instant>>,
     pub tool_budget: ToolBudget,
     /// (session_id, tool_call_id) -> cancellation signal for an active Bash
     /// process. The signal is removed by the execution owner in all outcomes.
@@ -58,18 +74,25 @@ pub struct AppState {
     /// separate tasks. A short-lived tombstone makes the later request start
     /// already cancelled instead of executing after Stop was acknowledged.
     pending_bash_aborts: HashMap<(String, String), Instant>,
+    /// Session-scoped Read/Edit snapshot store (ADR 0087). Interior mutex so
+    /// tool execution does not hold the AppState lock.
+    pub hashline: crate::tools::HashlineStore,
 }
 
 impl AppState {
     pub fn open(data_dir: &std::path::Path) -> Result<Self> {
         let db = Database::open_in_dir(data_dir)?;
+        crate::scheduled::automation::recover(&db)?;
         // Replies that were still streaming when the previous process ended
         // are promoted into their transcripts before any client can read them
         // (D299). The turn sweep inside `open` has already marked those turns
         // aborted, so the promoted rows land under an aborted turn.
         match crate::sessions::recover_orphaned_sessions(&db) {
             Ok(restored) if restored > 0 => {
-                tracing::info!(count = restored, "restored orphaned session rows from transcripts");
+                tracing::info!(
+                    count = restored,
+                    "restored orphaned session rows from transcripts"
+                );
             }
             Ok(_) => {}
             Err(error) => tracing::warn!(%error, "orphaned session sweep failed"),
@@ -82,15 +105,25 @@ impl AppState {
             Err(error) => tracing::warn!(%error, "in-flight reply sweep failed"),
         }
         let secrets = SecretStore::open(data_dir)?;
-        // The marketplace source is read before the manager builds its first
-        // catalog, so a mirror configured for networks without GitHub access
+        // The marketplace channel is read before the manager builds its first
+        // catalog, so a source configured for networks without GitHub access
         // applies on launch instead of only after a manual refresh.
         let app_settings = db.get_setting("app").unwrap_or_default();
         crate::network_proxy::apply_from_settings(app_settings.as_ref());
-        let plugins = PluginManager::new(
-            data_dir,
-            crate::plugins::market_source_from_settings(app_settings.as_ref()),
-        );
+        // The WebDAV transport reads this before it allows a plaintext hop, so
+        // it has to be in place on launch and not only after a settings write.
+        crate::network_policy::apply_from_settings(app_settings.as_ref());
+        let (channel, custom_url) =
+            crate::plugins::market_channel_from_settings(app_settings.as_ref());
+        let plugins = PluginManager::new(data_dir, channel, custom_url);
+        // Provider rows a plugin declared are rebuilt from the registry on
+        // launch, so the table matches the enabled plugins whatever path
+        // (install, enable, an upgraded manifest) last changed them.
+        match crate::plugins::reconcile_all(&db, &secrets, &plugins) {
+            Ok(0) => {}
+            Ok(count) => tracing::info!(count, "reconciled plugin provider rows"),
+            Err(error) => tracing::warn!(%error, "plugin provider reconciliation failed"),
+        }
         let mcp_servers = McpServerRegistry::new(data_dir);
         let user_skills = UserSkillRegistry::new(data_dir);
         let user_subagents = UserSubagentRegistry::new(data_dir);
@@ -109,16 +142,61 @@ impl AppState {
             user_subagents,
             user_experts,
             user_teams,
+            config_sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            config_sync_in_progress: Arc::new(AtomicBool::new(false)),
             started_at: Instant::now(),
             handshook: false,
             shutting_down: false,
             session_grants: HashMap::new(),
             plugin_execs: HashMap::new(),
+            plugin_import_rates: HashMap::new(),
+            plugin_batch_import_rates: HashMap::new(),
+            plugin_delete_rates: HashMap::new(),
             tool_budget: ToolBudget::new(),
             active_bash_cancellations: HashMap::new(),
             pending_permissions: HashMap::new(),
             pending_bash_aborts: HashMap::new(),
+            hashline: crate::tools::HashlineStore::new(),
         })
+    }
+
+    fn rate_allowed(
+        rates: &mut HashMap<String, Vec<Instant>>,
+        plugin_id: &str,
+        limit: usize,
+    ) -> bool {
+        let now = Instant::now();
+        let entries = rates.entry(plugin_id.to_string()).or_default();
+        entries.retain(|at| now.duration_since(*at) < PLUGIN_IMPORT_RATE_WINDOW);
+        if entries.len() >= limit {
+            return false;
+        }
+        entries.push(now);
+        true
+    }
+
+    pub fn allow_plugin_import(&mut self, plugin_id: &str, batch: bool) -> bool {
+        if batch {
+            Self::rate_allowed(
+                &mut self.plugin_batch_import_rates,
+                plugin_id,
+                PLUGIN_BATCH_IMPORT_RATE_LIMIT,
+            )
+        } else {
+            Self::rate_allowed(
+                &mut self.plugin_import_rates,
+                plugin_id,
+                PLUGIN_IMPORT_RATE_LIMIT,
+            )
+        }
+    }
+
+    pub fn allow_plugin_delete(&mut self, plugin_id: &str) -> bool {
+        Self::rate_allowed(
+            &mut self.plugin_delete_rates,
+            plugin_id,
+            PLUGIN_DELETE_RATE_LIMIT,
+        )
     }
 
     pub fn register_pending_permission(
@@ -282,5 +360,20 @@ mod tests {
             ),
             Err("NOT_FOUND".into())
         );
+    }
+
+    #[test]
+    fn plugin_session_rate_limits_are_per_plugin_and_per_operation() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::open(data_dir.path()).unwrap();
+
+        assert!((0..10).all(|_| state.allow_plugin_import("plugin.one", false)));
+        assert!(!state.allow_plugin_import("plugin.one", false));
+        assert!(state.allow_plugin_import("plugin.two", false));
+
+        assert!((0..5).all(|_| state.allow_plugin_import("plugin.one", true)));
+        assert!(!state.allow_plugin_import("plugin.one", true));
+        assert!((0..20).all(|_| state.allow_plugin_delete("plugin.one")));
+        assert!(!state.allow_plugin_delete("plugin.one"));
     }
 }

@@ -1,5 +1,5 @@
 /**
- * Read-only access to PI-Desktop's own local records.
+ * Read-only access to LaboFlow's own local records.
  *
  * Two things the panel cannot get any other way:
  *   readHostAppearance   the app's theme/locale, so the panel can follow it
@@ -101,7 +101,7 @@ function readSettingsViaSqlite(dbFile) {
 }
 
 /**
- * `providerId → display name`, for the ids PI-Desktop writes into transcripts.
+ * `providerId → display name`, for the ids LaboFlow writes into transcripts.
  *
  * Only the id and name columns are selected: nothing about credentials, base
  * urls or configuration is read. Providers the user has since deleted simply
@@ -291,7 +291,7 @@ function readHostAppearance(hostRoot) {
 /**
  * Completed-turn usage from the host database. Only token columns and ids;
  * no message text. Used to fold subagent spend that never landed on
- * transcript `message.usage` into the PI-Desktop scan.
+ * transcript `message.usage` into the LaboFlow scan.
  */
 function readCompletedTurnUsage(hostRoot) {
   const result = {

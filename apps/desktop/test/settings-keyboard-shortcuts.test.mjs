@@ -1,3 +1,9 @@
+import {
+  readSettingsSource,
+  readMainSource,
+  readAppSource,
+  readSharedTypesSource,
+} from "./helpers/source-contracts.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -7,23 +13,14 @@ const shortcutSource = await readFile(
   new URL("../../../packages/shared/src/keyboard-shortcuts.ts", import.meta.url),
   "utf8",
 );
-const sharedTypesSource = await readFile(
-  new URL("../../../packages/shared/src/types.ts", import.meta.url),
-  "utf8",
-);
-const appSource = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+const sharedTypesSource = await readSharedTypesSource();
+const appSource = await readAppSource();
 const menuSource = await readFile(
   new URL("../electron/main/application-menu.ts", import.meta.url),
   "utf8",
 );
-const mainSource = await readFile(
-  new URL("../electron/main/index.ts", import.meta.url),
-  "utf8",
-);
-const settingsSource = await readFile(
-  new URL("../src/pages/SettingsPage.tsx", import.meta.url),
-  "utf8",
-);
+const mainSource = await readMainSource();
+const settingsSource = await readSettingsSource();
 const sectionSource = await readFile(
   new URL("../src/components/settings/KeyboardShortcutsSection.tsx", import.meta.url),
   "utf8",
@@ -47,11 +44,13 @@ test("shared shortcut map drives renderer dispatch and native menu accelerators"
     "openWorkPanel",
     "openPluginLauncher",
     "abort",
-    "closeWindow",
+    "toggleWindow",
     "resetZoom",
     "zoomIn",
     "zoomOut",
     "toggleFullScreen",
+    "voiceToggle",
+    "voiceCancel",
   ]) {
     assert.match(shortcutSource, new RegExp(`"${id}"`));
   }
@@ -59,6 +58,7 @@ test("shared shortcut map drives renderer dispatch and native menu accelerators"
   assert.match(appSource, /settings\?\.keybindings/);
   assert.match(appSource, /keybindingMatchesEvent/);
   assert.match(appSource, /keybindingDisplayParts/);
+  assert.match(appSource, /runLiveVoiceShortcut\(shortcut\.id\)/);
   assert.match(appSource, /case "openWorkPanel"/);
   assert.match(appSource, /useAppStore\.getState\(\)\.toggleWorkPanel\(\)/);
   assert.match(menuSource, /resolveKeybinding\(shortcut, keybindings/);
@@ -69,7 +69,10 @@ test("shared shortcut map drives renderer dispatch and native menu accelerators"
   assert.match(mainSource, /globalShortcut\.register/);
   assert.match(mainSource, /keyboard\.setGlobalShortcut/);
   assert.match(mainSource, /pluginLauncherBinding: string \| null/);
-  assert.match(mainSource, /pluginLauncherAccelerator && pluginLauncherAccelerator !== accelerator/);
+  assert.match(
+    mainSource,
+    /launcherState\.pluginLauncherAccelerator && launcherState\.pluginLauncherAccelerator !== accelerator/,
+  );
   assert.match(mainSource, /method === "keyboard\.shortcut"/);
 });
 
@@ -81,6 +84,7 @@ test("global shortcut dispatch ignores incomplete keyboard events", () => {
     appSource,
     /e\.repeat[\s\S]*shortcut\.id === "navigateBack"[\s\S]*shortcut\.id === "navigateForward"/,
   );
+  assert.match(appSource, /e\.repeat[\s\S]*shortcut\.id === "voiceToggle"[\s\S]*shortcut\.id === "voiceCancel"/);
 });
 
 test("Basics exposes editable, conflict-safe, resettable shortcut mappings", () => {

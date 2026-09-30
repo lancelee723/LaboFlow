@@ -20,7 +20,7 @@ const cube = {
   models: ["glm-5.3", "glm-5.3-flash"],
   // Token Insights ships source entries as {id, label} objects.
   sources: [
-    { id: "pi-desktop", label: "PI-Desktop" },
+    { id: "pi-desktop", label: "LaboFlow" },
     { id: "claude-code", label: "Claude Code" },
   ],
   buckets: [

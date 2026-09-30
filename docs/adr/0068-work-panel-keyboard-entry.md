@@ -5,7 +5,9 @@
 - Deciders: PI-Desktop core
 - Amends: D128, D142
 - Amended by: [ADR 0085](0085-work-panel-shortcut-toggle.md) (the shortcut is a
-  toggle; the rejected toggle alternative below no longer holds)
+  toggle; the rejected toggle alternative below no longer holds);
+  [ADR 0195](0195-viewport-fixed-work-panel-toggle.md) (pointer equivalent of
+  the shortcut)
 - Amended in part by: [ADR 0108](0108-remove-built-in-interactive-terminal.md)
 - Related: [01-ui-ia](../spec/04-ux/01-ui-ia.md) ·
   [08-component-spec §5](../spec/04-ux/08-component-spec.md) ·
@@ -29,10 +31,11 @@ the missing capability is panel entry rather than a new resource protocol.
    panel context to open at its committed width without creating or activating a
    resource tab. Existing tabs, active resource, and Browser resource remain
    unchanged.
-3. The empty panel header remains the manual resource chooser for Browser
-   and in-scope plugin views. Artifact triggers continue to create and activate
-   resources atomically, and background-session artifacts cannot open the
-   visible panel.
+3. The empty panel header remains the manual resource chooser for the Review
+   row, Browser, and in-scope plugin views. Review opens only on explicit user
+   action (D451), while a plan or goal approval artifact still creates or
+   activates a tab in its originating session (D452); background-session
+   artifacts cannot open the visible panel.
 4. The shortcut is ignored while Settings is active and is a no-op without an
    active session. No host protocol, IPC channel, or native application-menu
    command is added.

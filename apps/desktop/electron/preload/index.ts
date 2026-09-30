@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from "electron";
-import { IPC, IPC_WHITELIST } from "@pi-desktop/shared";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { IPC, IPC_WHITELIST } from "@pi-desktop/shared/protocol";
 
 const LOCALE_ARGUMENT_PREFIX = "--pi-desktop-locale=";
 
@@ -27,6 +27,16 @@ const api = {
     ipcRenderer.on(channel, wrapped);
     return () => ipcRenderer.removeListener(channel, wrapped);
   },
+  onLiveVoicePort: () => {
+    const listener = (event: Electron.IpcRendererEvent, payload: unknown) => {
+      const value = payload && typeof payload === "object" ? payload as { callId?: unknown; nonce?: unknown } : null;
+      const port = event.ports[0];
+      if (!port || typeof value?.callId !== "string" || typeof value.nonce !== "string") return;
+      window.postMessage({ kind: "pi-desktop-live-voice-port", callId: value.callId, nonce: value.nonce }, "*", [port]);
+    };
+    ipcRenderer.on(IPC.event.liveVoicePort, listener);
+    return () => ipcRenderer.removeListener(IPC.event.liveVoicePort, listener);
+  },
   channels: IPC,
   // Synchronous platform info so the renderer can style window chrome
   // (traffic lights on macOS vs. controls overlay on Windows/Linux)
@@ -36,6 +46,14 @@ const api = {
   // creation argument. This keeps the locale available before first paint
   // without importing Electron's main-only `app` module in the sandbox.
   locale: readOsLocale(),
+  /** Resolve a real dropped File without exposing Node or Electron to the page. */
+  getDroppedFilePath: (file: File): string | null => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
 };
 
 contextBridge.exposeInMainWorld("piDesktop", api);

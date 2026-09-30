@@ -78,7 +78,7 @@ describe("main-supplied model capabilities", () => {
     });
   });
 
-  it("uses the published long-context window when a legacy binding has the generic seed", () => {
+  it("uses the published long-context window when a binding marks its seed as catalog-owned", () => {
     const model = {
       ...knownModel(),
       contextWindow: 1_050_000,
@@ -86,6 +86,7 @@ describe("main-supplied model capabilities", () => {
     };
     const configured = modelConfigWithBinding(model, {
       contextWindow: 128_000,
+      contextWindowSource: "catalog",
       maxTokens: 8_192,
       thinkingLevels: [],
     });
@@ -93,12 +94,37 @@ describe("main-supplied model capabilities", () => {
     expect(configured.limit?.context).toBe(1_050_000);
   });
 
-  it("applies binding limits and preserves explicit thinking levels", () => {
-    const configured = modelConfigWithBinding(knownModel(), {
-      contextWindow: 64_000,
-      maxTokens: 4_000,
-      thinkingLevels: ["off", "minimal", "low", "max"],
+  it("does not use a generic fallback to replace a catalog snapshot", () => {
+    const configured = modelConfigWithBinding(genericModelConfig("gateway-model"), {
+      contextWindow: 1_000_000,
+      contextWindowSource: "catalog",
+      maxTokens: 8_192,
+      thinkingLevels: [],
     });
+    expect(configured.contextWindow).toBe(1_000_000);
+  });
+
+  it("preserves a legacy stored context window without provenance", () => {
+    const configured = modelConfigWithBinding(knownModel(), {
+      contextWindow: 128_000,
+      maxTokens: 8_192,
+      thinkingLevels: [],
+    });
+    expect(configured.contextWindow).toBe(128_000);
+  });
+
+  it("applies binding limits and preserves explicit thinking levels", () => {
+    const configured = modelConfigWithBinding(
+      {
+        ...knownModel(),
+        thinkingLevelMap: { xhigh: null, max: null },
+      },
+      {
+        contextWindow: 64_000,
+        maxTokens: 4_000,
+        thinkingLevels: ["off", "minimal", "low", "max"],
+      },
+    );
     expect(configured.contextWindow).toBe(64_000);
     expect(configured.maxTokens).toBe(4_000);
     expect(configured.reasoning).toBe(true);
@@ -108,6 +134,15 @@ describe("main-supplied model capabilities", () => {
       "low",
       "max",
     ]);
+    expect(configured.thinkingLevelMap).toMatchObject({ max: "max" });
+
+    const enlarged = modelConfigWithBinding(knownModel(), {
+      contextWindow: 256_000,
+      maxTokens: 8_192,
+      thinkingLevels: [],
+    });
+    expect(enlarged.contextWindow).toBe(256_000);
+    expect(enlarged.catalogContextWindow).toBe(128_000);
 
     const unknown = modelConfigWithBinding(genericModelConfig("unknown"), {
       contextWindow: 16_000,
@@ -132,37 +167,6 @@ describe("main-supplied model capabilities", () => {
     );
     expect(cataloguedNonReasoning.reasoning).toBe(true);
     expect(cataloguedNonReasoning.supportedThinkingLevels).toEqual(["medium"]);
-  });
-
-  /**
-   * Bindings seeded before the catalog knew a model carry an empty level list
-   * (the same legacy seed as the 128k context default). Those must inherit the
-   * published ladder — otherwise GLM-5.3-Flash-class models are stuck with a
-   * reasoning menu that only offers "off".
-   */
-  it("empty configured thinking levels inherit the published ladder", () => {
-    const configured = modelConfigWithBinding(knownModel(), {
-      contextWindow: 128_000,
-      maxTokens: 8_192,
-      thinkingLevels: [],
-    });
-    expect(configured.reasoning).toBe(true);
-    expect(configured.supportedThinkingLevels).toEqual([
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-    ]);
-
-    // A model with nothing published stays non-reasoning.
-    const unpublished = modelConfigWithBinding(genericModelConfig("chat-only"), {
-      contextWindow: 16_000,
-      maxTokens: 2_000,
-      thinkingLevels: [],
-    });
-    expect(unpublished.reasoning).toBe(false);
-    expect(unpublished.supportedThinkingLevels).toEqual([]);
   });
 
   it("clamps sparse catalog capability lists using the nearest supported level", () => {
@@ -247,5 +251,30 @@ describe("binding attachment capability overrides", () => {
     expect(config.contextWindow).toBe(200_000);
     expect(config.maxTokens).toBe(32_000);
     expect(config.supportedThinkingLevels).toEqual(["off", "medium"]);
+  });
+});
+
+describe("unmatched model effective thinking policy", () => {
+  it("keeps every manually selected level without inventing published metadata", () => {
+    const levels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+    const published = genericModelConfig("route/unknown");
+    for (const binding of [undefined, { contextWindow: 128_000, maxTokens: 8_192, thinkingLevels: [] }]) {
+      const effective = modelConfigWithBinding(published, binding);
+      const capabilities = capabilitiesFromModelConfig(effective);
+      expect(capabilities.supportedThinkingLevels).toEqual(levels);
+      for (const level of levels) expect(clampThinkingLevel(capabilities, level)).toBe(level);
+      expect(effective.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
+    }
+    expect(published.reasoning).toBe(false);
+    expect(published.supportedThinkingLevels).toEqual([]);
+  });
+
+  it("preserves explicit restrictions and trusted non-reasoning records", () => {
+    const generic = genericModelConfig("route/unknown");
+    const binding = { contextWindow: 128_000, maxTokens: 8_192, thinkingLevels: ["off"] as ThinkingLevel[] };
+    expect(capabilitiesFromModelConfig(modelConfigWithBinding(generic, binding)).supportsReasoning).toBe(false);
+    const trusted = { ...generic, source: "models.dev" as const };
+    expect(capabilitiesFromModelConfig(modelConfigWithBinding(trusted)).supportsReasoning).toBe(false);
+    expect(capabilitiesFromModelConfig(modelConfigWithBinding(trusted, { ...binding, thinkingLevels: [] })).supportsReasoning).toBe(false);
   });
 });

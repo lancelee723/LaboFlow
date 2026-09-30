@@ -1,4 +1,10 @@
-import type { MessageAttachment, UiMessage } from "@pi-desktop/shared";
+import type { AgentEvent, MessageAttachment, UiMessage } from "@pi-desktop/shared";
+import {
+  getSessionMessageSnapshot,
+  registerSessionMessageAppend,
+  registerSessionMessageReplacement,
+  registerSessionMessageRewrite,
+} from "./session-transcript-updates";
 
 type OptimisticFileReference = {
   path: string;
@@ -44,6 +50,42 @@ export function optimisticUserMessage(
 }
 
 /**
+ * Terminal projection for one `message_end` event.
+ *
+ * Native Pi sessions mint SDK entry ids when the message is appended, so the
+ * live row streams under a provisional id and the terminal event names that id
+ * in `replacesMessageId`. Only that exact row is re-keyed; a generic Desktop
+ * terminal event carries no metadata and must leave every other row alone
+ * (parallel delegate streams, replayed historical completions).
+ */
+export function projectMessageEnd(
+  messages: UiMessage[],
+  event: Extract<AgentEvent, { type: "message_end" }>,
+): UiMessage[] {
+  let next = messages;
+  const replacesMessageId = event.replacesMessageId;
+  if (replacesMessageId && replacesMessageId !== event.message.id) {
+    const index = messages.findIndex(
+      (message) =>
+        message.id === replacesMessageId && message.role === "assistant",
+    );
+    if (index >= 0) {
+      next = registerSessionMessageRewrite(messages, [
+        ...messages.slice(0, index), ...messages.slice(index + 1),
+      ]);
+    }
+  }
+  const failed =
+    event.message.status === "error" || event.message.status === "aborted";
+  const empty =
+    !(event.message.content || "").trim() &&
+    !(event.message.thinking || "").trim();
+  return failed && empty && !event.message.error
+    ? removeLiveSessionMessage(next, event.message.id)
+    : upsertLiveSessionMessage(next, event.message);
+}
+
+/**
  * Collapse repeated transcript rows by their canonical message id.
  *
  * A retry or a stale page response can briefly put the same durable row in
@@ -51,6 +93,7 @@ export function optimisticUserMessage(
  * position, but use the last value, matching host-core's keep-last policy.
  */
 export function dedupeSessionMessages(messages: UiMessage[]): UiMessage[] {
+  if (getSessionMessageSnapshot(messages).unique) return messages;
   const positions = new Map<string, number>();
   let next: UiMessage[] | undefined;
   for (const [index, message] of messages.entries()) {
@@ -67,7 +110,7 @@ export function dedupeSessionMessages(messages: UiMessage[]): UiMessage[] {
     if (!next) next = messages.slice(0, index);
     next[previous] = message;
   }
-  return next ?? messages;
+  return next ? registerSessionMessageRewrite(messages, next) : messages;
 }
 
 /**
@@ -79,12 +122,29 @@ export function upsertLiveSessionMessage(
   message: UiMessage,
 ): UiMessage[] {
   const normalized = dedupeSessionMessages(messages);
-  const index = normalized.findIndex((candidate) => candidate.id === message.id);
-  if (index < 0) return [...normalized, message];
+  const index = getSessionMessageSnapshot(normalized).positions.get(message.id);
+  if (index === undefined) return registerSessionMessageAppend(normalized, [...normalized, message]);
   if (normalized[index] === message) return normalized;
   const next = normalized.slice();
   next[index] = message;
-  return next;
+  return registerSessionMessageReplacement(normalized, next, index);
+}
+
+/** Replace only the acknowledged submission identity, never an equal-text row. */
+export function reconcilePersistedUserMessage(
+  messages: UiMessage[],
+  optimisticMessageId: string,
+  message: UiMessage,
+): UiMessage[] {
+  if (
+    message.role !== "user" ||
+    !messages.some((row) => row.id === optimisticMessageId && row.role === "user")
+  ) return messages;
+  return upsertLiveSessionMessage(
+    registerSessionMessageRewrite(messages,
+      messages.map((row) => row.id === optimisticMessageId ? message : row)),
+    message,
+  );
 }
 
 /**
@@ -96,9 +156,11 @@ export function removeLiveSessionMessage(
   messageId: string,
 ): UiMessage[] {
   const normalized = dedupeSessionMessages(messages);
-  const index = normalized.findIndex((message) => message.id === messageId);
-  if (index < 0) return normalized;
-  return [...normalized.slice(0, index), ...normalized.slice(index + 1)];
+  const index = getSessionMessageSnapshot(normalized).positions.get(messageId);
+  if (index === undefined) return normalized;
+  return registerSessionMessageRewrite(normalized, [
+    ...normalized.slice(0, index), ...normalized.slice(index + 1),
+  ]);
 }
 
 /**

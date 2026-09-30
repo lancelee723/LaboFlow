@@ -7,6 +7,12 @@
  * every egress chokepoint it owns: the panel session, `pi.net.fetch`, and
  * remote MCP endpoints. Absent `manifest.net.domains`, a plugin gets no egress
  * at all — which is what makes a generous `fs.read` grant affordable.
+ *
+ * The one escape hatch is the `net.anyHost` permission: an install-time grant
+ * that lifts the allowlist for every http(s)/ws(s) host except the cloud
+ * metadata service, whose answers are instance credentials. It exists for
+ * plugins whose endpoints the user types in (self-hosted servers), where no
+ * manifest written ahead of time can name the hosts.
  */
 
 /** Hostname, or `*.suffix` for "this domain and its subdomains". */
@@ -14,10 +20,49 @@ export type PluginNetDomain = string;
 
 const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 
+/** Hostnames cloud providers answer with instance credentials. */
+const CLOUD_METADATA_HOSTS = new Set([
+  "169.254.169.254",
+  "metadata.google.internal",
+  "metadata",
+  "instance-data",
+  "100.100.100.200",
+  "fd00:ec2::254",
+]);
+
+/**
+ * Whether an allowlist entry admits a loopback, link-local, or cloud metadata
+ * host. Such an entry gives the plugin a path to local services and instance
+ * credentials that the egress allowlist exists to keep it from, so tooling
+ * warns about it; the entry itself stays valid because a plugin that talks to
+ * a local daemon is a legitimate, if unusual, design.
+ */
+export function isLocalNetDomain(entry: string): boolean {
+  const value = entry.trim().toLowerCase().replace(/\.$/, "");
+  const bare = value.startsWith("*.") ? value.slice(2) : value;
+  if (!bare) return false;
+  if (bare === "localhost" || bare.endsWith(".localhost")) return true;
+  if (bare === "0.0.0.0" || bare === "::1" || bare === "::") return true;
+  if (CLOUD_METADATA_HOSTS.has(bare)) return true;
+  const ipv4 = bare.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const first = Number(ipv4[1]);
+    const second = Number(ipv4[2]);
+    if (first === 127) return true;
+    if (first === 169 && second === 254) return true;
+    return false;
+  }
+  // IPv6 link-local (fe80::/10) and IPv4-mapped loopback.
+  if (/^fe[89ab][0-9a-f]:/.test(bare)) return true;
+  if (bare === "::ffff:127.0.0.1") return true;
+  return false;
+}
+
 /**
  * Validate `manifest.net.domains`. Patterns are hostnames only: no scheme, no
- * port, no path, and no bare `*`. A plugin that genuinely needs arbitrary hosts
- * has to ask the user at call time instead of declaring its way there.
+ * port, no path, and no bare `*`. A plugin that genuinely needs arbitrary,
+ * user-chosen hosts declares the `net.anyHost` permission instead — there is
+ * no way to declare its way there.
  */
 export function parseNetDomains(raw: unknown): {
   ok: boolean;
@@ -80,4 +125,79 @@ export function isNetUrlAllowed(url: string, domains: readonly string[]): boolea
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
   return isNetHostAllowed(parsed.hostname, domains);
+}
+
+/**
+ * True when a WebSocket URL may be connected to. `ws`/`wss` are the same
+ * decision as `http`/`https` for the host: the hostname still has to be in the
+ * allowlist, and `ws://` is the plaintext form of `http://` rather than a
+ * second, more permissive channel.
+ */
+export function isNetSocketUrlAllowed(url: string, domains: readonly string[]): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "wss:" && parsed.protocol !== "ws:") return false;
+  return isNetHostAllowed(parsed.hostname, domains);
+}
+
+/**
+ * Whether `host` is a cloud metadata endpoint. The `net.anyHost` grant never
+ * reaches these: their answers are instance credentials, and wide egress
+ * exists to keep a plugin from exfiltrating exactly that. A declared allowlist
+ * entry keeps today's behavior — tooling warns about it, it stays valid.
+ */
+export function isMetadataNetHost(host: string): boolean {
+  return CLOUD_METADATA_HOSTS.has(host.trim().toLowerCase().replace(/\.$/, ""));
+}
+
+/** What a plugin's egress decision needs: its allowlist plus the anyHost grant. */
+export type PluginNetEgressGrant = {
+  domains: readonly string[];
+  anyHost?: boolean;
+};
+
+/**
+ * `isNetUrlAllowed` with the `net.anyHost` escape hatch: the declared
+ * allowlist wins first (unchanged semantics), then the grant admits any other
+ * http(s) host except a cloud metadata endpoint. Unparseable input and
+ * non-http schemes are refused either way.
+ */
+export function isNetUrlAllowedWithGrant(
+  url: string,
+  grant: PluginNetEgressGrant,
+): boolean {
+  if (isNetUrlAllowed(url, grant.domains)) return true;
+  if (!grant.anyHost) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  return !isMetadataNetHost(parsed.hostname);
+}
+
+/**
+ * The socket half of the grant: same decision shape as
+ * `isNetUrlAllowedWithGrant` over `ws`/`wss`.
+ */
+export function isNetSocketUrlAllowedWithGrant(
+  url: string,
+  grant: PluginNetEgressGrant,
+): boolean {
+  if (isNetSocketUrlAllowed(url, grant.domains)) return true;
+  if (!grant.anyHost) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "wss:" && parsed.protocol !== "ws:") return false;
+  return !isMetadataNetHost(parsed.hostname);
 }

@@ -1265,7 +1265,6 @@ export function AgentExpertsPage() {
   return (
     <AgentCapabilityPage
       className="agent-experts"
-      description={t("expert.subtitle")}
       toolbar={
         <CapabilityToolbar
           search={query}

@@ -19,3 +19,10 @@
 | [15-workspace-ignore-rules.md](15-workspace-ignore-rules.md) | Workspace ignore & denylist |
 | [16-tool-result-limits.md](16-tool-result-limits.md) | Tool result size limits |
 | [17-asktool-questions.md](17-asktool-questions.md) | Interactive multi-question tool |
+| [18-line-anchored-edit-contract.md](18-line-anchored-edit-contract.md) | Line-anchored Edit contract |
+| [19-remote-agent-control-protocol.md](19-remote-agent-control-protocol.md) | Remote Agent Control Protocol |
+| [20-speech.md](20-speech.md) | Host speech (ASR/TTS) |
+| [live-voice.md](live-voice.md) | App-owned real-time voice calls |
+
+- [Image generation and editing](21-image-generation.md)
+- [Portable configuration sync](22-config-sync.md)

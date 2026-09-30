@@ -21,7 +21,10 @@ export type WorkPanelReservationState = {
 
 export const WORK_PANEL_MIN_WIDTH = 244;
 export const WORK_PANEL_MAX_WIDTH = 720;
-export const WORK_PANEL_CHAT_MIN_WIDTH = 1040;
+/** App-wide minimum window size, in DIP, before clamping to the work area. */
+export const WINDOW_MIN_WIDTH = 800;
+export const WINDOW_MIN_HEIGHT = 560;
+export const WORK_PANEL_CHAT_MIN_WIDTH = WINDOW_MIN_WIDTH;
 export const WORK_PANEL_CHAT_MAX_WIDTH = 10000;
 
 export const emptyWorkPanelReservationState = (): WorkPanelReservationState => ({
@@ -123,6 +126,44 @@ export function clampBoundsOriginToWorkArea(
     ...bounds,
     x: Math.round(Math.max(workArea.x, Math.min(bounds.x, maximumX))),
     y: Math.round(Math.max(workArea.y, Math.min(bounds.y, maximumY))),
+  };
+}
+
+/**
+ * Fits a rect entirely inside a work area for a restore/unmaximize path:
+ * first shrinks the size so it never exceeds the work area, then clamps the
+ * origin so no edge falls off-screen.
+ *
+ * Unlike {@link clampBoundsOriginToWorkArea}, this intentionally shrinks an
+ * oversized rect. A persisted rect can exceed the current work area when the
+ * display scale or the Windows accessibility "text size" changed since it was
+ * saved (issue #544): the OS-reported work area and the window bounds both
+ * live in the same scaled coordinate space, so clamping here keeps the window
+ * fully visible regardless of which scale source inflated it. When the work
+ * area is smaller than the rect, the fitted size wins over any minimum.
+ */
+export function clampBoundsToWorkArea(
+  bounds: WindowBounds,
+  workArea: WindowBounds,
+): WindowBounds {
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  return clampBoundsOriginToWorkArea({ ...bounds, width, height }, workArea);
+}
+
+/**
+ * Caps a requested minimum window size to the current work area so the OS
+ * never enforces a minimum larger than the display can show (issue #1175:
+ * Windows at 150% scaling reports a ~1280x672 DIP work area). Each dimension
+ * is floored to an integer and kept at least 1.
+ */
+export function clampMinimumSizeToWorkArea(
+  min: { width: number; height: number },
+  workArea: { width: number; height: number },
+): { width: number; height: number } {
+  return {
+    width: Math.max(1, Math.floor(Math.min(min.width, workArea.width))),
+    height: Math.max(1, Math.floor(Math.min(min.height, workArea.height))),
   };
 }
 

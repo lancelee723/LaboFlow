@@ -118,7 +118,7 @@
    * Fold scanned events into the fact cube.
    *
    * `labelForSource` maps a source id to its display label, and
-   * `labelForProvider` resolves a provider id (PI-Desktop writes configuration
+   * `labelForProvider` resolves a provider id (LaboFlow writes configuration
    * UUIDs) to the name the user gave it, so the panel never shows an opaque id
    * it could have translated.
    */

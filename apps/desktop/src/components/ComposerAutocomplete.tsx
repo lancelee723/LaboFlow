@@ -1,17 +1,19 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ComposerCommand } from "@pi-desktop/shared";
-import type { AutocompleteItem, useComposerAutocomplete } from "../hooks/use-composer-autocomplete";
+import type {
+  CompletionController,
+  CompletionItem,
+} from "../features/chat/composer/hooks/useComposerCompletions";
 import {
+  IconBookOpen,
   IconFileText,
   IconFolder,
-  IconGraduationCap,
-  IconNewSession,
   IconPlug,
   IconSlash,
   IconSparkles,
-  IconUsers,
 } from "./icons";
+import { AnchoredMenu } from "./settings/AnchoredMenu";
 
 /**
  * Composer autocomplete panel (D123–D125, spec 08 §11.8): full composer
@@ -46,19 +48,24 @@ const GROUP_KEYS: Record<ComposerCommand["kind"], string> = {
   template: "chat.slashGroupTemplates",
   builtin: "chat.slashGroupApp",
   plugin: "chat.slashGroupPlugins",
+  extension: "chat.slashGroupExtensions",
+  skill: "chat.slashGroupSkills",
 };
 
 function CommandIcon({ kind }: { kind: ComposerCommand["kind"] }) {
   if (kind === "template") return <IconSlash size={14} />;
-  if (kind === "plugin") return <IconPlug size={14} />;
+  if (kind === "skill") return <IconBookOpen size={14} />;
+  if (kind === "plugin" || kind === "extension") return <IconPlug size={14} />;
   return <IconSparkles size={14} />;
 }
 
 export function ComposerAutocomplete({
+  anchorRef,
   ac,
   onAccept,
 }: {
-  ac: ReturnType<typeof useComposerAutocomplete>;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  ac: CompletionController;
   onAccept: (index: number) => void;
 }) {
   const { t } = useTranslation();
@@ -73,20 +80,16 @@ export function ComposerAutocomplete({
 
   if (!ac.open) return null;
 
-  const renderRow = (item: AutocompleteItem, index: number) => {
+  const renderRow = (item: CompletionItem, index: number) => {
     const active = index === ac.highlight;
     const rowClass = `composer-plus-item composer-ac-item ${active ? "kb-active" : ""}`;
     const commonProps = {
       key:
         item.kind === "command"
           ? `c:${item.command.kind}:${item.command.name}`
-          : item.kind === "expert"
-            ? `e:${item.expert.id}`
-            : item.kind === "team"
-              ? `t:${item.team.id}`
-              : item.kind === "context"
-                ? `x:${item.session.id}`
-                : `p:${item.entry.path}`,
+          : item.kind === "plugin"
+            ? `pl:${item.pluginId}:${index}`
+            : `p:${item.entry.path}`,
       type: "button" as const,
       role: "option" as const,
       "aria-selected": active,
@@ -108,6 +111,9 @@ export function ComposerAutocomplete({
           <span className="composer-ac-name">
             /<Highlighted text={item.command.name} ranges={item.match.ranges} />
           </span>
+          {item.command.kind === "skill" && item.command.title !== item.command.name ? (
+            <span className="composer-ac-hint">{item.command.title}</span>
+          ) : null}
           {item.command.argumentHint ? (
             <span className="composer-ac-hint">{item.command.argumentHint}</span>
           ) : null}
@@ -117,33 +123,14 @@ export function ComposerAutocomplete({
         </button>
       );
     }
-    if (item.kind === "expert" || item.kind === "team") {
-      const isTeam = item.kind === "team";
-      const name = isTeam ? item.team.name : item.expert.name;
-      const description = isTeam ? item.team.description : item.expert.description;
+    if (item.kind === "plugin") {
       return (
-        <button {...commonProps} title={description || undefined}>
+        <button {...commonProps} title={item.row.detail}>
           <span className="composer-ac-icon">
-            {isTeam ? <IconUsers size={14} /> : <IconGraduationCap size={14} />}
+            <IconPlug size={14} />
           </span>
-          <span className="composer-ac-name">
-            <Highlighted text={name} ranges={item.match.ranges} />
-          </span>
-          {description ? (
-            <span className="composer-ac-desc">{description}</span>
-          ) : null}
-        </button>
-      );
-    }
-    if (item.kind === "context") {
-      const title = item.session.title || t("chat.untitledTask");
-      return (
-        <button {...commonProps} title={title}>
-          <span className="composer-ac-icon">
-            <IconNewSession size={14} />
-          </span>
-          <span className="composer-ac-name">{title}</span>
-          <span className="composer-ac-hint">{t("chat.contextGroup")}</span>
+          <span className="composer-ac-name">{item.row.label}</span>
+          {item.row.detail ? <span className="composer-ac-desc">{item.row.detail}</span> : null}
         </button>
       );
     }
@@ -177,45 +164,14 @@ export function ComposerAutocomplete({
           </div>,
         );
       }
-    } else if (item.kind === "expert" && lastGroup !== "expert") {
-      lastGroup = "expert";
+    } else if (item.kind === "plugin" && lastGroup !== `plugin:${item.pluginId}`) {
+      // A plugin's rows sit under its own name, after the host's.
+      lastGroup = `plugin:${item.pluginId}`;
       rows.push(
-        <div key="g:expert" className="composer-model-group-label">
-          {t("chat.expertGroup")}
+        <div key={`g:${lastGroup}`} className="composer-model-group-label">
+          {item.pluginName}
         </div>,
       );
-    } else if (item.kind === "team" && lastGroup !== "team") {
-      lastGroup = "team";
-      rows.push(
-        <div key="g:team" className="composer-model-group-label">
-          {t("chat.teamGroup")}
-        </div>,
-      );
-    } else if (item.kind === "context" && lastGroup !== "context") {
-      lastGroup = "context";
-      rows.push(
-        <div key="g:context" className="composer-model-group-label">
-          {t("chat.contextGroup")}
-        </div>,
-      );
-    } else if (item.kind === "path" && lastGroup !== "path") {
-      lastGroup = "path";
-      // Files keep the long-standing unlabeled list unless any named group
-      // (agents or contexts) is shown above them; the label then separates
-      // the reference kinds.
-      const hasContexts = ac.items.some(
-        (candidate) =>
-          candidate.kind === "context" ||
-          candidate.kind === "expert" ||
-          candidate.kind === "team",
-      );
-      if (hasContexts) {
-        rows.push(
-          <div key="g:path" className="composer-model-group-label">
-            {t("chat.fileGroup")}
-          </div>,
-        );
-      }
     }
     rows.push(renderRow(item, index));
   });
@@ -228,10 +184,24 @@ export function ComposerAutocomplete({
       : "chat.slashEmpty";
 
   return (
-    <div
-      className="composer-autocomplete"
+    <AnchoredMenu
+      className="composer-autocomplete-anchor"
+      open={ac.open}
+      onClose={ac.close}
+      anchorRef={anchorRef}
+      menuClassName="composer-autocomplete"
+      label={t(
+        ac.mode === "file"
+          ? "chat.fileMenu"
+          : ac.mode === "plugin"
+            ? "chat.pluginTriggerMenu"
+            : "chat.slashMenu",
+      )}
       role="listbox"
-      aria-label={t(ac.mode === "file" ? "chat.fileMenu" : "chat.slashMenu")}
+      side="top"
+      matchAnchorWidth
+      initialFocus="none"
+      trigger={() => null}
     >
       <div className="composer-ac-list" ref={listRef}>
         {rows.length > 0 ? (
@@ -246,6 +216,6 @@ export function ComposerAutocomplete({
           <span className="composer-ac-truncated">{t("chat.fileTruncated")}</span>
         ) : null}
       </div>
-    </div>
+    </AnchoredMenu>
   );
 }

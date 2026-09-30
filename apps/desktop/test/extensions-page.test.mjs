@@ -1,3 +1,4 @@
+import { readSettingsSourceSync, readPluginsSourceSync, readMainSourceSync } from "./helpers/source-contracts.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
@@ -5,9 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadStyles } from "./helpers/styles.mjs";
-import { en } from "../../../packages/i18n/src/locales/en/index.ts";
-import { zhCN } from "../../../packages/i18n/src/locales/zh-CN/index.ts";
-import { tr } from "../../../packages/i18n/src/locales/tr/index.ts";
+import { en } from "../../../packages/i18n/dist/locales/en/index.js";
+import { zhCN } from "../../../packages/i18n/dist/locales/zh-CN/index.js";
+import { tr } from "../../../packages/i18n/dist/locales/tr/index.js";
 
 const catalogs = { en, "zh-CN": zhCN, tr };
 
@@ -24,13 +25,13 @@ const settingsComponents = new Map(
     .filter((name) => name.endsWith(".tsx"))
     .map((name) => [name, readFileSync(join(settingsDir, name), "utf8")]),
 );
-const pageSrc = readFileSync(join(here, "../src/pages/PluginsPage.tsx"), "utf8");
+const pageSrc = readPluginsSourceSync();
 const marketSettingsSrc = readFileSync(
   join(here, "../src/components/plugins/MarketplaceSourceSettings.tsx"),
   "utf8",
 );
-const settingsPageSrc = readFileSync(join(here, "../src/pages/SettingsPage.tsx"), "utf8");
-const electronMainSrc = readFileSync(join(here, "../electron/main/index.ts"), "utf8");
+const settingsPageSrc = readSettingsSourceSync();
+const electronMainSrc = readMainSourceSync();
 const hostCapabilitySources = [
   readFileSync(join(here, "../../../crates/host-core/src/agent_capabilities.rs"), "utf8"),
   readFileSync(join(here, "../../../crates/host-core/src/user_skills.rs"), "utf8"),
@@ -127,9 +128,9 @@ test("installed plugin rows keep secondary detail behind a disclosure", () => {
 });
 
 test("extension row actions stay visible and labelled", () => {
-  assert.match(pageSrc, /data-tip=\{t\("plugins\.openPanel"\)\}/);
-  assert.match(pageSrc, /data-tip=\{t\("plugins\.rowActions", \{ name: plugin\.name \}\)\}/);
-  assert.match(styles, /\.plugins-icon-btn\[data-tip\]::after[\s\S]*?content: attr\(data-tip\)/);
+  assert.match(pageSrc, /<TooltipButton[\s\S]*?tooltip=\{t\("plugins\.openPanel"\)\}/);
+  assert.match(pageSrc, /<TooltipButton[\s\S]*?tooltip=\{t\("plugins\.rowActions", \{ name: plugin\.name \}\)\}/);
+  assert.match(styles, /\.ui-tooltip\s*\{[\s\S]*?position:\s*fixed;/);
   const actionBlock = styles.match(/\.ext-row-actions\s*\{[^}]*\}/)?.[0] ?? "";
   assert.match(actionBlock, /opacity:\s*1/);
 });
@@ -163,15 +164,15 @@ test("capability sections flow at natural height with skeleton loading", () => {
 });
 
 test("skill import is one native file and physically targets the selected level", () => {
-  const start = electronMainSrc.indexOf("handle(IPC.invoke.skillImport");
-  const end = electronMainSrc.indexOf("handle(\n    IPC.invoke.skillUpdate", start);
-  const handler = electronMainSrc.slice(start, end);
-  assert.ok(start >= 0 && end > start, "skill import handler is missing");
+  const handler = electronMainSrc.match(
+    /handle\(\s*IPC\.invoke\.skillImport[\s\S]*?(?=handle\(\s*IPC\.invoke\.skillUpdate)/,
+  )?.[0];
+  assert.ok(handler, "skill import handler is missing");
   assert.match(handler, /properties: \["openFile"\]/);
-  assert.doesNotMatch(handler, /\bmultiple\b/);
-  assert.match(handler, /host\.call\("skills\.import"/);
+  assert.match(handler, /path: picked\.filePaths\[0\]/);
+  assert.match(handler, /currentHost\.call\("skills\.import"/);
   assert.match(settingsComponents.get("AgentSkillsPage.tsx"), /api\.importUserSkill\(/);
-  assert.match(hostCapabilitySources, /fs::copy\(&source_path, &target\)/);
+  assert.match(hostCapabilitySources, /fs::copy\(source, target\)/);
 });
 
 test("MCP management reuses the modal and validates its locked id and transport branches", () => {
@@ -185,6 +186,13 @@ test("MCP management reuses the modal and validates its locked id and transport 
   assert.match(sheet, /command\.includes\("\.\."\)/);
   assert.match(sheet, /isNonLoopbackHttpMcpUrl/);
   assert.match(sheet, /role="dialog" aria-modal/);
+  assert.match(sheet, /MCP_STDIO_LAUNCHER_PRESETS/);
+  assert.match(sheet, /launcherCustom/);
+  assert.match(sheet, /mcpStdioLauncherChoice/);
+  // A server may advertise thousands of tools, so the name row renders a bounded
+  // prefix and leaves the total to the count beside it.
+  assert.match(sheet, /MCP_TEST_TOOL_NAME_LIMIT = 24/);
+  assert.match(sheet, /slice\(0, MCP_TEST_TOOL_NAME_LIMIT\)/);
 });
 
 test("project records shadow global records before disabled records are filtered", () => {
@@ -195,11 +203,14 @@ test("project records shadow global records before disabled records are filtered
 
 test("subagents are global-only and use the agents root", () => {
   const page = settingsComponents.get("AgentSubagentsPage.tsx");
+  const helper = readFileSync(join(settingsDir, "subagent-settings.ts"), "utf8");
   assert.match(page, /GLOBAL_SUBAGENTS_PATH = "~\/\.agents\/subagents"/);
   // Global-only means no level to pick and no project to resolve against. It no
   // longer means read-only: authoring lives here now (D257).
   assert.doesNotMatch(page, /AgentProjectPicker|projectPath/);
-  assert.match(page, /level: "global"/);
+  assert.doesNotMatch(helper, /AgentProjectPicker|projectPath/);
+  assert.match(helper, /level: "global"/);
+  assert.match(page, /api\.subagentCatalog|fetchSubagentPageData/);
   assert.match(electronMainSrc, /IPC\.invoke\.subagentList/);
   assert.match(hostCapabilitySources, /capability_dir\(CapabilityLevel::Global, None, "subagents"\)/);
 });

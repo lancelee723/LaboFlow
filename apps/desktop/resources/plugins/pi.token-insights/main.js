@@ -68,7 +68,7 @@ async function hostRoot() {
   return hostRootFromDataPath(await pi.plugin.getDataPath());
 }
 
-/** PI-Desktop transcripts live next to the plugin data directory. */
+/** LaboFlow transcripts live next to the plugin data directory. */
 async function transcriptRoot() {
   return path.join(await hostRoot(), "sessions");
 }

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  WINDOW_MIN_HEIGHT,
+  WINDOW_MIN_WIDTH,
+  WORK_PANEL_CHAT_MIN_WIDTH,
   baseWindowBounds,
+  clampMinimumSizeToWorkArea,
   clampBoundsOriginToWorkArea,
+  clampBoundsToWorkArea,
   displayWorkAreaKey,
   emptyWorkPanelReservationState,
   isWorkPanelOuterResizeEdge,
@@ -24,10 +30,40 @@ test("legacy work-panel edge classifier remains available to geometry helpers", 
 });
 
 test("chat resize IPC accepts only bounded integer widths", () => {
-  assert.equal(parseWorkPanelChatWidth({ width: 1040 }), 1040);
+  assert.equal(parseWorkPanelChatWidth({ width: 800 }), 800);
   assert.equal(parseWorkPanelChatWidth({ width: 10000 }), 10000);
-  assert.equal(parseWorkPanelChatWidth({ width: 1039 }), null);
+  assert.equal(parseWorkPanelChatWidth({ width: 799 }), null);
+  assert.equal(parseWorkPanelChatWidth({ width: 10001 }), null);
   assert.equal(parseWorkPanelChatWidth({ width: 10000.5 }), null);
+});
+
+test("app-wide minimum window size is shared with the chat width floor", () => {
+  assert.equal(WINDOW_MIN_WIDTH, 800);
+  assert.equal(WINDOW_MIN_HEIGHT, 560);
+  assert.equal(WORK_PANEL_CHAT_MIN_WIDTH, WINDOW_MIN_WIDTH);
+});
+
+test("minimum window size is capped to the work area", () => {
+  const scaledWorkArea = { width: 1280, height: 672 };
+  assert.deepEqual(
+    clampMinimumSizeToWorkArea({ width: 1040, height: 700 }, scaledWorkArea),
+    { width: 1040, height: 672 },
+  );
+  assert.deepEqual(
+    clampMinimumSizeToWorkArea(
+      { width: WINDOW_MIN_WIDTH, height: WINDOW_MIN_HEIGHT },
+      workArea,
+    ),
+    { width: 800, height: 560 },
+  );
+  assert.deepEqual(
+    clampMinimumSizeToWorkArea({ width: 800, height: 560 }, { width: 640.7, height: 480.9 }),
+    { width: 640, height: 480 },
+  );
+  assert.deepEqual(
+    clampMinimumSizeToWorkArea({ width: 800, height: 560 }, { width: 0, height: 0.5 }),
+    { width: 1, height: 1 },
+  );
 });
 
 test("display work-area keys change with display geometry", () => {
@@ -397,6 +433,30 @@ test("normalizing a dropped window moves its origin without resizing it", () => 
   );
 });
 
+test("restoring a window shrinks an oversized rect to fit the work area", () => {
+  // Regression for issue #544: a display-scale or accessibility "text size"
+  // change can leave a persisted rect wider/taller than the current work area.
+  // The restore path must fit it back on-screen, size included.
+  const restoreArea = { x: 0, y: 0, width: 1280, height: 912 };
+  assert.deepEqual(
+    clampBoundsToWorkArea(
+      { x: -37, y: 22, width: 1572, height: 1056 },
+      restoreArea,
+    ),
+    { x: 0, y: 0, width: 1280, height: 912 },
+  );
+  // A rect that already fits keeps its size and only its origin is clamped.
+  assert.deepEqual(
+    clampBoundsToWorkArea({ x: 900, y: 700, width: 800, height: 600 }, restoreArea),
+    { x: 480, y: 312, width: 800, height: 600 },
+  );
+  // A rect fully inside the work area is returned unchanged.
+  assert.deepEqual(
+    clampBoundsToWorkArea({ x: 40, y: 30, width: 1000, height: 700 }, restoreArea),
+    { x: 40, y: 30, width: 1000, height: 700 },
+  );
+});
+
 test("a drag onto a smaller display keeps the base size restorable", () => {
   const smallWorkArea = { x: 1920, y: 0, width: 1280, height: 800 };
   const base = { x: 100, y: 80, width: 1600, height: 900 };
@@ -460,4 +520,19 @@ test("reservation width parsing rejects coerced and malformed IPC input", () => 
   ]) {
     assert.equal(parseWorkPanelReservationWidth(input), null);
   }
+});
+
+test("display topology changes cap the reserved minimum instead of dropping it", () => {
+  const windowSource = readFileSync(
+    new URL("../electron/main/bootstrap/window.ts", import.meta.url),
+    "utf8",
+  );
+  const handler =
+    windowSource.match(/const reconcileDisplayTopology = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? "";
+  assert.ok(handler, "reconcileDisplayTopology handler not found");
+  assert.match(
+    handler,
+    /clampMinimumSizeToWorkArea\(\s*\{ width: workPanelMinimumWindowWidth\(\), height: windowMinHeight \}/,
+  );
+  assert.doesNotMatch(handler, /\{ width: windowMinWidth, height: windowMinHeight \}/);
 });

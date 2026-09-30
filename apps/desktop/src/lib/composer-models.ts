@@ -1,11 +1,20 @@
 import {
-  modelIdsMatch,
+  bindingSupportsImages,
+  isImageGenerationModel,
+  type ImageGenerationBindings,
   modelMatchesFilter,
+  modelWireIdsEqual,
+  type ModelBinding,
   type ModelInfo,
   type ProviderPublic,
 } from "@pi-desktop/shared";
 
 type ConfiguredProvider = Pick<ProviderPublic, "id" | "models" | "defaultModelId">;
+
+/** UI identity is the complete wire id, not a catalog alias or a route suffix. */
+export function sameComposerModelId(left: string, right: string): boolean {
+  return modelWireIdsEqual(left, right);
+}
 
 function configuredModelIds(provider: ConfiguredProvider): string[] {
   const ids = (provider.models ?? [])
@@ -19,22 +28,27 @@ function configuredModelIds(provider: ConfiguredProvider): string[] {
 
 /**
  * Build the Composer model list from the models explicitly enabled in
- * provider settings. Discovery only enriches those configured rows; it does
- * not grant every discovered model access to the conversation picker.
+ * provider settings. Discovery only enriches an exact configured id; it does
+ * not grant every discovered model access to the conversation picker or lend
+ * another route's capabilities to this binding.
  */
 export function composerModelsForProvider(
   provider: ConfiguredProvider,
   discovered: readonly ModelInfo[] | undefined,
+  imageGeneration?: ImageGenerationBindings | null,
 ): ModelInfo[] {
-  return configuredModelIds(provider).map((modelId) => {
+  return configuredModelIds(provider).filter((modelId) =>
+    !isImageGenerationModel(imageGeneration, provider.id, modelId),
+  ).map((modelId) => {
     const metadata = (discovered ?? []).find((model) =>
-      modelIdsMatch(model.modelId, modelId),
+      sameComposerModelId(model.modelId, modelId),
     );
+    const displayName = modelId;
     return metadata
-      ? { ...metadata, modelId, providerId: provider.id }
+      ? { ...metadata, modelId, displayName, providerId: provider.id }
       : {
           modelId,
-          displayName: modelId,
+          displayName,
           providerId: provider.id,
           capabilities: ["text"],
           source: "user" as const,
@@ -42,34 +56,55 @@ export function composerModelsForProvider(
   });
 }
 
+/** The Composer uses the configured alias when set, otherwise the complete wire id. */
+export function composerModelDisplayName(
+  provider: ConfiguredProvider | undefined,
+  modelId: string,
+): string {
+  const alias = provider ? composerModelBinding(provider, modelId)?.alias?.trim() : undefined;
+  return alias || modelId;
+}
+
+/** Find only the binding for this complete wire id. */
+export function composerModelBinding(
+  provider: ConfiguredProvider,
+  modelId: string,
+): ModelBinding | undefined {
+  return (provider.models ?? []).find((candidate) =>
+    sameComposerModelId(candidate.id, modelId),
+  );
+}
+
 /** Short capability markers shown on a composer model row. */
 export type ComposerModelBadge = "reasoning" | "vision";
 
 /**
- * Published capability markers for one configured model. The composer shows
- * these so a model can be chosen on capability rather than on name alone.
+ * Capability markers for one configured model. Vision follows the binding's
+ * image-input override when set, the published capability otherwise.
  */
-export function composerModelBadges(model: ModelInfo): ComposerModelBadge[] {
+export function composerModelBadges(
+  model: ModelInfo,
+  provider?: ConfiguredProvider | null,
+): ComposerModelBadge[] {
   const badges: ComposerModelBadge[] = [];
   if (modelMatchesFilter(model, "reasoning")) badges.push("reasoning");
-  if (modelMatchesFilter(model, "vision")) badges.push("vision");
+  const binding = provider ? composerModelBinding(provider, model.modelId) : undefined;
+  if (bindingSupportsImages(binding, model)) badges.push("vision");
   return badges;
 }
 
-/**
- * Match a composer model row against the picker query. Model id, display name,
- * published family and the owning provider name are all searchable, so
- * "sonnet", "anthropic" and "claude-3" all reach the same row.
- */
+/** Search the full id, configured alias, published name, family and provider. */
 export function composerModelMatchesQuery(
   model: ModelInfo,
   providerName: string,
   query: string,
+  alias?: string,
 ): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   const haystacks = [
     model.modelId,
+    alias ?? "",
     model.displayName ?? "",
     model.family ?? "",
     providerName,

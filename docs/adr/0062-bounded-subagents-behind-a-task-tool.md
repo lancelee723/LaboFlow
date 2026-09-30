@@ -1,14 +1,18 @@
 # ADR 0062: Bounded Subagents Behind a Task Tool
 
+
 - Status: Accepted for implementation (definition roots amended by ADR 0112;
-  timeout policy amended by ADR 0119; delegation presentation amended by D265)
+  timeout policy amended by ADR 0119; delegation presentation amended by D265;
+  opt-in parent-tool inherit amended by ADR 0246; resumable delegations amended
+  by ADR 0279; report spillover amended by RFC #1196)
 - Date: 2026-08-06
 - Deciders: PI-Desktop core
 - Related: D201, ADR 0041 (persistence outbox), ADR 0048 (lazy per-turn tool
   activation), ADR 0053 (plan checkpoint and execution epoch), D123 (prompt
   template documents), D138 (session-scoped inline permission requests),
   D198 (contract modes), ADR 0112 (capability roots and Settings IA), ADR 0119
-  (event-driven subagent timeouts), D265 (one delegation reads as a card too)
+  (event-driven subagent timeouts), D265 (one delegation reads as a card too),
+  ADR 0246 (opt-in `tools: inherit`), ADR 0279 (resumable delegations)
 
 ## Context
 
@@ -85,9 +89,11 @@ The `Task` tool takes `agent`, `task` and an optional short `description`. The
 catalog of available delegates rides in the tool description rather than the
 system prompt, because the two change together.
 
-`Task` is offered only in Agent mode. Plan and Goal are read-only contract
+`Task` executes only in Agent mode. Plan and Goal are read-only contract
 negotiations (D198), and a delegate with Bash or Edit would drive straight
-through one.
+through one. [Contract-mode declaration compatibility](plan-tool-declarations-and-execution-denials.md)
+retains configured Task-family schemas but rejects their execution before any
+delegate is created or controlled; a visible schema is not a permission grant.
 
 Concurrency is expressed through pi's execution modes: the session Agent runs
 with `toolExecution: "parallel"`, every catalog tool carries
@@ -101,11 +107,11 @@ remains an optional hard backstop with a maximum of 80.
 
 Fan-out makes one same-process ordering problem real, and the sidecar owns it.
 host-core admits one mutation per session at a time, so concurrent writes cannot
-tear, but it defines no order between two same-path mutations — and the sidecar's
-edit-recovery contract counts failures per path and terminates the second failed
-`Edit` on one file, which only means "re-read and retry once" if the attempts
-were ordered. A `PathMutex` in the sidecar serializes mutating calls per
-normalized path; different paths never wait on each other, which is the point.
+tear, but it defines no order between same-path mutations — and the sidecar's
+edit-recovery contract allows three counted failures per path before terminating
+the prompt, which only means "re-read and retry" if the attempts were ordered. A
+`PathMutex` in the sidecar serializes mutating calls per normalized path;
+different paths never wait on each other, which is the point.
 Delegates also run under the same bounded provider retry policy as the parent
 (one retry, 8s delay cap), so a fan-out cannot turn one failing provider into a
 retry storm.
@@ -116,6 +122,20 @@ A `SubagentRun` is a second pi `Agent` in the same sidecar process. Its final
 message, bounded to `MAX_SUBAGENT_REPORT_CHARS` (12k), becomes the `Task` tool
 result, with `agent`, `status`, `turns`, `toolCalls` and `usage` as structured
 details.
+
+When a delegate's completed report exceeds `MAX_SUBAGENT_REPORT_CHARS`, the
+runtime preserves the full, unclipped report in the session scratch directory
+(`<data_dir>/scratch/<sessionId>/delegations/<parentToolCallId>/report.md`; an
+opaque ID containing path separators is encoded before it is used as a path
+component)
+and returns a compact pointer notice (`Complete subagent report (N characters) was saved to: <path>`)
+alongside `scratchReportPath` in the structured result. If scratch persistence fails,
+it degrades gracefully to bounded head/tail clipping with a truncation marker.
+Delegates with mutation capability are guided in their prompt to write oversized
+reports (>8,000 characters) directly to a file and return a summary with the file path.
+When a delegate truncates due to model output token limits (`SUBAGENT_OUTPUT_TRUNCATED`),
+the failure result includes character count statistics and a resume hint for ADR 0279
+chains (`Task(resume: "<delegationId>")`).
 
 Delegate messages and tool rows are still emitted and persisted — they are what
 makes a delegation reviewable — but every row carries `parentToolCallId` and
@@ -169,9 +189,11 @@ many requests wait behind it.
 - **Inherit the session model always.** Cheaper to reason about. Rejected: a
   wide search is exactly the work worth doing on a cheap fast model while the
   parent keeps the expensive one.
-- **Let delegates inherit the parent's tools.** Rejected: it makes every
-  delegation as dangerous as the session, and a definition is the only place a
-  reader can see what a delegate may do.
+- **Let delegates inherit the parent's tools.** Rejected for silent, always-on
+   inherit: it makes every delegation as dangerous as the session, and a
+   definition is the only place a reader can see what a delegate may do.
+   Amended by ADR 0246: a document may opt in with `tools: inherit` and a
+   deny list; builtins stay on today's whitelist.
 - **A separate process per delegate.** Real isolation, but it duplicates the
   host connection, provider setup and event plumbing for a bounded worker that
   already runs under host-core containment. Rejected for v1.
