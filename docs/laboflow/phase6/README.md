@@ -90,6 +90,13 @@ union 合并不可行。已改用上游版本，fork 的以下能力**暂时不�
 
 ### T6.2 Phase5 遗留（恢复推进，按 phase5/README 既有裁决）
 
+**T6.2-a 通道凭证持久化 ✅（2026-09-30）**：credential-store 的 setSecretStore
+SEAM 正式接通 host-core 密封密钥表（`secrets.set`/`secrets.getForRuntime`/
+`secrets.delete`，Rust 零改动——getForRuntime 即主进程 plain read）。
+保存写穿、重启恢复，空值保护与显式删除双清有单测锁定
+（channels-registry 14/14）。Phase5 验收 §4-7 的重启掉线问题关闭。
+实机：新实例启动 0 错误，KB 入口/主链路复验通过。
+
 1. **模块 03 远程指挥与定时任务**（整体暂缓中）：cron+补跑语义（R5-1）、
    助理总控台、通用 Webhook（T53.3）。T53.1 地基已随合并可用，
    上游 v0.15.x 的 scheduled.execute/listRuns IPC 正好是它的上游对位物。
