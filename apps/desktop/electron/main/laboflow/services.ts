@@ -468,7 +468,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     // LaboFlow handlers must return the same Result envelope the upstream
     // `wrap` produces (renderer's api.invoke unwraps `ok`/`error`).
     const laboflowHandle: IpcHandler = (channel, fn) =>
-      laboflowHandle(channel, async (...args: any[]) => {
+      handle(channel, async (...args: any[]) => {
         try {
           return ok(await fn(...args));
         } catch (e: any) {
@@ -480,7 +480,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         }
       });
     const laboflowHandleWithEvent: IpcHandlerWithEvent = (channel, fn) =>
-      laboflowHandleWithEvent(channel, async (event, ...args: any[]) => {
+      handleWithEvent(channel, async (event, ...args: any[]) => {
         try {
           return ok(await fn(event, ...args));
         } catch (e: any) {
