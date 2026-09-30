@@ -1,0 +1,35 @@
+{
+  "_comment": "U.6 region annotations — expected tokens per region (appendix D-D5). Screenshots to be provided by the user.",
+  "sidebar": {
+    "expectedTokens": { "background": "--bg-sidebar", "width": "256px", "text": "--text-1/--text-3" },
+    "checks": ["width 256px (±4px)", "hover = --bg-hover", "active = --bg-accent-soft", "7-color grouping dots present"]
+  },
+  "session-main": {
+    "expectedTokens": { "background": "--bg-app", "text": "--text-1", "cards": "--bg-card" },
+    "checks": ["timeline node density compact", "tool cards rounded 8px", "streaming cursor blink"]
+  },
+  "input-area": {
+    "expectedTokens": { "background": "--bg-input", "border": "--border", "accent": "--accent" },
+    "checks": ["composer rounded 12px", "mode selector color-coded", "busy shows steer/queue buttons"]
+  },
+  "context-panel": {
+    "expectedTokens": { "background": "--bg-right", "width": "260px" },
+    "checks": ["subagent/browser/artifact sections", "cards rounded 8px"]
+  },
+  "command-panel": {
+    "expectedTokens": { "background": "--bg-card", "border": "--border-strong" },
+    "checks": ["commands+skills groups", "150ms open animation"]
+  },
+  "approval": {
+    "expectedTokens": { "border": "--lf-mode-confirm", "danger": "--lf-danger" },
+    "checks": ["five-decision buttons", "diff unified/split toggle"]
+  },
+  "settings-dialog": {
+    "expectedTokens": { "background": "--bg-app", "radius": "16px" },
+    "checks": ["12 sections nav", "toggle switches", "usage charts present"]
+  },
+  "task-row": {
+    "expectedTokens": { "hover": "--bg-hover", "text2": "--text-2" },
+    "checks": ["title + relative time + status", "pin on hover", "color dot click cycles"]
+  }
+}
