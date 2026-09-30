@@ -893,7 +893,7 @@ const laboflow = createLaboflowServices({
 });
 
 function registerIpc() {
-  return registerIpcHandlers({
+  const ipcDispose = registerIpcHandlers({
     traySessions: applicationLifecycle!.traySessions,
     taskbarUnreadBadge: applicationLifecycle!.taskbarUnreadBadge,
     ipcMain,
@@ -1025,6 +1025,10 @@ function registerIpc() {
     });
   };
   laboflow.registerIpc(handle, handleWithEvent);
+  // registerIpcHandlers returns the external-agent invoker (its "dispose" is
+  // ownership release). Laboflow channels stay registered for the app
+  // lifetime, so they ride along under the same invoker.
+  return ipcDispose as ReturnType<typeof registerIpcHandlers>;
 }
 
 // Default hardening for every web contents Electron creates, applied before
