@@ -15,6 +15,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import {
+  err,
+  ok,
   IPC,
   type KbServerDelivery,
   type MessageUsage,
@@ -463,13 +465,39 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       if (!h) throw new Error("host unavailable");
       return h;
     };
+    // LaboFlow handlers must return the same Result envelope the upstream
+    // `wrap` produces (renderer's api.invoke unwraps `ok`/`error`).
+    const laboflowHandle: IpcHandler = (channel, fn) =>
+      laboflowHandle(channel, async (...args: any[]) => {
+        try {
+          return ok(await fn(...args));
+        } catch (e: any) {
+          return err(
+            e?.data?.errorCode || e?.errorCode || "INTERNAL",
+            e instanceof Error ? e.message : String(e),
+            { retriable: e?.data?.retriable === true, details: e?.data },
+          );
+        }
+      });
+    const laboflowHandleWithEvent: IpcHandlerWithEvent = (channel, fn) =>
+      laboflowHandleWithEvent(channel, async (event, ...args: any[]) => {
+        try {
+          return ok(await fn(event, ...args));
+        } catch (e: any) {
+          return err(
+            e?.data?.errorCode || e?.errorCode || "INTERNAL",
+            e instanceof Error ? e.message : String(e),
+            { retriable: e?.data?.retriable === true, details: e?.data },
+          );
+        }
+      });
 
     // Module 04: channel accounts + connect/test lifecycle IPC (registry-owned).
-    channelHost.registerIpc(handle);
+    channelHost.registerIpc(laboflowHandle);
     // Module 02: team-space tree/docs/comments/revisions/events IPC.
-    spaceHost?.registerIpc(handle);
+    spaceHost?.registerIpc(laboflowHandle);
 
-    handleWithEvent(
+    laboflowHandleWithEvent(
       IPC.invoke.composerAttachSession,
       async (
         event,
@@ -514,23 +542,23 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     );
 
     // Expert center (module 01)
-    handle(IPC.invoke.expertList, async () => expertService.list());
-    handle(
+    laboflowHandle(IPC.invoke.expertList, async () => expertService.list());
+    laboflowHandle(
       IPC.invoke.expertGet,
       async (req: { id: string }) => expertService.get(String(req?.id ?? "").trim()),
     );
-    handle(IPC.invoke.expertSave, async (input: Record<string, unknown>) =>
+    laboflowHandle(IPC.invoke.expertSave, async (input: Record<string, unknown>) =>
       expertService.save(input ?? {}),
     );
-    handle(IPC.invoke.expertDelete, async (req: { id: string }) =>
+    laboflowHandle(IPC.invoke.expertDelete, async (req: { id: string }) =>
       expertService.delete(String(req?.id ?? "").trim()),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.expertToggle,
       async (req: { id: string; enabled: boolean }) =>
         expertService.toggle(String(req?.id ?? "").trim(), req?.enabled === true),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.expertInvoke,
       async (req: { sessionId?: string; expertId: string; task: string }) =>
         expertService.invoke({
@@ -539,15 +567,15 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           task: String(req?.task ?? "").trim(),
         }),
     );
-    handle(IPC.invoke.expertTeamsList, async () => expertService.listTeams());
-    handle(
+    laboflowHandle(IPC.invoke.expertTeamsList, async () => expertService.listTeams());
+    laboflowHandle(
       IPC.invoke.expertTeamGet,
       async (req: { id: string }) => {
         const h = requireHost();
         return h.call("expertTeams.read", { id: String(req?.id ?? "").trim() });
       },
     );
-    handle(IPC.invoke.expertTeamSave, async (input: Record<string, unknown>) => {
+    laboflowHandle(IPC.invoke.expertTeamSave, async (input: Record<string, unknown>) => {
       const h = requireHost();
       const name = String(input?.name ?? "").trim();
       if (!name) throw new Error("EXPERT_INVALID: name is required");
@@ -568,11 +596,11 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         ? h.call("expertTeams.update", { id: name, team: payload })
         : h.call("expertTeams.create", { team: payload });
     });
-    handle(IPC.invoke.expertTeamDelete, async (req: { id: string }) => {
+    laboflowHandle(IPC.invoke.expertTeamDelete, async (req: { id: string }) => {
       const h = requireHost();
       return h.call("expertTeams.remove", { id: String(req?.id ?? "").trim() });
     });
-    handle(
+    laboflowHandle(
       IPC.invoke.expertTeamInvoke,
       async (req: { sessionId?: string; teamId: string; task: string }) =>
         teamRunner.invoke({
@@ -581,7 +609,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           task: String(req?.task ?? "").trim(),
         }),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.expertTeamRetryMember,
       async (req: { runId: string; index: number }) =>
         teamRunner.retryMember({
@@ -591,23 +619,23 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     );
 
     // Knowledge base (module 05)
-    handle(IPC.invoke.kbListUrls, async () => kbService.listUrls());
-    handle(
+    laboflowHandle(IPC.invoke.kbListUrls, async () => kbService.listUrls());
+    laboflowHandle(
       IPC.invoke.kbSaveUrl,
       async (req: { name: string; url: string }) => kbService.saveUrl(req ?? {}),
     );
-    handle(IPC.invoke.kbDeleteUrl, async (req: { id: string }) =>
+    laboflowHandle(IPC.invoke.kbDeleteUrl, async (req: { id: string }) =>
       kbService.deleteUrl(String(req?.id ?? "").trim()),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.kbApplyOrgDelivery,
       async (req: { orgId: string; items: KbServerDelivery[] }) =>
         kbService.applyOrgDelivery(String(req?.orgId ?? "").trim(), req?.items ?? []),
     );
-    handle(IPC.invoke.kbDisableOrgServers, async () => kbService.disableOrgServers());
+    laboflowHandle(IPC.invoke.kbDisableOrgServers, async () => kbService.disableOrgServers());
 
     // Organization session + Phase 3 provider + Phase 4 workspaces
-    handle(
+    laboflowHandle(
       IPC.invoke.orgLogin,
       async (input: { serverUrl: string; username: string; password: string }) => {
         const status = await orgService.login(input);
@@ -618,7 +646,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         return status;
       },
     );
-    handle(IPC.invoke.orgStatus, async () => {
+    laboflowHandle(IPC.invoke.orgStatus, async () => {
       const status = await orgService.status();
       if (status.state === "connected") {
         await syncOrgProvider();
@@ -626,10 +654,10 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       }
       return status;
     });
-    handle(IPC.invoke.orgChangePassword, (input: { currentPassword: string; newPassword: string }) =>
+    laboflowHandle(IPC.invoke.orgChangePassword, (input: { currentPassword: string; newPassword: string }) =>
       orgService.changePassword(input),
     );
-    handle(IPC.invoke.orgLogout, async () => {
+    laboflowHandle(IPC.invoke.orgLogout, async () => {
       const status = await orgService.logout();
       // Signing out of the current org: the provider follows whatever org is
       // current now (and is removed only when no session remains). Live WS
@@ -643,26 +671,26 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       }
       return status;
     });
-    handle(IPC.invoke.orgSetCurrent, async (input: { key: string }) => {
+    laboflowHandle(IPC.invoke.orgSetCurrent, async (input: { key: string }) => {
       const status = await orgService.setCurrent(String(input?.key ?? ""));
       if (status.state === "connected") await syncOrgProvider();
       return status;
     });
-    handle(IPC.invoke.orgQuotaRemaining, () => orgService.quotaRemaining());
-    handle(IPC.invoke.orgRemoveSession, (input: { key: string }) =>
+    laboflowHandle(IPC.invoke.orgQuotaRemaining, () => orgService.quotaRemaining());
+    laboflowHandle(IPC.invoke.orgRemoveSession, (input: { key: string }) =>
       orgService.removeSession(String(input?.key ?? "")),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.orgSetSessionEnabled,
       (input: { key: string; enabled: boolean }) =>
         orgService.setSessionEnabled(String(input?.key ?? ""), Boolean(input.enabled)),
     );
-    handle(IPC.invoke.orgWsSessions, (input: { wid: string }) =>
+    laboflowHandle(IPC.invoke.orgWsSessions, (input: { wid: string }) =>
       orgService.getOrgJson(
         `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions`,
       ),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.orgWsCreateSession,
       (input: { wid: string; title: string }) =>
         orgService.postOrgJson(
@@ -670,44 +698,44 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           { title: String(input?.title ?? "共享会话") },
         ),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.orgWsEntries,
       (input: { wid: string; sid: string; since?: number }) =>
         orgService.getOrgJson(
           `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions/${encodeURIComponent(String(input?.sid ?? ""))}/entries?since=${Number(input?.since ?? -1)}`,
         ),
     );
-    handle(IPC.invoke.orgWsConnect, async (input: { wid: string; sid: string }) => {
+    laboflowHandle(IPC.invoke.orgWsConnect, async (input: { wid: string; sid: string }) => {
       await orgHub.connect(String(input?.wid ?? ""), String(input?.sid ?? ""));
       return { ok: true };
     });
-    handle(IPC.invoke.orgWsDisconnect, async (input: { sid: string }) => {
+    laboflowHandle(IPC.invoke.orgWsDisconnect, async (input: { sid: string }) => {
       orgHub.disconnect(String(input?.sid ?? ""));
       return { ok: true };
     });
-    handle(IPC.invoke.orgWsLock, (input: { wid: string; sid: string }) =>
+    laboflowHandle(IPC.invoke.orgWsLock, (input: { wid: string; sid: string }) =>
       orgService.postOrgJson(
         `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions/${encodeURIComponent(String(input?.sid ?? ""))}/lock`,
         {},
       ),
     );
-    handle(IPC.invoke.orgWsRelease, async (input: { wid: string; sid: string }) =>
+    laboflowHandle(IPC.invoke.orgWsRelease, async (input: { wid: string; sid: string }) =>
       orgService.postOrgJson(
         `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/sessions/${encodeURIComponent(String(input?.sid ?? ""))}/release`,
         {},
       ),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.orgWsSay,
       async (input: { wid: string; sid: string; text: string }) =>
         orgHub.say(String(input?.wid ?? ""), String(input?.sid ?? ""), String(input?.text ?? "")),
     );
-    handle(IPC.invoke.orgWsDeliverables, (input: { wid: string }) =>
+    laboflowHandle(IPC.invoke.orgWsDeliverables, (input: { wid: string }) =>
       orgService.getOrgJson(
         `/workspaces/${encodeURIComponent(String(input?.wid ?? ""))}/deliverables`,
       ),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.orgWsDeliverableUpload,
       (input: { wid: string; path: string; title?: string; contentBase64: string; sessionId?: string }) =>
         orgService.postOrgJson(
@@ -721,7 +749,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           },
         ),
     );
-    handle(
+    laboflowHandle(
       IPC.invoke.orgWsDeliverableDownload,
       (input: { did: string; version?: number }) =>
         orgService.getOrgJson(
@@ -730,7 +758,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     );
 
     // Pull requests of the active workspace (fork page kept through the merge)
-    handle(IPC.invoke.pullsList, async () => {
+    laboflowHandle(IPC.invoke.pullsList, async () => {
       const h = requireHost();
       const res = (await h.call("workspace.get")) as {
         workspace: { path: string; name: string } | null;
@@ -789,7 +817,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     });
 
     // Clawhub skill market: zip-shaped skill packages land in ~/.agents/skills
-    handle(
+    laboflowHandle(
       IPC.invoke.skillMarketInstall,
       async (payload: { slug: string; ownerHandle?: string }) => {
         const slug = String(payload?.slug ?? "").trim();
@@ -841,7 +869,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     );
 
     // The usage stats page reads the Token Insights plugin's published facts.
-    handle(IPC.invoke.statsGetTokenInsights, async () => {
+    laboflowHandle(IPC.invoke.statsGetTokenInsights, async () => {
       const data = deps.plugins.readPluginDataJson(
         "pi.token-insights",
         "settings.json",
