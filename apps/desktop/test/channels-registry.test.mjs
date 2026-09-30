@@ -352,3 +352,49 @@ test("createChannelRegistryHost registers all channels/* IPC handlers", async ()
   await handlers.get(IPC.invoke.channelsDelete)(saved.id);
   assert.equal(host.registry.list().length, 0);
 });
+
+test("credential store persists across restarts via the host secret store", async () => {
+  const { createChannelCredentialStore } = await import(
+    "../electron/main/channels/credential-store.ts"
+  );
+  // Simulated host-core sealed table: the durable side of the SEAM.
+  const sealedTable = new Map();
+  const hostSecretStore = {
+    async set(ref, value) {
+      sealedTable.set(ref, value);
+    },
+    async get(ref) {
+      return sealedTable.get(ref) ?? null;
+    },
+    async delete(ref) {
+      sealedTable.delete(ref);
+    },
+  };
+
+  // "First launch": wire the store, save a credential, then the process dies
+  // (a fresh in-memory Map comes up with the restart).
+  const first = createChannelCredentialStore();
+  first.setSecretStore(hostSecretStore);
+  assert.equal(await first.put("channel:feishu:acct-1", "secret-token"), true);
+  assert.equal(await first.has("channel:feishu:acct-1"), true);
+
+  // "Second launch": memory starts empty; the sealed table still has the value.
+  const second = createChannelCredentialStore();
+  second.setSecretStore(hostSecretStore);
+  assert.equal(
+    await second.get("channel:feishu:acct-1"),
+    "secret-token",
+    "restart must recover the credential from the host secret store",
+  );
+  assert.equal(await second.has("channel:feishu:acct-1"), true);
+
+  // Empty-value protection still holds against the wired store: a blank put
+  // must not clobber the recovered credential.
+  assert.equal(await second.put("channel:feishu:acct-1", "   "), false);
+  assert.equal(await second.get("channel:feishu:acct-1"), "secret-token");
+
+  // Explicit delete clears both layers.
+  await second.delete("channel:feishu:acct-1");
+  assert.equal(await second.has("channel:feishu:acct-1"), false);
+  assert.equal(sealedTable.has("channel:feishu:acct-1"), false);
+});

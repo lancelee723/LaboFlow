@@ -205,9 +205,38 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     tokenProvider?: () => Promise<string>;
     serverUrl?: () => string | undefined;
   } = {};
+  // T6.2-a: channel credentials persist across restarts. host-core exposes a
+  // sealed secret table (AES-256-GCM at rest) with `secrets.getForRuntime` as
+  // the main-process plain read — so the SEAM promised by the credential
+  // store's module doc is wired here, with memory as the hot cache.
+  const channelCredentialStore = createChannelCredentialStore();
+  channelCredentialStore.setSecretStore({
+    async set(secretRef, value) {
+      const h = host();
+      if (!h) throw new Error("host unavailable");
+      await h.call("secrets.set", { secretRef, value });
+    },
+    async get(secretRef) {
+      const h = host();
+      if (!h) return null;
+      const result = await h.call<{ value?: string | null }>("secrets.getForRuntime", {
+        secretRef,
+      });
+      return typeof result?.value === "string" && result.value.length > 0
+        ? result.value
+        : null;
+    },
+    async delete(secretRef) {
+      const h = host();
+      if (!h) return;
+      await h.call("secrets.delete", { secretRef });
+    },
+  });
+
   const channelHost = createChannelRegistryHost({
     getLogger: () => logger,
     getDriver: () => headlessAgentDriver,
+    credentialStore: channelCredentialStore,
     adapters: {
       feishu: createFeishuAdapterFactory(),
       wecom: createWecomAdapterFactory(),
@@ -222,7 +251,6 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         serverUrl: () => orgChannelContext.serverUrl?.(),
       }),
     },
-    credentialStore: createChannelCredentialStore(),
     broadcast: (event) => sendToRenderer(IPC.event.channelState, event),
   });
 
@@ -899,6 +927,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       orgService,
       orgHub,
       channelHost,
+      channelCredentialStore,
       getSpaceHost: () => spaceHost,
     },
     registerIpc,
