@@ -77,11 +77,16 @@ union 合并不可行。已改用上游版本，fork 的以下能力**暂时不�
 验收：deferred 清零；desktop 套件 ≥3460 pass / 0 fail；`pnpm dev` 手验
 专家召唤→团队执行→组织登录→KB 引用角标全链路。
 
-### T6.1 合入 main（T6.0 后，0.5 天）
+### T6.1 合入 main（✅ 2026-09-30 完成）
 
-- `sync/upstream-v0.15.10` → main 快进合并；打 tag `v0.15.10-laboflow.1`。
-- main 在此之前保持 v0.14.5 全功能状态（Phase5 收尾基线）。
-- 合并后立即跑一次三平台打包冒烟（mac 本地；win/linux 走 CI matrix）。
+- `sync/upstream-v0.15.10` → main 快进合并（2346 提交）；tag **`laboflow-v0.15.10.1`**。
+- 工作区同步迁移：仓库现位于 `/Users/lance/LaboFlow Desktop`（产品标准名），
+  旧 `/Users/lance/laboflow-v2` 路径消失；用户可见名（窗口标题/About/页面标题）
+  统一为 LaboFlow Desktop（APP_NAME/userData 身份不变，数据零迁移）。
+- 实机验收（CDP 实验 E0–E5，见 [E2E-ACCEPTANCE-2026-09-30.md](E2E-ACCEPTANCE-2026-09-30.md)）：
+  专家召唤/@指派/组织登录错误链路/plus 菜单通过；随验收修复 3 项
+  （fork IPC 注册不可达、Result 包装缺失、召唤状态互斥）与 KB 入口漏项补挂、
+  带空格路径的测试解码（4 文件）。main 检出态 desktop 3505 用例 0 fail。
 
 ### T6.2 Phase5 遗留（恢复推进，按 phase5/README 既有裁决）
 
