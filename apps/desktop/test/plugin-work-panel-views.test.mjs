@@ -278,3 +278,28 @@ test("host panel events reach docked views as well as detached windows", () => {
   assert.match(mainSource, /plugins\.broadcastEvent\("appearance:changed"/);
   assert.match(mainSource, /function setCurrentWorkspacePath/);
 });
+
+test("closing a tab destroys its plugin view — not only the browser's", () => {
+  // Regression (LaboFlow): closeWorkPanelTab used to special-case
+  // pi.browser/browser only. Any other plugin view (e.g. the slides
+  // workbench) kept its native WebContentsView compositing over the renderer
+  // after the tab was gone — it renders above the DOM, so it looked like a
+  // panel that could never be closed.
+  const sliceSource = readFileSync(
+    resolve("src/stores/slices/work-panel-slice.ts"),
+    "utf8",
+  );
+  const closeFn = sliceSource.match(
+    /closeWorkPanelTab: \(tabId\) => \{[\s\S]*?\n  \},/,
+  )?.[0];
+  assert.ok(closeFn, "closeWorkPanelTab implementation found");
+  // Every plugin-view tab is closed through parsePluginViewRef, with the
+  // browser keeping its session/tabId payload.
+  assert.match(closeFn, /parsePluginViewRef\(tab\.resource\)/);
+  assert.match(closeFn, /resource === "pi\.browser\/browser"[\s\S]*?tabId/);
+  // Non-browser views are destroyed too (the pluginViewClose fallback arm).
+  assert.match(
+    closeFn,
+    /else \{\s*\n\s*void api\.pluginViewClose\(ref\.pluginId, ref\.viewId\)/,
+  );
+});

@@ -8,6 +8,7 @@ import {
   fileWorkPanelTab,
   newWorkPanelTab,
   openWorkPanelTabState,
+  parsePluginViewRef,
   reorderWorkPanelTabsState,
   replaceWorkPanelTabState,
   sanitizeWorkPanelTabsState,
@@ -310,9 +311,24 @@ export function createWorkPanelSlice({
   },
   closeWorkPanelTab: (tabId) => {
     const current = get();
-    if (current.activeSessionId && current.workPanelTabs.some((tab) => tab.id === tabId && tab.resource === "pi.browser/browser")) {
-      void api.pluginViewClose("pi.browser", "browser", { sessionId: current.activeSessionId, tabId })
-        .catch((error) => get().showToast(String(error), { variant: "error" }));
+    // A closed tab must also drop the native view it owned. The browser view
+    // keeps per-tab guests server-side (session + tabId); every other plugin
+    // view (e.g. the slides workbench) is destroyed through pluginViewClose —
+    // otherwise its WebContentsView keeps compositing over the renderer after
+    // the tab is gone (it renders above the page DOM, so it looks unclosable).
+    for (const tab of current.workPanelTabs) {
+      if (tab.id !== tabId) continue;
+      const ref = parsePluginViewRef(tab.resource);
+      if (!ref || !current.activeSessionId) break;
+      if (tab.resource === "pi.browser/browser") {
+        void api.pluginViewClose(ref.pluginId, ref.viewId, {
+          sessionId: current.activeSessionId,
+          tabId,
+        }).catch((error) => get().showToast(String(error), { variant: "error" }));
+      } else {
+        void api.pluginViewClose(ref.pluginId, ref.viewId).catch(() => undefined);
+      }
+      break;
     }
     set((state) => {
       const sessionId = state.activeSessionId;
