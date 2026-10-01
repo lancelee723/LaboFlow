@@ -303,6 +303,30 @@ async function submit(waive) {
 document.getElementById("btn-confirm").addEventListener("click", () => submit(false));
 document.getElementById("btn-waive").addEventListener("click", () => submit(true));
 init();
+
+// openPanel on an already-open card only focuses the window — the page keeps
+// showing the previously submitted stage. Re-fetch when the card is focused or
+// becomes visible, but only when the pending stage actually changed so an
+// in-progress waive-reason draft survives an unrelated focus.
+let renderedPendingKey = null;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  void (async () => {
+    try {
+      const boot = await bridge.invoke("ppt.getBootstrap");
+      const next = boot.pending ? `${boot.pending.projectDir}::${boot.pending.stage}` : "";
+      if (next === renderedPendingKey) return;
+      renderedPendingKey = next;
+      await init();
+    } catch {
+      // Bridge busy: the next focus retries; init's own error path covers
+      // hard failures.
+    }
+  })();
+});
+window.addEventListener("focus", () => {
+  document.dispatchEvent(new Event("visibilitychange"));
+});
 </script>
 </body>
 </html>

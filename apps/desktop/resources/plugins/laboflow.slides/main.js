@@ -25,7 +25,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { exec as spawnExec } from "node:child_process";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { exportDeckToBuffer, normalizeOutline, sanitizeFileName } from "./lib/slides.js";
 import {
@@ -61,8 +62,10 @@ let runtimeStatusCache = null;
 let runtimeStatusCacheAt = 0;
 
 function getPluginDir() {
-  // The plugin host loads main.js from <pluginDir>/main.js.
-  return new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+  // The plugin host loads main.js from <pluginDir>/main.js. `URL.pathname`
+  // keeps percent-encoding, so a repo path with spaces (e.g. "LaboFlow
+  // Desktop") would reach every fs call as %20 and never match on disk.
+  return dirname(fileURLToPath(import.meta.url));
 }
 
 async function resolveDataDir() {

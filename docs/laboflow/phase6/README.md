@@ -194,3 +194,34 @@ main 检出态回归：desktop 3505 用例 0 fail。
 （前 8 条）；fork 原版含搜索框与 contextQuery 过滤（contextQuery 状态已接，搜索框
 渲染待 UI 打磨）；专家 foreground 的「会话绑定 persona 在重载后仍生效」依赖
 registry 持久化（已有测试覆盖）。
+
+### T6.2-c 补充：PPT 工作台全链路实机验收 + 4 项修复（2026-10-02）
+
+以真实用户路径跑通 PPT 全流程（CDP 驱动 + 确认卡实点）：粘贴上传脚本
+`Tester.md`（3 页）→ agent 走 ppt-master L2 管线 → Stage-1 沟通契约确认 →
+Stage-2 三方向确认（麦府经典蓝）→ 3 页 SVG 绘制 + 质检（修正 1 处环形图）→
+finalize_svg → svg_to_pptx 导出。产物：
+`apps/projects/maoming_chantou_20261002/exports/maoming_chantou_20261002_013056.pptx`
+（OOXML、3 页、每页原生可编辑 DrawingML 67–77KB、含演讲备注；质检
+passed-with-warnings，9 条均为咨询性提示）。工作台实机验证：载入项目、翻页
+预览（1–6/6 渲染 SVG）、管线四 gate 全 confirmed、导出列表带打开入口。
+
+过程中修复 4 项缺陷（均有回归测试，见
+`test/slides-plugin-regressions.test.mjs`，slides 系 60/60 绿）：
+
+1. **技能整体未加载**：manifest 声明了 `contributes.skills` 但缺少
+   `agent.prompt.inject` 权限，`registerSkills` 静默跳过全部技能——PPT 工作流
+   指令从未进入 agent 提示词。补齐权限。
+2. **空格路径安装失败**：`getPluginDir()` 用 `URL.pathname`（百分号编码），
+   仓库路径含空格时 requirements/vendored 脚本全部找不到。改 `fileURLToPath`。
+3. **工作台脚本整体死亡**：init 对动态创建的 `#t-noexports` 无空值保护，
+   首次打开必抛 TypeError，全部按钮监听未挂载（静态布局照常渲染，故视觉
+   检查未能发现）。加保护。
+4. **确认卡不随新 Stage 刷新**：`openPanel` 对已开面板仅 focus，卡面停留在
+   上一 Stage，需手动关闭重开。卡片现在在 focus/可见时检测 pending Stage
+   变化并重载（不覆盖未提交的意见草稿）。
+
+已知约束：glm-5.3-flash(max) 在超长上下文（~725KB）下单轮输出整页 SVG 会
+触发 provider 空响应（EMPTY_MODEL_RESPONSE, retriable），采用「单页/轮」
+粒度推进可稳定完成。确认卡 Stage-2 提交后 agent 停轮等待设计使确认动作
+需要在会话里再推进一次（工具语义如此，非缺陷）。

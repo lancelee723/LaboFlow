@@ -164,7 +164,7 @@
       }
     ]
   },
-  "permissions": ["agent.tool.register", "workspace.read", "fs.write", "ui.panel", "ui.view", "notify"],
+  "permissions": ["agent.tool.register", "agent.prompt.inject", "workspace.read", "fs.write", "ui.panel", "ui.view", "notify"],
   "engines": {
     "piDesktop": ">=0.8.0"
   },

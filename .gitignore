@@ -58,8 +58,10 @@ coverage/
 .claude/
 .workbuddy
 electron.vite.config.*.mjs
-app 输出目录：slides 插件手工测试产物，不入库
+# app 输出目录：slides 插件手工测试产物，不入库
 apps/desktop/slides/
+# PPT-Master 运行时项目产物（agent 会话生成），不入库
+apps/projects/
 *.pyc
 __pycache__/
 

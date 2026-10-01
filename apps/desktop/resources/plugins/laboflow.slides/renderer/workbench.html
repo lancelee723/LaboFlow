@@ -116,7 +116,10 @@ for (const [id, key] of [
 ]) document.getElementById(id).textContent = t[key];
 document.getElementById("project-dir").placeholder = t.projectPh;
 document.getElementById("preview-empty").textContent = t.emptyPages;
-document.getElementById("t-noexports").textContent = t.noExports;
+// `t-noexports` is (re)created by loadProject inside #exports, so it is absent
+// on first paint — a hard null deref here killed the whole init script and
+// left every button listener unattached.
+document.getElementById("t-noexports")?.append(document.createTextNode(t.noExports));
 
 let projectDir = "";
 let pages = []; // { name, bytes, dir }
