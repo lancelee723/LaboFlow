@@ -90,6 +90,19 @@ union 合并不可行。已改用上游版本，fork 的以下能力**暂时不�
 
 ### T6.2 Phase5 遗留（恢复推进，按 phase5/README 既有裁决）
 
+**T6.2-b 模块 03 cron 调度 ✅（2026-10-01）**：R5-1 落地。
+Rust 新增 `scheduled/cron.rs`（5 字段解析器：*/,,-,a/n；周日 0/7 归一；
+日+周并集；结构化错误 + `next_after` 逐日扫描 + `last_before` 回溯，
+13 单测）；`automation` 接受 `cronExpr`（cadence="cron"，清 schedule，
+nextRunAt 由 cron 决定），`recover()` 补跑判定（最近一次错过 + 24h 上限
++ 首启保护 <5min 无运行 + 60s 启动延迟）；renderer `ScheduledEditor`
+Cron 模式（`lib/cron-expr.ts` 客户端校验镜像 Rust 规则）+ i18n 九语言。
+shared 加 cadence "cron" / ScheduledTask.cronExpr。
+实机（CDP）：创建 `*/2 * * * *` 任务 → 30s tick 自动触发 → headless 会话
+→ 权限审批（R5-6 严格策略）→ Bash 执行 → 正确回复；运行记录「运行中/
+已完成」状态正确。调度管道沿用上游 30s tick，主干零新增触点。
+host-core 695/695（+13 cron 单测）· desktop 3506/0。
+
 **T6.2-a 通道凭证持久化 ✅（2026-09-30）**：credential-store 的 setSecretStore
 SEAM 正式接通 host-core 密封密钥表（`secrets.set`/`secrets.getForRuntime`/
 `secrets.delete`，Rust 零改动——getForRuntime 即主进程 plain read）。
