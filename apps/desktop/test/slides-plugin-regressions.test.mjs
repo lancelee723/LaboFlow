@@ -58,3 +58,19 @@ test("confirm card re-fetches the pending stage on focus", () => {
   assert.match(html, /renderedPendingKey/);
   assert.match(html, /addEventListener\("focus"/);
 });
+
+test("panel pages define the theme token pair for both color schemes", () => {
+  // The host injects no --pi-bg/--pi-fg into plugin pages. Without local
+  // definitions the fallback pair (transparent body + #1f2328 text) sat
+  // near-black text on the dark window background (#181818).
+  for (const page of ["renderer/confirm-card.html", "renderer/workbench.html"]) {
+    const html = readPlugin(page);
+    assert.match(html, /--pi-bg:\s*#ffffff/, `${page}: light --pi-bg missing`);
+    assert.match(html, /--pi-fg:\s*#1f2328/, `${page}: light --pi-fg missing`);
+    assert.match(
+      html,
+      /prefers-color-scheme: dark[\s\S]*?--pi-bg:\s*#181818[\s\S]*?--pi-fg:\s*#e6e8eb/,
+      `${page}: dark scheme tokens missing`,
+    );
+  }
+});

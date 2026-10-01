@@ -6,7 +6,17 @@
 <meta name="pi-plugin-chrome" content="v2">
 <title>PPT 工作台</title>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light dark;
+    /* Panel pages receive no --pi-* tokens from the host: without these, dark
+       mode painted #1f2328 text on the #181818 window background. Keep --pi-bg
+       equal to builtinWindowBackground so the titlebar sample matches. */
+    --pi-bg: #ffffff;
+    --pi-fg: #1f2328;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --pi-bg: #181818; --pi-fg: #e6e8eb; }
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0; padding: calc(var(--pi-plugin-titlebar-height, 0px) + 12px) 14px 14px;

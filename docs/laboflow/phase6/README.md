@@ -225,3 +225,13 @@ passed-with-warnings，9 条均为咨询性提示）。工作台实机验证：�
 触发 provider 空响应（EMPTY_MODEL_RESPONSE, retriable），采用「单页/轮」
 粒度推进可稳定完成。确认卡 Stage-2 提交后 agent 停轮等待设计使确认动作
 需要在会话里再推进一次（工具语义如此，非缺陷）。
+
+### 补充：确认卡/工作台暗色模式对比度修复（2026-10-02）
+
+用户报告 Stage-1 确认卡在暗色模式下「半透明、显示不对」。根因：两个面板页
+引用 `var(--pi-bg, transparent)` / `var(--pi-fg, #1f2328)`，但宿主从不向
+插件页面注入这对 token——暗色窗口底 `#181818` 配恒定近黑文字，深底深字
+看起来像半透明。修复：两页面本地定义 token 对并随 `prefers-color-scheme`
+切换（暗色 `#181818`/`#e6e8eb`，与 builtinWindowBackground 一致，标题栏
+取色样本保持吻合）。实机验证暗/亮两模式渲染均正常。潜在后续：宿主 preload
+可考虑向 v2 面板/视图页面统一注入该 token 对（跨插件契约，暂不动）。
