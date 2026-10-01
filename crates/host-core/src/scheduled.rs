@@ -8,6 +8,7 @@ use crate::db::{ms_to_ts, now_ms, ts_to_ms, Database};
 use crate::sessions;
 
 pub mod automation;
+pub mod cron;
 pub mod project;
 pub mod timing;
 
@@ -30,6 +31,10 @@ pub struct ScheduledTask {
     pub schedule: Option<timing::Schedule>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_run_at: Option<String>,
+    /// LaboFlow module 03 (R5-1): 5-field cron expression; present instead of
+    /// `schedule` for cron-scheduled tasks (cadence tag stays "cron").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron_expr: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,7 +65,7 @@ pub struct TaskRun {
     pub ended_at: Option<String>,
 }
 
-const CADENCES: [&str; 4] = ["manual", "hourly", "daily", "weekly"];
+const CADENCES: [&str; 5] = ["manual", "hourly", "daily", "weekly", "cron"];
 
 fn normalize_cadence(value: Option<&str>) -> String {
     match value {
@@ -191,6 +196,11 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
         _ => (None, None),
     };
     Ok(ScheduledTask {
+        cron_expr: config
+            .get("cronExpr")
+            .and_then(Value::as_str)
+            .filter(|expr| !expr.trim().is_empty())
+            .map(str::to_string),
         id: row.get(0)?,
         title: row.get(1)?,
         prompt: row.get(2)?,

@@ -1,0 +1,96 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+out/
+build/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+!apps/desktop/build/
+apps/desktop/build/icon.iconset/
+target/
+*.tsbuildinfo
+apps/desktop/out/
+apps/desktop/dist-electron/
+apps/desktop/release/
+packages/*/dist/
+packages/*/dist-bundle/
+apps/*/dist-bundle/
+
+# Local design-source exports
+docs/image/pi_logo.png
+docs/image/pi_logo.webp
+*.tgz
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.local
+*.p12
+*.cer
+*.p8
+*.mobileprovision
+*.pem
+*.key
+!scripts/e2e/fixtures/certificates/localhost-cert.pem
+!scripts/e2e/fixtures/certificates/localhost-key.pem
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+coverage/
+.cache/
+.turbo/
+
+# Local runtime data
+.pi-desktop/
+.pi-desktop-test/
+.pi/
+.cc-connect/
+
+.playwright-mcp/
+.claude/
+.workbuddy
+electron.vite.config.*.mjs
+app 输出目录：slides 插件手工测试产物，不入库
+apps/desktop/slides/
+*.pyc
+__pycache__/
+
+.playwright-cli
+worktrees
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+site-packages/
+venv/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

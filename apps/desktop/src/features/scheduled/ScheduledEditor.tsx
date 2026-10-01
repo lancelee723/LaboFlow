@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GlobalPermissionMode, ProjectRecord, ScheduledTask } from "@pi-desktop/shared";
 import { Button, Field, Input, Textarea } from "../../components/ui";
 import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
 import { ScheduledWeekdaySelect } from "./ScheduledWeekdaySelect";
+import { validateCronExpr } from "../../lib/cron-expr";
 import {
   ScheduledExecutionSettings,
   type ScheduledModelSelection,
@@ -12,6 +13,7 @@ import { useAppStore } from "../../stores/app-store";
 import "./scheduled-editor.css";
 
 export type ScheduledDraft = Pick<ScheduledTask, "title" | "prompt" | "cadence" | "schedule"> & {
+  cronExpr?: string | null;
   workspacePath?: string;
   permissionMode?: GlobalPermissionMode;
   providerId?: string | null;
@@ -44,6 +46,13 @@ export function ScheduledEditor({
   const [weekdays, setWeekdays] = useState<number[]>(
     task?.schedule?.weekdays ?? [task?.schedule?.weekday ?? 0],
   );
+  // LaboFlow module 03 (R5-1): 5-field cron mode alongside the calendar UI.
+  const [cronExpr, setCronExpr] = useState(task?.cronExpr ?? "");
+  const cronLocal = useMemo(() => {
+    const expr = cronExpr.trim();
+    if (!expr) return { ok: true as const, error: "" };
+    return validateCronExpr(expr);
+  }, [cronExpr]);
   const [workspacePath, setWorkspacePath] = useState(
     task?.workspacePath || currentWorkspacePath || projects[0]?.path || "",
   );
@@ -71,7 +80,8 @@ export function ScheduledEditor({
     Number(minute) >= 0 && Number(minute) < 60;
   const valid = !!prompt.trim() && !!title.trim() &&
     ((cadence !== "daily" && cadence !== "weekly") || validTime) &&
-    (cadence !== "weekly" || weekdays.length > 0);
+    (cadence !== "weekly" || weekdays.length > 0) &&
+    (cadence !== "cron" || (cronLocal.ok && cronExpr.trim() !== ""));
   const periods = [
     { id: "morning", label: t("scheduled.morning"), hour: "09" },
     { id: "afternoon", label: t("scheduled.afternoon"), hour: "14" },
@@ -81,6 +91,7 @@ export function ScheduledEditor({
   const period = minute === "00" ? periods.find((item) => item.hour === hour) : undefined;
   const cadences = [
     ["manual", "scheduled.cadenceManual"],
+    ["cron", "scheduled.cadenceCron"],
     ["hourly", "scheduled.cadenceHourly"],
     ["daily", "scheduled.cadenceDaily"],
     ["weekly", "scheduled.cadenceWeekly"],
@@ -112,8 +123,9 @@ export function ScheduledEditor({
           title: title.trim(),
           prompt: prompt.trim(),
           cadence,
+          cronExpr: cadence === "cron" ? cronExpr.trim() : null,
           schedule:
-            cadence === "manual"
+            cadence === "manual" || cadence === "cron"
               ? null
               : cadence === "hourly"
                 ? { hour: 0, minute: 0, weekday: 0 }
@@ -194,6 +206,24 @@ export function ScheduledEditor({
               }} />
           </Field>
         )}
+        {cadence === "cron" && (
+          <Field
+            label={t("scheduled.cronExpr")}
+            hint={
+              cronExpr.trim() && !cronLocal.ok
+                ? `⚠ ${cronLocal.error}`
+                : undefined
+            }
+          >
+            <Input
+              required
+              value={cronExpr}
+              placeholder="*/15 * * * *"
+              spellCheck={false}
+              onChange={(e) => setCronExpr(e.target.value)}
+            />
+          </Field>
+        )}
         {cadence === "weekly" && (
           <Field label={t("scheduled.weekday")}>
             <ScheduledWeekdaySelect value={weekdays} onChange={setWeekdays} disabled={busy} />
@@ -202,6 +232,16 @@ export function ScheduledEditor({
       </div>
       {(cadence === "daily" || cadence === "weekly") && (
         <p className="dest-row-meta">{hour}:{minute} · {t("scheduled.exactTimeHint")}</p>
+      )}
+      {cadence === "cron" && (
+        <p className="dest-row-meta" aria-live="polite">
+          {cronExpr.trim() && cronLocal.ok
+            ? t("scheduled.cronValid", { defaultValue: "Cron expression accepted" })
+            : t("scheduled.cronHint", {
+                defaultValue:
+                  "5 fields: minute hour day-of-month month day-of-week. Missed runs catch up once within 24h.",
+              })}
+        </p>
       )}
       {cadence === "weekly" && (
         <p className="dest-row-meta" aria-live="polite">

@@ -96,7 +96,13 @@ export type OnboardingState = {
 };
 
 
-export type ScheduledTaskCadence = "manual" | "hourly" | "daily" | "weekly";
+export type ScheduledTaskCadence =
+  | "manual"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  /** LaboFlow module 03 (R5-1): 5-field cron expression in `cronExpr`. */
+  | "cron";
 export type ScheduledTaskSchedule = {
   hour: number;
   minute: number;
@@ -122,6 +128,8 @@ export type ScheduledTask = {
   updatedAt: string;
   lastRunAt?: string;
   schedule?: ScheduledTaskSchedule | null;
+  /** LaboFlow module 03 (R5-1): 5-field cron expression (cadence "cron"). */
+  cronExpr?: string | null;
   nextRunAt?: string;
   workspacePath?: string;
   /** Explicit task-owned execution settings. Missing fields preserve legacy behavior. */
