@@ -658,13 +658,20 @@ export function TokenUsagePage() {
         >
           {heatMode === "day" ? (
             <div className="usage-heatmap-months">
-              {/* A one-column month would clip its label; GitHub hides those. */}
+              {/* A one-column month would clip its label; GitHub hides those.
+                  gridRow pins every label to the first row: adjacent months
+                  share one grid column at mixed-week boundaries, and without
+                  the explicit row auto-placement wraps the overlapping span
+                  onto a new line (staircase layout, tall empty band). */}
               {dayHeat.months
                 .filter((month) => month.end > month.start)
                 .map((month) => (
                   <span
                     key={`${month.label}-${month.start}`}
-                    style={{ gridColumn: `${month.start + 1} / ${month.end + 2}` }}
+                    style={{
+                      gridColumn: `${month.start + 1} / ${month.end + 2}`,
+                      gridRow: "1",
+                    }}
                   >
                     {month.label}
                   </span>
