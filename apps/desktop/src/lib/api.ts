@@ -1255,15 +1255,11 @@ export const api = {
     invoke(IPC.invoke.skillSetScope, { id, scope }),
   /** Search the online skill marketplace (Clawhub by default). */
   skillMarketSearch: (query: string) =>
-    invoke<
-      Array<{
-        slug: string;
-        ownerHandle: string;
-        name: string;
-        description: string;
-        downloads: number;
-      }>
-    >(IPC.invoke.skillMarketSearch, { query }),
+    invoke<{
+      entries?: SkillCatalogEntry[];
+      failedSources?: string[];
+      failureKinds?: Record<string, "policy" | "fake-ip" | "unresolved" | "network">;
+    }>(IPC.invoke.skillMarketSearch, { query }),
   /** Download and install one marketplace skill into the global skills root. */
   skillMarketInstall: (payload: { slug: string; ownerHandle?: string; name?: string }) =>
     invoke<{ ok: boolean }>(IPC.invoke.skillMarketInstall, payload),

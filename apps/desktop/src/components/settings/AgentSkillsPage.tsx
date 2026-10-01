@@ -308,8 +308,21 @@ export function AgentSkillsPage() {
     if (!query || marketSearching) return;
     setMarketSearching(true);
     try {
-      const results = await api.skillMarketSearch(query);
-      setMarketResults(results ?? []);
+      // The aggregator returns sourced catalog entries; the built-in Clawhub
+      // source encodes its slug in the id prefix (mirrors the main-process
+      // fold-in) because install round-trips slug + ownerHandle.
+      const result = await api.skillMarketSearch(query);
+      setMarketResults(
+        (result?.entries ?? []).map((entry) => ({
+          slug: entry.id.startsWith("clawhub:")
+            ? entry.id.slice("clawhub:".length)
+            : entry.id,
+          ownerHandle: entry.author ?? "",
+          name: entry.name,
+          description: entry.description ?? "",
+          downloads: 0,
+        })),
+      );
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
       setMarketResults([]);
