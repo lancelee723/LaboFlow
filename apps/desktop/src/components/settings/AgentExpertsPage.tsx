@@ -736,15 +736,20 @@ export function AgentExpertsPage() {
           >
             {t("expert.invoke")}
           </Button>
-          {team.source === "user" ? (
+          {/* Preset teams are editable too: saving a doc with the same name
+              shadows the builtin (name is the id), same pattern as preset
+              experts. Org packs stay read-only. */}
+          {team.source === "user" || team.source === "preset" ? (
             <>
               <Button size="sm" variant="secondary" onClick={() => openTeamEditor(team)}>
                 <IconPencil size={13} />
                 {t("expert.edit")}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => void deleteTeam(team)}>
-                {t("expert.delete")}
-              </Button>
+              {team.source === "user" ? (
+                <Button size="sm" variant="ghost" onClick={() => void deleteTeam(team)}>
+                  {t("expert.delete")}
+                </Button>
+              ) : null}
             </>
           ) : null}
         </>
