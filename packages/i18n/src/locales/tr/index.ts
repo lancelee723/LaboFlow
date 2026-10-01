@@ -1608,6 +1608,8 @@ export const tr = {
       unknownModel: "Bilinmeyen model",
       dataUpdated: "Veri güncellendi {{time}}",
       modelUsage: "Model kullanımı",
+      weekTotal: "Hafta toplamı",
+      monthTotal: "Ay toplamı",
       orgQuota: "Kurum kotası",
       tokensKind: "Token",
       sessionsKind: "Oturum",

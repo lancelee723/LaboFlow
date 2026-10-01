@@ -1608,6 +1608,8 @@ export const zhTW = {
       unknownModel: "未知模型",
       dataUpdated: "數據更新於 {{time}}",
       modelUsage: "模型用量",
+      weekTotal: "週合計",
+      monthTotal: "月合計",
       orgQuota: "組織配額",
       tokensKind: "Tokens",
       sessionsKind: "會話數",

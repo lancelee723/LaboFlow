@@ -1606,6 +1606,8 @@ export const en = {
       unknownModel: "Unknown model",
       dataUpdated: "Data updated {{time}}",
       modelUsage: "Model usage",
+      weekTotal: "Week total",
+      monthTotal: "Month total",
       orgQuota: "Organization quota",
       tokensKind: "Tokens",
       sessionsKind: "Sessions",

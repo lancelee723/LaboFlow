@@ -75,26 +75,20 @@ test("month axis labels span their month's real grid columns", () => {
 });
 
 /**
- * Weekly/cumulative granularities mirror the daily grid: single-row layouts
- * (26×1 / 12×1) at the same cell height, each with its own month axis —
- * the axis renders for every mode, never gated on the daily mode alone.
+ * Weekly/cumulative share the daily canvas: the same 7×26 day grid and month
+ * axis, with only the tinting granularity changing (each cell colored by its
+ * week's / month's bucket total; the hover card names the bucket). No
+ * per-mode grid variants may creep back in.
  */
-test("weekly and cumulative grids match the daily cell size with month axes", () => {
-  assert.match(
-    styles,
-    /\.usage-heatmap-grid\.is-week \{\s*grid-template-rows: repeat\(1, 10px\);\s*grid-auto-flow: row;\s*grid-template-columns: repeat\(26, 1fr\);/,
-  );
-  assert.match(
-    styles,
-    /\.usage-heatmap-grid\.is-month \{\s*grid-template-rows: repeat\(1, 10px\);\s*grid-auto-flow: row;\s*grid-template-columns: repeat\(12, 1fr\);/,
-  );
-  assert.match(styles, /\.usage-heatmap-months\.is-month \{\s*grid-template-columns: repeat\(12, 1fr\);/);
-  // The month axis renders from the active mode's own series, not day-only.
-  assert.match(usagePage, /\{heat\.months\s*$/m);
-  assert.doesNotMatch(usagePage, /heatMode === "day" \? \(\s*<div className="usage-heatmap-months"/);
-  // Week cells map 1:1 to columns; day cells fold seven-to-one.
-  assert.match(usagePage, /One cell IS one column here/);
-  assert.match(usagePage, /Math\.floor\(index \/ 7\)/);
+test("weekly and cumulative tint the shared daily canvas by bucket totals", () => {
+  assert.match(usagePage, /share ONE canvas/);
+  assert.match(usagePage, /weekTotals/);
+  assert.match(usagePage, /monthTotals/);
+  assert.match(usagePage, /weekTotal"/);
+  assert.match(usagePage, /monthTotal"/);
+  assert.match(usagePage, /months: dayHeat\.months/);
+  assert.doesNotMatch(styles, /usage-heatmap-grid\.is-(week|month)/);
+  assert.doesNotMatch(usagePage, /usage-heatmap-grid is-(week|month)/);
 });
 
 test("usage trend chart is per-model with no daily-breakdown table", () => {

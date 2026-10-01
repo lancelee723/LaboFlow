@@ -1608,6 +1608,8 @@ export const zhCN = {
       unknownModel: "未知模型",
       dataUpdated: "数据更新于 {{time}}",
       modelUsage: "模型用量",
+      weekTotal: "周合计",
+      monthTotal: "月合计",
       orgQuota: "组织配额",
       tokensKind: "Tokens",
       sessionsKind: "会话数",

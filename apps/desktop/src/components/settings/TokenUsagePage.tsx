@@ -17,7 +17,6 @@ type RangeId = "7d" | "30d";
 type HeatMode = "day" | "week" | "cumulative";
 
 const HEAT_WEEKS = 26;
-const HEAT_MONTHS = 12;
 const TREND_MAX_DAYS = 30;
 /** Categorical palette for per-model trend lines (ZCode reference order). */
 const MODEL_COLORS = [
@@ -61,17 +60,6 @@ function computeStreaks(activeKeys: Set<string>): { current: number; longest: nu
     longest = Math.max(longest, run);
   }
   return { current, longest };
-}
-
-/** Monday of the week containing `date`. */
-function weekStart(date: Date): Date {
-  const day = new Date(date);
-  day.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-  return day;
-}
-
-function monthKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 /**
@@ -287,90 +275,40 @@ export function TokenUsagePage() {
     return { cells, months };
   }, [byDay]);
 
-  // Weekly grid: one cell per week, a single row of 26 — the same column
-  // structure (and cell size) as the daily grid, with the same month axis.
-  const weekHeat = useMemo(() => {
-    const cells: HeatCell[] = [];
-    const thisWeek = weekStart(new Date());
-    for (let i = HEAT_WEEKS - 1; i >= 0; i -= 1) {
-      const start = new Date(thisWeek);
-      start.setDate(thisWeek.getDate() - i * 7);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      let total = 0;
-      for (let d = 0; d < 7; d += 1) {
-        const day = new Date(start);
-        day.setDate(start.getDate() + d);
-        total += byDay.get(localDateKey(day))?.totalTokens ?? 0;
-      }
-      cells.push({
-        key: `w:${localDateKey(start)}`,
-        label: t("settings.usage.weekLabel", {
-          start: localDateKey(start),
-          end: localDateKey(end),
-        }),
-        total,
-      });
-    }
-    // One cell IS one column here, so the month fold works on the raw index.
-    const months: Array<{ label: string; start: number; end: number }> = [];
-    cells.forEach((cell, index) => {
-      const label = new Date(`${cell.key.slice(2)}T00:00:00`).toLocaleDateString(undefined, {
-        month: "short",
-      });
-      const last = months[months.length - 1];
-      if (last && last.label === label) last.end = index;
-      else months.push({ label, start: index, end: index });
-    });
-    return { cells, months };
-  }, [byDay, t]);
-
-  // Cumulative (monthly) grid: one cell per month in a single 12-wide row,
-  // cell height matched to the daily grid; the axis labels are the cells.
-  const monthHeat = useMemo(() => {
-    const cells: HeatCell[] = [];
-    const today = new Date();
-    let cumulative = 0;
+  // All three granularities share ONE canvas: the same 7×26 day grid and the
+  // same month axis as the daily view. Weekly/cumulative only change the
+  // tinting granularity — every cell is colored by its week's / month's bucket
+  // total (ZCode-style unified visual), and the hover card names the bucket.
+  const heat = useMemo(() => {
+    const weekKeyOf = (key: string) => {
+      const day = new Date(`${key}T00:00:00`);
+      day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
+      return localDateKey(day);
+    };
+    const weekTotals = new Map<string, number>();
     const monthTotals = new Map<string, number>();
     for (const [key, item] of byDay) {
-      const month = key.slice(0, 7);
-      monthTotals.set(month, (monthTotals.get(month) ?? 0) + item.totalTokens);
+      const weekKey = weekKeyOf(key);
+      const monthKey = key.slice(0, 7);
+      weekTotals.set(weekKey, (weekTotals.get(weekKey) ?? 0) + item.totalTokens);
+      monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + item.totalTokens);
     }
-    // Cumulative counts everything recorded before the window too.
-    const windowKeys = new Set<string>();
-    for (let i = HEAT_MONTHS - 1; i >= 0; i -= 1) {
-      const month = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      windowKeys.add(monthKey(month));
-    }
-    for (const [key, item] of byDay) {
-      if (!windowKeys.has(key.slice(0, 7))) cumulative += item.totalTokens;
-    }
-    for (let i = HEAT_MONTHS - 1; i >= 0; i -= 1) {
-      const month = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const key = monthKey(month);
-      const total = monthTotals.get(key) ?? 0;
-      cumulative += total;
-      cells.push({
-        key: `m:${key}`,
-        label: month.toLocaleDateString(undefined, { year: "numeric", month: "long" }),
-        detail: `${t("settings.usage.cumulative")}: ${formatTokenCount(cumulative)}`,
+    const cells = dayHeat.cells.map((cell) => {
+      if (heatMode === "day") return cell;
+      const total =
+        heatMode === "week"
+          ? (weekTotals.get(weekKeyOf(cell.key)) ?? 0)
+          : (monthTotals.get(cell.key.slice(0, 7)) ?? 0);
+      const bucketLabel = t(
+        heatMode === "week" ? "settings.usage.weekTotal" : "settings.usage.monthTotal",
+      );
+      return {
+        ...cell,
         total,
-      });
-    }
-    const months = cells.map((cell, index) => ({
-      label: new Date(`${cell.key.slice(2)}-01T00:00:00`).toLocaleDateString(undefined, {
-        month: "short",
-      }),
-      start: index,
-      end: index,
-    }));
-    return { cells, months };
-  }, [byDay, t]);
-
-  const heat = useMemo(() => {
-    const source =
-      heatMode === "day" ? dayHeat : heatMode === "week" ? weekHeat : monthHeat;
-    const nonzero = source.cells.filter((cell) => cell.total > 0).map((cell) => cell.total);
+        detail: `${bucketLabel}: ${formatTokenCount(total)}`,
+      };
+    });
+    const nonzero = cells.filter((cell) => cell.total > 0).map((cell) => cell.total);
     const quartile = (fraction: number) => {
       if (!nonzero.length) return 0;
       const sorted = [...nonzero].sort((a, b) => a - b);
@@ -379,11 +317,11 @@ export function TokenUsagePage() {
       return value || 0;
     };
     return {
-      cells: source.cells,
+      cells,
       levels: [quartile(0.33), quartile(0.66), quartile(0.9)],
-      months: source.months,
+      months: dayHeat.months,
     };
-  }, [heatMode, dayHeat, weekHeat, monthHeat]);
+  }, [heatMode, dayHeat, byDay, t]);
 
   const showHeatCell = (cell: HeatCell, event: React.MouseEvent<HTMLDivElement>) => {
     const host = heatRef.current?.getBoundingClientRect();
@@ -675,15 +613,12 @@ export function TokenUsagePage() {
           aria-label={t("settings.usage.activity")}
           onMouseLeave={() => setHover(null)}
         >
-          <div
-            className={`usage-heatmap-months${heatMode === "cumulative" ? " is-month" : ""}`}
-          >
+          <div className="usage-heatmap-months">
             {/* A one-column month would clip its label; GitHub hides those.
                 gridRow pins every label to the first row: adjacent months
                 share one grid column at mixed-week boundaries, and without
                 the explicit row auto-placement wraps the overlapping span
-                onto a new line (staircase layout, tall empty band). Monthly
-                labels are 1:1 with their cells, so every span is one column. */}
+                onto a new line (staircase layout, tall empty band). */}
             {heat.months
               .filter((month) => month.end > month.start)
               .map((month) => (
@@ -698,15 +633,7 @@ export function TokenUsagePage() {
                 </span>
               ))}
           </div>
-          <div
-            className={
-              heatMode === "day"
-                ? "usage-heatmap-grid"
-                : heatMode === "week"
-                  ? "usage-heatmap-grid is-week"
-                  : "usage-heatmap-grid is-month"
-            }
-          >
+          <div className="usage-heatmap-grid">
             {heat.cells.map((cell) => {
               const level =
                 cell.total <= 0 ? 0 : cell.total <= heat.levels[0] ? 1 : cell.total <= heat.levels[1] ? 2 : 3;

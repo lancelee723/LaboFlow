@@ -1608,6 +1608,8 @@ export const ko = {
       unknownModel: "알 수 없는 모델",
       dataUpdated: "데이터 업데이트: {{time}}",
       modelUsage: "모델 사용량",
+      weekTotal: "주간 합계",
+      monthTotal: "월간 합계",
       orgQuota: "조직 할당량",
       tokensKind: "토큰",
       sessionsKind: "세션",

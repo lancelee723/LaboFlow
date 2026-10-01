@@ -2738,24 +2738,8 @@
   gap: 3px;
 }
 
-/* Weekly: one row of 26 — same columns and cell size as the daily grid.
-   Monthly: one row of 12; cells stay 10px tall to match, and run wider
-   because one cell carries a whole month. */
-.usage-heatmap-grid.is-week {
-  grid-template-rows: repeat(1, 10px);
-  grid-auto-flow: row;
-  grid-template-columns: repeat(26, 1fr);
-}
-
-.usage-heatmap-grid.is-month {
-  grid-template-rows: repeat(1, 10px);
-  grid-auto-flow: row;
-  grid-template-columns: repeat(12, 1fr);
-}
-
-.usage-heatmap-months.is-month {
-  grid-template-columns: repeat(12, 1fr);
-}
+/* All granularities share the daily grid geometry: weekly/cumulative only
+   re-tint the same 7×26 cells by their bucket totals. */
 
 .usage-heat-cell {
   border-radius: var(--radius-3xs);

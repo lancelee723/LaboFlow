@@ -1606,6 +1606,8 @@ export const de = {
       weekLabel: "{{start}} ~ {{end}}",
       cumulative: "Kumuliert",
       unknownModel: "Unbekanntes Modell",
+      weekTotal: "Wochensumme",
+      monthTotal: "Monatssumme",
       dataUpdated: "Daten aktualisiert {{time}}",
       modelUsage: "Modellnutzung",
       orgQuota: "Organisations-Kontingent",
