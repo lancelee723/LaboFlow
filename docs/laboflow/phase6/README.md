@@ -90,6 +90,14 @@ union 合并不可行。已改用上游版本，fork 的以下能力**暂时不�
 
 ### T6.2 Phase5 遗留（恢复推进，按 phase5/README 既有裁决）
 
+**T6.2-c 模块 06 L3 工作台 ✅（2026-10-01，勘察修正）**：此前记录
+「L3 工作台面板后置」有误——工作台视图已在 ppt-l2-rebuild Phase C 实装
+（laboflow.slides contributes.views → renderer/workbench.html：运行时
+状态卡/管线 stage/翻页预览（左右键）/导出列表）。实机验证：工作面板
+launcher 出现「PPT 工作台」入口，视图以独立 WebContentsView 加载，
+pluginBridge 就绪，四区域渲染正常（CDP 截图）。仍后置项：模板蒸馏/
+组织模板包（T56.10）/产物版本链（FR-PPT-06）——依赖模板实测调优，维持后置。
+
 **T6.2-b 模块 03 cron 调度 ✅（2026-10-01）**：R5-1 落地。
 Rust 新增 `scheduled/cron.rs`（5 字段解析器：*/,,-,a/n；周日 0/7 归一；
 日+周并集；结构化错误 + `next_after` 逐日扫描 + `last_before` 回溯，
