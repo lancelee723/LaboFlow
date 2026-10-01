@@ -271,16 +271,18 @@ export function TokenUsagePage() {
       });
     }
     // Month axis: one label per calendar month spanning exactly the grid
-    // columns that month occupies, so label widths track the weeks below them
-    // (GitHub-style) instead of each label squeezing into a single column.
+    // columns that month occupies (GitHub-style). `index` counts CELLS (days,
+    // column-flow: 7 per column), so the column is index/7 — feeding the raw
+    // day index to gridColumn pushed every label past the month it belongs to.
     const months: Array<{ label: string; start: number; end: number }> = [];
     cells.forEach((cell, index) => {
+      const column = Math.floor(index / 7);
       const label = new Date(`${cell.key}T00:00:00`).toLocaleDateString(undefined, {
         month: "short",
       });
       const last = months[months.length - 1];
-      if (last && last.label === label) last.end = index;
-      else months.push({ label, start: index, end: index });
+      if (last && last.label === label) last.end = column;
+      else months.push({ label, start: column, end: column });
     });
     return { cells, months };
   }, [byDay]);
