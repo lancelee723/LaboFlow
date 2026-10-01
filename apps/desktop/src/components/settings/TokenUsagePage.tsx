@@ -287,7 +287,8 @@ export function TokenUsagePage() {
     return { cells, months };
   }, [byDay]);
 
-  // Weekly grid: one cell per week, two rows of thirteen, oldest first.
+  // Weekly grid: one cell per week, a single row of 26 — the same column
+  // structure (and cell size) as the daily grid, with the same month axis.
   const weekHeat = useMemo(() => {
     const cells: HeatCell[] = [];
     const thisWeek = weekStart(new Date());
@@ -311,11 +312,21 @@ export function TokenUsagePage() {
         total,
       });
     }
-    return { cells };
+    // One cell IS one column here, so the month fold works on the raw index.
+    const months: Array<{ label: string; start: number; end: number }> = [];
+    cells.forEach((cell, index) => {
+      const label = new Date(`${cell.key.slice(2)}T00:00:00`).toLocaleDateString(undefined, {
+        month: "short",
+      });
+      const last = months[months.length - 1];
+      if (last && last.label === label) last.end = index;
+      else months.push({ label, start: index, end: index });
+    });
+    return { cells, months };
   }, [byDay, t]);
 
-  // Cumulative (monthly) grid: one cell per month plus the running total up
-  // through that month, so the long-term curve stays readable.
+  // Cumulative (monthly) grid: one cell per month in a single 12-wide row,
+  // cell height matched to the daily grid; the axis labels are the cells.
   const monthHeat = useMemo(() => {
     const cells: HeatCell[] = [];
     const today = new Date();
@@ -346,13 +357,20 @@ export function TokenUsagePage() {
         total,
       });
     }
-    return { cells };
+    const months = cells.map((cell, index) => ({
+      label: new Date(`${cell.key.slice(2)}-01T00:00:00`).toLocaleDateString(undefined, {
+        month: "short",
+      }),
+      start: index,
+      end: index,
+    }));
+    return { cells, months };
   }, [byDay, t]);
 
   const heat = useMemo(() => {
     const source =
-      heatMode === "day" ? dayHeat.cells : heatMode === "week" ? weekHeat.cells : monthHeat.cells;
-    const nonzero = source.filter((cell) => cell.total > 0).map((cell) => cell.total);
+      heatMode === "day" ? dayHeat : heatMode === "week" ? weekHeat : monthHeat;
+    const nonzero = source.cells.filter((cell) => cell.total > 0).map((cell) => cell.total);
     const quartile = (fraction: number) => {
       if (!nonzero.length) return 0;
       const sorted = [...nonzero].sort((a, b) => a - b);
@@ -361,8 +379,9 @@ export function TokenUsagePage() {
       return value || 0;
     };
     return {
-      cells: source,
+      cells: source.cells,
       levels: [quartile(0.33), quartile(0.66), quartile(0.9)],
+      months: source.months,
     };
   }, [heatMode, dayHeat, weekHeat, monthHeat]);
 
@@ -656,28 +675,29 @@ export function TokenUsagePage() {
           aria-label={t("settings.usage.activity")}
           onMouseLeave={() => setHover(null)}
         >
-          {heatMode === "day" ? (
-            <div className="usage-heatmap-months">
-              {/* A one-column month would clip its label; GitHub hides those.
-                  gridRow pins every label to the first row: adjacent months
-                  share one grid column at mixed-week boundaries, and without
-                  the explicit row auto-placement wraps the overlapping span
-                  onto a new line (staircase layout, tall empty band). */}
-              {dayHeat.months
-                .filter((month) => month.end > month.start)
-                .map((month) => (
-                  <span
-                    key={`${month.label}-${month.start}`}
-                    style={{
-                      gridColumn: `${month.start + 1} / ${month.end + 2}`,
-                      gridRow: "1",
-                    }}
-                  >
-                    {month.label}
-                  </span>
-                ))}
-            </div>
-          ) : null}
+          <div
+            className={`usage-heatmap-months${heatMode === "cumulative" ? " is-month" : ""}`}
+          >
+            {/* A one-column month would clip its label; GitHub hides those.
+                gridRow pins every label to the first row: adjacent months
+                share one grid column at mixed-week boundaries, and without
+                the explicit row auto-placement wraps the overlapping span
+                onto a new line (staircase layout, tall empty band). Monthly
+                labels are 1:1 with their cells, so every span is one column. */}
+            {heat.months
+              .filter((month) => month.end > month.start)
+              .map((month) => (
+                <span
+                  key={`${month.label}-${month.start}`}
+                  style={{
+                    gridColumn: `${month.start + 1} / ${month.end + 2}`,
+                    gridRow: "1",
+                  }}
+                >
+                  {month.label}
+                </span>
+              ))}
+          </div>
           <div
             className={
               heatMode === "day"
