@@ -3198,6 +3198,46 @@ async fn handle_request(
                 .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             Ok(json!({ "artifacts": artifacts }))
         }
+        // Register a session-produced file the Write/Edit tracker cannot see
+        // (e.g. a deck exported by a plugin-run script). Same upsert as the
+        // internal tracker path, so repeat exports refresh the version chain.
+        "artifacts.record" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let path = params
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if session_id.is_empty() || path.is_empty() {
+                return Err(rpc_err(
+                    1002,
+                    "sessionId and path are required",
+                    "INVALID_ARGUMENT",
+                ));
+            }
+            let op = params
+                .get("op")
+                .and_then(|v| v.as_str())
+                .unwrap_or("write")
+                .to_string();
+            let turn_id = params
+                .get("turnId")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let st = state.lock().await;
+            if !crate::sessions::exists(&st.db, &session_id)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?
+            {
+                return Err(rpc_err(1004, "session not found", "NOT_FOUND"));
+            }
+            artifacts::record(&st.db, &session_id, &path, &op, turn_id.as_deref())
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "ok": true }))
+        }
 
         "plans.pending" => {
             let session_id = params.get("sessionId").and_then(|v| v.as_str());
@@ -5366,6 +5406,76 @@ mod tests {
             error.data.as_ref().and_then(|data| data.get("errorCode")),
             Some(&json!("MODEL_ALIAS_TOO_LONG"))
         );
+    }
+
+    #[tokio::test]
+    async fn artifacts_record_registers_and_version_chains_session_exports() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut app_state = AppState::open(data_dir.path()).unwrap();
+        app_state.handshook = true;
+        let session_id = sessions::create_session_with_options(
+            &app_state.db,
+            sessions::SessionCreateOptions::default(),
+        )
+        .unwrap()
+        .id;
+        let state = Arc::new(Mutex::new(app_state));
+
+        // Unknown session → NOT_FOUND; junk input → INVALID_ARGUMENT.
+        let missing = handle_request(
+            state.clone(),
+            "artifacts.record",
+            json!({ "sessionId": "nope", "path": "/tmp/x.pptx" }),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            missing.data.unwrap().get("errorCode"),
+            Some(&json!("NOT_FOUND"))
+        );
+        let junk = handle_request(
+            state.clone(),
+            "artifacts.record",
+            json!({ "sessionId": "" }),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            junk.data.unwrap().get("errorCode"),
+            Some(&json!("INVALID_ARGUMENT"))
+        );
+
+        // First export registers; a repeat export refreshes the same row (the
+        // upsert is the version chain) instead of duplicating it.
+        for _ in 0..2 {
+            let recorded = handle_request(
+                state.clone(),
+                "artifacts.record",
+                json!({
+                    "sessionId": session_id,
+                    "path": "/ws/exports/deck.pptx",
+                    "op": "export"
+                }),
+                mpsc::unbounded_channel().0,
+            )
+            .await
+            .unwrap();
+            assert_eq!(recorded["ok"], json!(true));
+        }
+        let listed = handle_request(
+            state,
+            "artifacts.list",
+            json!({ "sessionId": session_id }),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+        .unwrap();
+        let rows = listed["artifacts"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["path"], "/ws/exports/deck.pptx");
+        assert_eq!(rows[0]["op"], "export");
     }
 
     #[tokio::test]

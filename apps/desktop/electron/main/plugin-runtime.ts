@@ -320,6 +320,19 @@ export type PluginHostServices = {
    */
   onPluginThemesChanged?: (pluginId: string) => void;
   showToast: (message: string, level?: "info" | "warn" | "error") => void;
+  /**
+   * Observe completed plugin tool executions (FR-PPT-06): the slides plugin's
+   * exports register as session artifacts through this hook. Fire-and-forget —
+   * the runtime never awaits it and a throw must not fail the tool call.
+   */
+  onPluginToolArtifact?: (input: {
+    pluginId: string;
+    toolName: string;
+    sessionId: string;
+    turnId?: string;
+    args: unknown;
+    result: unknown;
+  }) => void;
   notify: (input: { title: string; body?: string }) => void;
   getNotificationPermission: () => PluginNotificationPermission | Promise<PluginNotificationPermission>;
   requestNotificationPermission: () => Promise<PluginNotificationPermission>;
@@ -2602,7 +2615,7 @@ export class PluginRuntime {
               signal: ctx?.signal,
             });
             try {
-              return await this.sendToChild(
+              const result = await this.sendToChild(
                   target,
                   {
                     t: "call",
@@ -2621,6 +2634,19 @@ export class PluginRuntime {
                   PLUGIN_TOOL_TIMEOUT_MS,
                   invocation.signal,
               );
+              try {
+                this.services.onPluginToolArtifact?.({
+                  pluginId,
+                  toolName: name,
+                  sessionId,
+                  turnId: ctx?.turnId,
+                  args: toolArgs,
+                  result,
+                });
+              } catch {
+                // Artifact registration is best-effort; never fail the tool.
+              }
+              return result;
             } catch (error) {
               this.toolInvocations.cancel(invocation, error);
               throw error;
