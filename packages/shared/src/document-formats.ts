@@ -20,7 +20,7 @@ export const DOCUMENT_PREVIEW_MIME: Record<FsDocumentKind, string> = {
 const EXTENSION_SET = new Set<string>(DOCUMENT_PREVIEW_EXTENSIONS);
 
 /** True when the path's extension is an in-app previewable document format. */
-export function isDocumentPreviewPath(path: string): boolean {
+export function isDocumentPreviewPath(path: string | null | undefined): boolean {
   const base = String(path ?? "").replace(/\\/g, "/").split("/").pop() ?? "";
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return false;
