@@ -77,6 +77,7 @@ export interface ChannelDriver {
     newSession?: { title?: string; projectPath?: string };
     prompt: string;
     personaPrompt?: string;
+    unattendedPolicy?: "strict" | "degraded" | "lenient";
     timeoutMs?: number;
   }): Promise<{
     sessionId: string;

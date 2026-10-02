@@ -1,4 +1,5 @@
 type Host = { call<T>(method: string, params?: Record<string, unknown>): Promise<T> };
+import { clearUnattendedPolicy, registerUnattendedPolicy } from "../assistant/unattended-policy";
 export type ScheduledLaunch = { sessionId: string; prompt: string; runId: string };
 
 /** Runs through the same prompt entry point as an interactive desktop turn. */
@@ -15,9 +16,13 @@ export async function executeScheduledTask(options: {
   try {
     if (!isCurrent()) throw new Error("scheduled runtime stopped");
     runs.set(launch.sessionId, launch.runId);
+    // R5-6: scheduled tasks default to the strict unattended policy — ask-
+    // class calls auto-deny and the task keeps moving (FR-MC-17).
+    registerUnattendedPolicy(launch.sessionId, "strict");
     await prompt(launch.sessionId, launch.prompt);
     return launch;
   } catch (error) {
+    clearUnattendedPolicy(launch.sessionId);
     if (runs.get(launch.sessionId) === launch.runId) runs.delete(launch.sessionId);
     try {
       await host.call("scheduled.finishRun", {

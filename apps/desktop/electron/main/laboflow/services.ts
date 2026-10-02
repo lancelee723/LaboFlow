@@ -557,6 +557,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       const handle = await headlessAgentDriver.start({
         sessionId,
         prompt: message,
+        unattendedPolicy: "degraded",
         timeoutMs: 15 * 60_000,
       });
       const result = await handle.completion;

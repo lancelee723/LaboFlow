@@ -33,6 +33,8 @@ export interface HeadlessRunRequest {
   thinkingLevel?: string;
   /** Persona overlay prepended to the harness prompt (module 01 experts). */
   personaPrompt?: string;
+  /** FR-MC-17: how ask-class tools resolve without a human. */
+  unattendedPolicy?: "strict" | "degraded" | "lenient";
   /** Abort the run after this long without settlement. */
   timeoutMs?: number;
 }
