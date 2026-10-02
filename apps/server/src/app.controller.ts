@@ -783,6 +783,24 @@ class CoreController {
     }));
   }
 
+  // ----- 组织设置（FR-TC-06 协作范围闸口；读取全员，写入仅管理员） -----
+  @Get('org/settings')
+  async getOrgSettings() {
+    return this.deps.spaces.getOrgSettings();
+  }
+
+  @Put('org/settings')
+  async updateOrgSettings(@Req() req: FastifyRequest, @Body() body: { allowExternalCollab?: boolean }) {
+    const actor = requireActor(req);
+    if (actor.role !== 'sys_admin' && actor.role !== 'team_admin') {
+      throw new HttpException('仅管理员可修改组织设置', 403);
+    }
+    return this.deps.spaces.setOrgSettings(
+      { userId: actor.userId, role: actor.role, teamId: actor.teamId },
+      { allowExternalCollab: body.allowExternalCollab === true },
+    );
+  }
+
   /** 空间通知（FR-TC-10）：我的未读/已读流转，轮询消费。 */
   @Get('spaces/notifications')
   async mySpaceNotifications(@Req() req: FastifyRequest & { query: Record<string, string> }) {

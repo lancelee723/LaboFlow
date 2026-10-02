@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   comments, inviteLinks, revisionSuggestions, spaceDocVersions, spaceDocs,
   spaceEvents, spaceFileVersions, spaceMembers, spaceNodeOverrides, spaceNodes,
-  spaceNotifications, spaces, users,
+  spaceNotifications, orgSettings, spaces, users,
 } from '../db/schema.js';
 import {
   canSpace, effectivePerm, isNodePerm, isSpacePerm,
@@ -687,6 +687,28 @@ export class SpaceService {
     return this.revisionDto(r!);
   }
 
+  // ============================ 组织设置（FR-TC-06） ============================
+
+  async getOrgSettings(): Promise<{ allowExternalCollab: boolean }> {
+    const [row] = await this.db.select().from(orgSettings).where(eq(orgSettings.id, 'default')).limit(1);
+    return { allowExternalCollab: row?.allowExternalCollab ?? false };
+  }
+
+  async setOrgSettings(
+    actor: { userId: string; role?: string; teamId: string | null },
+    input: { allowExternalCollab: boolean },
+  ): Promise<{ allowExternalCollab: boolean }> {
+    await this.db
+      .insert(orgSettings)
+      .values({ id: 'default', allowExternalCollab: input.allowExternalCollab === true, updatedBy: actor.userId })
+      .onConflictDoUpdate({
+        target: orgSettings.id,
+        set: { allowExternalCollab: input.allowExternalCollab === true, updatedBy: actor.userId, updatedAt: new Date() },
+      });
+    await this.audit(actor.userId, 'org.settings', 'default', { allowExternalCollab: input.allowExternalCollab === true });
+    return { allowExternalCollab: input.allowExternalCollab === true };
+  }
+
   /** 我的未读空间通知（轮询消费；frontier = createdAt ISO 游标）。 */
   async listNotifications(userId: string, sinceIso?: string): Promise<Array<Record<string, unknown>>> {
     const rows = await this.db
@@ -871,6 +893,15 @@ export class SpaceService {
     const [space] = await this.db.select().from(spaces).where(eq(spaces.id, invite.spaceId)).limit(1);
     if (!space) throw new SpaceError(404, 'ENOENT', '空间不存在');
     this.assertWritable(space);
+    // FR-TC-06 协作范围闸口：org_settings.allowExternalCollab=false 时，
+    // 非本团队账号无法经邀请链接加入（组织边界=默认安全边界）。
+    const [settings] = await this.db.select().from(orgSettings).where(eq(orgSettings.id, 'default')).limit(1);
+    if (settings && !settings.allowExternalCollab && actor.teamId !== space.teamId) {
+      await this.audit(actor.userId, 'invite.redeem.blocked', invite.id, {
+        spaceId: invite.spaceId, reason: 'external-collab-disabled',
+      });
+      throw new SpaceError(403, 'EEXTERNAL', '该组织仅允许组织内协作，无法经链接加入');
+    }
     await this.db
       .insert(spaceMembers)
       .values({ spaceId: invite.spaceId, userId: actor.userId, perm: invite.perm as SpacePerm, invitedBy: invite.createdBy })

@@ -302,6 +302,14 @@ export const spaceDocVersions = pgTable(
   (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
 );
 
+/** 组织级设置（FR-TC-06：协作范围闸口）。单组织部署：id 固定 'default'。 */
+export const orgSettings = pgTable('org_settings', {
+  id: text('id').primaryKey(), // 'default'
+  allowExternalCollab: boolean('allow_external_collab').notNull().default(false),
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** 空间内通知（FR-TC-10：按评论修订完成后通知评论者复核）。 */
 export const spaceNotifications = pgTable(
   'space_notifications',

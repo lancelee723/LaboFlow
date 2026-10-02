@@ -507,6 +507,38 @@ describe('T52.3 事件推流：since 游标 + 200 条上限', () => {
   });
 
 // ---------------------------------------------------------------- T52.5 文件上传
+describe('FR-TC-06 org_settings 协作范围闸口', () => {
+  it('默认组织内锁定：团队 B 经邀请加入被拒 403；放开后可加入', async () => {
+    if (!pgUp) return;
+    // carol（团队B）没有被加入空间A：先造一个团队B可见的邀请（manager 造）→ 兑换被闸
+    const invite = await api('POST', `/spaces/${spaceId}/invites`, { perm: 'viewer', expiresInDays: 1 }, taToken);
+    expect(invite.status).toBe(200);
+    const token = (invite.json as { token: string }).token;
+    const blocked = await api('POST', '/invites/redeem', { token }, carolToken);
+    expect(blocked.status).toBe(403);
+
+    // 管理员放开外部协作 → 兑换成功
+    const put = await api('PUT', '/org/settings', { allowExternalCollab: true }, rootToken);
+    expect(put.status).toBe(200);
+    const ok = await api('POST', '/invites/redeem', { token }, carolToken);
+    expect(ok.status).toBe(200);
+    // 还原锁定
+    await api('PUT', '/org/settings', { allowExternalCollab: false }, rootToken);
+    const second = await api('POST', `/spaces/${spaceId}/invites`, { perm: 'viewer', expiresInDays: 1 }, taToken);
+    const token2 = (second.json as { token: string }).token;
+    const blocked2 = await api('POST', '/invites/redeem', { token2 }, daveToken);
+    expect(blocked2.status).toBe(403);
+  });
+
+  it('非成员读设置 200（全员可读）；成员写设置 403', async () => {
+    if (!pgUp) return;
+    const read = await api('GET', '/org/settings', undefined, bobToken);
+    expect(read.status).toBe(200);
+    const write = await api('PUT', '/org/settings', { allowExternalCollab: true }, bobToken);
+    expect(write.status).toBe(403);
+  });
+});
+
 describe('FR-TC-21 空间内全文检索：标题+正文，仅可见节点', () => {
   it('建 MD 写正文 → 按内容与标题命中；viewer 的 none 覆盖节点不出现', async () => {
     if (!pgUp) return;

@@ -379,6 +379,18 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       `CREATE INDEX IF NOT EXISTS idx_space_notifications_user ON space_notifications(user_id, created_at);`,
     ],
   },
+  {
+    version: 9,
+    name: 'org-settings',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS org_settings (
+        id TEXT PRIMARY KEY,
+        allow_external_collab BOOLEAN NOT NULL DEFAULT false,
+        updated_by UUID,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {
