@@ -1,9 +1,11 @@
-import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createHash, randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   comments, inviteLinks, revisionSuggestions, spaceDocVersions, spaceDocs,
-  spaceEvents, spaceMembers, spaceNodeOverrides, spaceNodes, spaces, users,
+  spaceEvents, spaceFileVersions, spaceMembers, spaceNodeOverrides, spaceNodes, spaces, users,
 } from '../db/schema.js';
 import {
   canSpace, effectivePerm, isNodePerm, isSpacePerm,
@@ -23,6 +25,8 @@ import {
 
 /** MD/CSV 文档版本链滚动窗口（SPEC §2：20 版滚动可配）。 */
 export const SPACE_VERSIONS_KEEP = 20;
+/** file 上限沿用交付物约束（PRD FR-TC-02②：单文件 ≤200MB）。 */
+export const MAX_SPACE_FILE_SIZE = 200 * 1024 * 1024;
 
 export interface SpaceActor {
   userId: string;
@@ -53,6 +57,8 @@ export class SpaceService {
   constructor(
     private readonly db: NodePgDatabase<Record<string, never>>,
     private readonly audit: AuditFn,
+    /** 卷存储根（file 节点内容）；缺省时 file 上传/下载不可用。 */
+    private readonly storageDir?: string,
   ) {}
 
   // ============================ 事件（ONE mechanism，WS hub 复用） ============================
@@ -834,5 +840,98 @@ export class SpaceService {
       .where(and(eq(spaceNodeOverrides.nodeId, nodeId), eq(spaceNodeOverrides.subjectId, subjectId)));
     await this.emit(spaceId, 'node.updated', { nodeId, override: { subjectId, perm: null } }, actor.userId);
     return { ok: true };
+  }
+
+  // ============================ 文件上传（T52.5：file 走卷存储） ============================
+
+  /** 上传为新 file 节点，或对既有 file 节点追加版本。20 版滚动窗口与交付物一致。 */
+  async uploadFile(
+    spaceId: string, actor: SpaceActor,
+    input: { nodeId?: string; parentId?: string | null; name?: string; contentBase64: string },
+  ): Promise<Record<string, unknown>> {
+    if (!this.storageDir) throw new SpaceError(503, 'ENOSTORAGE', '服务端未配置文件卷存储');
+    const content = Buffer.from(String(input.contentBase64 ?? ''), 'base64');
+    if (!content.length) throw new SpaceError(422, 'EEMPTY', '上传内容为空');
+    if (content.length > MAX_SPACE_FILE_SIZE) {
+      throw new SpaceError(413, 'ETOOLARGE', `文件超过上限（${Math.round(MAX_SPACE_FILE_SIZE / 1024 / 1024)}MB）`);
+    }
+    let nodeId: string;
+    let nodeName: string;
+    if (input.nodeId) {
+      const { space, node } = await this.requireNode(spaceId, actor, input.nodeId, 'edit');
+      this.assertWritable(space);
+      if (node.type !== 'file') throw new SpaceError(422, 'ETYPE', '只能对 file 节点追加版本');
+      nodeId = node.id;
+      nodeName = node.name;
+    } else {
+      const name = String(input.name ?? '').trim();
+      if (!name) throw new SpaceError(422, 'ENAME', '新文件需要 name');
+      const created = await this.createNode(spaceId, actor, {
+        parentId: input.parentId ?? null, type: 'file', name,
+      });
+      nodeId = String(created.id);
+      nodeName = name;
+    }
+    const sha = createHash('sha256').update(content).digest('hex');
+    const [row] = await this.db
+      .select({ current: sql<number>`COALESCE(MAX(${spaceFileVersions.version}), 0)` })
+      .from(spaceFileVersions)
+      .where(eq(spaceFileVersions.nodeId, nodeId));
+    const versionNo = Number(row?.current ?? 0) + 1;
+    const key = path.join(this.storageDir, 'spaces', nodeId, `v${versionNo}`);
+    fs.mkdirSync(path.dirname(key), { recursive: true });
+    fs.writeFileSync(key, content);
+    await this.db.insert(spaceFileVersions).values({
+      nodeId, version: versionNo, size: content.length, sha256: sha, storageKey: key, uploadedBy: actor.userId,
+    });
+    await this.db
+      .update(spaceNodes)
+      .set({ updatedBy: actor.userId, updatedAt: new Date() })
+      .where(eq(spaceNodes.id, nodeId));
+    // 20 版滚动：淘汰最旧（与 deliverables / spaceDocVersions 同一窗口语义）
+    const stale = await this.db
+      .select()
+      .from(spaceFileVersions)
+      .where(and(eq(spaceFileVersions.nodeId, nodeId), lt(spaceFileVersions.version, versionNo - SPACE_VERSIONS_KEEP + 1)));
+    for (const oldRow of stale) {
+      fs.rmSync(oldRow.storageKey, { force: true });
+      await this.db.delete(spaceFileVersions)
+        .where(and(eq(spaceFileVersions.nodeId, oldRow.nodeId), eq(spaceFileVersions.version, oldRow.version)));
+    }
+    await this.audit(actor.userId, 'file.upload', nodeId, { spaceId, name: nodeName, version: versionNo, size: content.length });
+    await this.emit(spaceId, 'node.updated', { nodeId, name: nodeName, fileVersion: versionNo }, actor.userId);
+    return { nodeId, name: nodeName, versionNo, size: content.length, sha256: sha };
+  }
+
+  async listFileVersions(
+    spaceId: string, actor: SpaceActor, nodeId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    await this.requireNode(spaceId, actor, nodeId, 'view');
+    const rows = await this.db
+      .select({ version: spaceFileVersions.version, size: spaceFileVersions.size, sha256: spaceFileVersions.sha256, createdAt: spaceFileVersions.createdAt })
+      .from(spaceFileVersions)
+      .where(eq(spaceFileVersions.nodeId, nodeId))
+      .orderBy(desc(spaceFileVersions.version));
+    return rows;
+  }
+
+  async downloadFile(
+    spaceId: string, actor: SpaceActor, nodeId: string, version?: number,
+  ): Promise<{ name: string; contentBase64: string; sha256: string; versionNo: number } | null> {
+    if (!this.storageDir) throw new SpaceError(503, 'ENOSTORAGE', '服务端未配置文件卷存储');
+    const { node } = await this.requireNode(spaceId, actor, nodeId, 'view');
+    const rows = version
+      ? await this.db.select().from(spaceFileVersions)
+          .where(and(eq(spaceFileVersions.nodeId, nodeId), eq(spaceFileVersions.version, version))).limit(1)
+      : await this.db.select().from(spaceFileVersions)
+          .where(eq(spaceFileVersions.nodeId, nodeId)).orderBy(desc(spaceFileVersions.version)).limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      name: node.name,
+      contentBase64: fs.readFileSync(row.storageKey).toString('base64'),
+      sha256: row.sha256,
+      versionNo: row.version,
+    };
   }
 }

@@ -58,7 +58,8 @@ beforeAll(async () => {
   await admin.query(`CREATE DATABASE ${DB_NAME}`).catch(() => undefined);
   await admin.end();
 
-  const boot = await bootstrap({ databaseUrl: DATABASE_URL, jwtSecret: 'x'.repeat(40) });
+  const storageDir = (await import('node:fs')).mkdtempSync((await import('node:path')).join((await import('node:os')).tmpdir(), 't52-files-'));
+  const boot = await bootstrap({ databaseUrl: DATABASE_URL, jwtSecret: 'x'.repeat(40), storageDir });
   app = boot.app;
   deps = boot.deps;
   baseUrl = `http://127.0.0.1:${boot.port}`;
@@ -504,4 +505,50 @@ describe('T52.3 事件推流：since 游标 + 200 条上限', () => {
     expect(capped.events.length).toBe(200);
     expect(capped.lastSeq).toBe(start + 204);
   });
+
+// ---------------------------------------------------------------- T52.5 文件上传
+describe('T52.5 空间文件上传：版本链/权限/校验', () => {
+  it('上传建 file 节点 → 下载往返一致；同节点重传产生版本链', async () => {
+    if (!pgUp) return;
+    const content = Buffer.from('验收文件内容-第一版');
+    const up = await api('POST', `/spaces/${spaceId}/files`, {
+      name: '报告.pdf', contentBase64: content.toString('base64'),
+    }, aliceToken);
+    expect(up.status).toBe(200);
+    const nodeId = (up.json as { nodeId: string }).nodeId;
+    expect((up.json as { versionNo: number }).versionNo).toBe(1);
+
+    const up2 = await api('POST', `/spaces/${spaceId}/files`, {
+      nodeId, contentBase64: Buffer.from('第二版内容').toString('base64'),
+    }, aliceToken);
+    expect(up2.status).toBe(200);
+    expect((up2.json as { versionNo: number }).versionNo).toBe(2);
+
+    const versions = await api('GET', `/spaces/${spaceId}/files/${nodeId}/versions`, undefined, aliceToken);
+    expect(versions.status).toBe(200);
+    expect((versions.json as unknown as unknown[]).length).toBe(2);
+
+    const dl = await api('GET', `/spaces/${spaceId}/files/${nodeId}/download`, undefined, aliceToken);
+    expect(dl.status).toBe(200);
+    expect(Buffer.from((dl.json as { contentBase64: string }).contentBase64, 'base64').toString()).toBe('第二版内容');
+    const dl1 = await api('GET', `/spaces/${spaceId}/files/${nodeId}/download?version=1`, undefined, aliceToken);
+    expect(Buffer.from((dl1.json as { contentBase64: string }).contentBase64, 'base64').toString()).toBe('验收文件内容-第一版');
+    const sha = (dl.json as { sha256: string }).sha256;
+    expect(sha).toBe(createHash('sha256').update('第二版内容').digest('hex'));
+  });
+
+  it('viewer 不能上传（403）；空内容 422；版本不存在 404', async () => {
+    if (!pgUp) return;
+    const created = await api('POST', `/spaces/${spaceId}/files`, {
+      name: 'bob.bin', contentBase64: Buffer.from('x').toString('base64'),
+    }, bobToken);
+    expect(created.status).toBe(403);
+    const empty = await api('POST', `/spaces/${spaceId}/files`, {
+      name: 'empty.bin', contentBase64: '',
+    }, aliceToken);
+    expect(empty.status).toBe(422);
+    const missing = await api('GET', `/spaces/${spaceId}/files/00000000-0000-4000-8000-000000000000/download`, undefined, aliceToken);
+    expect([403, 404]).toContain(missing.status);
+  });
+});
 });

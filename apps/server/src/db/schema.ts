@@ -302,6 +302,21 @@ export const spaceDocVersions = pgTable(
   (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
 );
 
+/** file 节点的二进制版本：内容落卷（storageKey），元数据在 PG（T52.5 上传）。 */
+export const spaceFileVersions = pgTable(
+  'space_file_versions',
+  {
+    nodeId: uuid('node_id').notNull(),
+    version: integer('version').notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    storageKey: text('storage_key').notNull(),
+    uploadedBy: uuid('uploaded_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
+);
+
 export const comments = pgTable('comments', {
   id: uuid('id').defaultRandom().primaryKey(),
   nodeId: uuid('node_id').notNull(),

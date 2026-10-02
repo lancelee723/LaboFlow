@@ -635,6 +635,58 @@ class CoreController {
     return this.space(this.deps.spaces.tree(id, { userId: actor.userId, teamId: actor.teamId }));
   }
 
+  /** 文件上传（T52.5）：body.file 透传 base64（≤200MB，同交付物约束）。
+   *  multipart 由外层网关处理时走 @FastifyMulticast；这里只收 JSON。 */
+  @Post('spaces/:id/files')
+  @HttpCode(200)
+  async uploadSpaceFile(
+    @Req() req: FastifyRequest & { raw: { bodyLimit?: number } },
+    @Param('id') id: string,
+    @Body() body: { nodeId?: string; parentId?: string | null; name?: string; contentBase64?: string },
+  ) {
+    const actor = requireActor(req);
+    try {
+      return await this.deps.spaces.uploadFile(id, { userId: actor.userId, teamId: actor.teamId }, {
+        nodeId: body.nodeId,
+        parentId: body.parentId ?? null,
+        name: body.name,
+        contentBase64: String(body.contentBase64 ?? ''),
+      });
+    } catch (err) {
+      if (err instanceof SpaceError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  @Get('spaces/:id/files/:nid/versions')
+  async spaceFileVersions(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    try {
+      return await this.deps.spaces.listFileVersions(id, { userId: actor.userId, teamId: actor.teamId }, nid);
+    } catch (err) {
+      if (err instanceof SpaceError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  @Get('spaces/:id/files/:nid/download')
+  async downloadSpaceFile(
+    @Req() req: FastifyRequest & { query: Record<string, string> },
+    @Param('id') id: string,
+    @Param('nid') nid: string,
+  ) {
+    const actor = requireActor(req);
+    const version = (req.query as { version?: string }).version ? Number((req.query as { version?: string }).version) : undefined;
+    try {
+      const r = await this.deps.spaces.downloadFile(id, { userId: actor.userId, teamId: actor.teamId }, nid, version);
+      if (!r) throw new HttpException('版本不存在', 404);
+      return r;
+    } catch (err) {
+      if (err instanceof SpaceError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
   @Patch('spaces/:id/nodes/:nid')
   async updateSpaceNode(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Body() body: { name?: string; parentId?: string | null; sortKey?: number }) {
     const actor = requireActor(req);
@@ -1126,7 +1178,7 @@ export async function bootstrap(options: {
       options.jwtSecret,
     )),
     expertPacks: new ExpertPackService(db),
-    spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail)),
+    spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail), options.storageDir),
     wechatMp: new WechatMpService(db, SecretBox.forServer(
       options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
       options.jwtSecret,

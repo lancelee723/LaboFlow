@@ -1887,6 +1887,26 @@ export const api = {
     invoke<import("@pi-desktop/shared").SpaceNode[]>(IPC.invoke.spaceTree, {
       spaceId,
     }),
+  spaceFileUpload: (input: {
+    spaceId: string;
+    nodeId?: string;
+    parentId?: string | null;
+    name?: string;
+    contentBase64: string;
+  }) =>
+    invoke<{ nodeId: string; name: string; versionNo: number; size: number; sha256: string }>(
+      IPC.invoke.spaceFileUpload,
+      input,
+    ),
+  spaceFileVersions: (input: { spaceId: string; nodeId: string }) =>
+    invoke<Array<Record<string, unknown>>>(IPC.invoke.spaceFileVersions, input),
+  spaceFileDownload: (input: { spaceId: string; nodeId: string; version?: number }) =>
+    invoke<{
+      name: string;
+      contentBase64: string;
+      sha256: string;
+      versionNo: number;
+    } | null>(IPC.invoke.spaceFileDownload, input),
   composerAttachSpaceDoc: (input: {
     sessionId: string;
     spaceId: string;

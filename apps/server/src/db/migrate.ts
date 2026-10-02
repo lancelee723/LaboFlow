@@ -346,6 +346,22 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       `CREATE INDEX IF NOT EXISTS idx_wechat_mp_pending_bot ON wechat_mp_pending(bot_id, created_at);`,
     ],
   },
+  {
+    version: 7,
+    name: 'space-files',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS space_file_versions (
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        uploaded_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (node_id, version)
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {

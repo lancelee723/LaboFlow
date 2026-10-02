@@ -123,6 +123,54 @@ export function SpacePage() {
     }
   }, [activeSpaceId, fail]);
 
+  /** T52.5 upload: read chosen files, land them as file nodes under the
+   * selected folder (or the current node's parent), then select the last one. */
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const uploadChosen = async (files: FileList | null) => {
+    if (!files?.length || !activeSpaceId || uploading) return;
+    const parentId = selectedNode
+      ? selectedNode.type === "folder"
+        ? selectedNode.id
+        : selectedNode.parentId
+      : null;
+    setUploading(true);
+    try {
+      let lastNodeId = "";
+      for (const file of Array.from(files)) {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        const result = await api.spaceFileUpload({
+          spaceId: activeSpaceId,
+          parentId,
+          name: file.name,
+          contentBase64: btoa(binary),
+        });
+        lastNodeId = result.nodeId;
+      }
+      await loadTree();
+      if (lastNodeId) {
+        setSelectedId(lastNodeId);
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          if (parentId) next.add(parentId);
+          return next;
+        });
+      }
+      showToast(t("space.uploadDone", { count: files.length }), { variant: "success" });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
+
   const loadComments = useCallback(async () => {
     if (!activeSpaceId || !selectedId) {
       setComments([]);
@@ -530,14 +578,23 @@ export function SpacePage() {
             />
           )}
 
-          <span className="mt-auto text-center text-xs opacity-40" title={t("space.uploadNextBatch")}>
+          <span className="mt-auto text-center text-xs opacity-40">
+            <input
+              ref={uploadInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              data-testid="space-upload-input"
+              onChange={(event) => void uploadChosen(event.target.files)}
+            />
             <button
               type="button"
-              className="w-full rounded-sm border border-dashed px-2 py-1.5 opacity-70"
-              disabled
-              title={t("space.uploadNextBatch")}
+              className="w-full rounded-sm border border-dashed px-2 py-1.5 opacity-70 enabled:hover:opacity-100"
+              disabled={!activeSpaceId || Boolean(activeSpace?.archivedAt) || uploading}
+              title={t("space.upload")}
+              onClick={() => uploadInputRef.current?.click()}
             >
-              {t("space.upload")}
+              {uploading ? t("space.uploading") : t("space.upload")}
             </button>
           </span>
         </aside>

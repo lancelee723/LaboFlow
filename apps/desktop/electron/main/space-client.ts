@@ -135,6 +135,36 @@ export function createSpaceClient(deps: SpaceClientDeps) {
         seq?: number;
       }>;
     },
+    uploadFile(
+      spaceId: string,
+      input: { nodeId?: string; parentId?: string | null; name?: string; contentBase64: string },
+    ): Promise<{ nodeId: string; name: string; versionNo: number; size: number; sha256: string }> {
+      return deps.postJson(`/spaces/${id(spaceId)}/files`, input) as Promise<{
+        nodeId: string;
+        name: string;
+        versionNo: number;
+        size: number;
+        sha256: string;
+      }>;
+    },
+    listFileVersions(spaceId: string, nodeId: string): Promise<Array<Record<string, unknown>>> {
+      return deps.getJson(`/spaces/${id(spaceId)}/files/${id(nodeId)}/versions`) as Promise<
+        Array<Record<string, unknown>>
+      >;
+    },
+    downloadFile(
+      spaceId: string,
+      nodeId: string,
+      version?: number,
+    ): Promise<{ name: string; contentBase64: string; sha256: string; versionNo: number } | null> {
+      const query = version === undefined ? "" : `?version=${version}`;
+      return deps.getJson(`/spaces/${id(spaceId)}/files/${id(nodeId)}/download${query}`) as Promise<{
+        name: string;
+        contentBase64: string;
+        sha256: string;
+        versionNo: number;
+      } | null>;
+    },
     listComments(spaceId: string, nodeId: string): Promise<SpaceComment[]> {
       return deps.getJson(`/spaces/${id(spaceId)}/nodes/${id(nodeId)}/comments`) as Promise<SpaceComment[]>;
     },
@@ -373,6 +403,42 @@ export function createSpaceIpcHost(deps: SpaceIpcHostDeps): SpaceIpcHost {
       );
       handle(IPC.invoke.spaceNodeRestore, async (input: { spaceId?: string; nodeId?: string }) =>
         wrap(() => client.restoreNode(String(input?.spaceId ?? ""), String(input?.nodeId ?? ""))),
+      );
+      handle(
+        IPC.invoke.spaceFileUpload,
+        async (input: {
+          spaceId?: string;
+          nodeId?: string;
+          parentId?: string | null;
+          name?: string;
+          contentBase64?: string;
+        }) =>
+          wrap(() =>
+            client.uploadFile(String(input?.spaceId ?? ""), {
+              ...(typeof input?.nodeId === "string" && input.nodeId ? { nodeId: input.nodeId } : {}),
+              parentId: input?.parentId ?? null,
+              name: input?.name,
+              contentBase64: String(input?.contentBase64 ?? ""),
+            }),
+          ),
+      );
+      handle(
+        IPC.invoke.spaceFileVersions,
+        async (input: { spaceId?: string; nodeId?: string }) =>
+          wrap(() =>
+            client.listFileVersions(String(input?.spaceId ?? ""), String(input?.nodeId ?? "")),
+          ),
+      );
+      handle(
+        IPC.invoke.spaceFileDownload,
+        async (input: { spaceId?: string; nodeId?: string; version?: number }) =>
+          wrap(() =>
+            client.downloadFile(
+              String(input?.spaceId ?? ""),
+              String(input?.nodeId ?? ""),
+              typeof input?.version === "number" ? input.version : undefined,
+            ),
+          ),
       );
       handle(
         IPC.invoke.spaceDocGet,
