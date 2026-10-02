@@ -427,6 +427,7 @@ export const IPC = {
     spaceFileUpload: "pi-desktop/space/file/upload",
     spaceFileVersions: "pi-desktop/space/file/versions",
     spaceFileDownload: "pi-desktop/space/file/download",
+    spaceSearch: "pi-desktop/space/search",
     spaceCommentsList: "pi-desktop/space/comments/list",
     spaceCommentsCreate: "pi-desktop/space/comments/create",
     spaceCommentsReply: "pi-desktop/space/comments/reply",

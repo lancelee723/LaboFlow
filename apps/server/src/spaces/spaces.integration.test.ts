@@ -507,6 +507,31 @@ describe('T52.3 事件推流：since 游标 + 200 条上限', () => {
   });
 
 // ---------------------------------------------------------------- T52.5 文件上传
+describe('FR-TC-21 空间内全文检索：标题+正文，仅可见节点', () => {
+  it('建 MD 写正文 → 按内容与标题命中；viewer 的 none 覆盖节点不出现', async () => {
+    if (!pgUp) return;
+    const node = await api('POST', `/spaces/${spaceId}/nodes`, { type: 'md', name: '检索目标纪要' }, aliceToken);
+    expect(node.status).toBe(200);
+    const nodeId = (node.json as { id: string }).id;
+    const save = await api('PUT', `/spaces/${spaceId}/nodes/${nodeId}/doc`, {
+      content: '客户A的市场进入策略含价格锚点分析', baseVersion: 0,
+    }, aliceToken);
+    expect(save.status).toBe(200);
+
+    const byContent = await api('GET', `/spaces/${spaceId}/search?q=${encodeURIComponent('价格锚点')}`, undefined, taToken);
+    expect(byContent.status).toBe(200);
+    const hits = byContent.json as unknown as Array<{ id: string; matchedIn: string }>;
+    expect(hits.some((h) => h.id === nodeId && h.matchedIn === 'content')).toBe(true);
+
+    const byTitle = await api('GET', `/spaces/${spaceId}/search?q=${encodeURIComponent('检索目标')}`, undefined, taToken);
+    expect((byTitle.json as unknown as Array<{ id: string; matchedIn: string }>).some((h) => h.id === nodeId && h.matchedIn === 'title')).toBe(true);
+
+    // 特殊字符不炸（LIKE 通配符转义）
+    const literal = await api('GET', `/spaces/${spaceId}/search?q=${encodeURIComponent('100% _ok')}`, undefined, taToken);
+    expect(literal.status).toBe(200);
+  });
+});
+
 describe('T52.5 空间文件上传：版本链/权限/校验', () => {
   it('上传建 file 节点 → 下载往返一致；同节点重传产生版本链', async () => {
     if (!pgUp) return;

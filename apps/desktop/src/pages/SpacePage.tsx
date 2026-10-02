@@ -21,7 +21,7 @@ import {
   IconUser,
   IconUsers,
 } from "../components/icons";
-import { SpaceTree } from "../components/space/SpaceTree";
+import { NodeTypeIcon, SpaceTree } from "../components/space/SpaceTree";
 import { MdDocEditor } from "../components/space/MdDocEditor";
 import { CsvEditor } from "../components/space/CsvEditor";
 import { HtmlCollabEditor } from "../components/space/HtmlCollabEditor";
@@ -170,6 +170,39 @@ export function SpacePage() {
       if (uploadInputRef.current) uploadInputRef.current.value = "";
     }
   };
+
+  // FR-TC-21: space-scoped full-text search (debounced, visibility-filtered
+  // server-side). Results replace the tree while a query is active.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<Record<string, unknown>>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query || !activeSpaceId) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      let cancelled = false;
+      api
+        .spaceSearch({ spaceId: activeSpaceId, query })
+        .then((hits) => {
+          if (!cancelled) setSearchResults(hits ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearchLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, activeSpaceId]);
 
   const loadComments = useCallback(async () => {
     if (!activeSpaceId || !selectedId) {
@@ -546,6 +579,30 @@ export function SpacePage() {
                 ))}
               </ul>
             )
+          ) : searchQuery.trim() ? (
+            <ul className="min-h-0 flex-1 overflow-auto text-sm" data-testid="space-search-results">
+              {searchResults.map((hit) => (
+                <li key={String(hit.id)}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left hover:bg-black/5"
+                    onClick={() => {
+                      setSelectedId(String(hit.id));
+                      setSearchQuery("");
+                    }}
+                  >
+                    <NodeTypeIcon type={String(hit.type) as SpaceNode["type"]} />
+                    <span className="truncate">{String(hit.name)}</span>
+                    <span className="ml-auto text-[10px] opacity-50">
+                      {t(hit.matchedIn === "title" ? "space.searchTitle" : "space.searchContent")}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {!searchResults.length && !searchLoading ? (
+                <li className="px-2 py-1 text-xs opacity-60">{t("space.searchEmpty")}</li>
+              ) : null}
+            </ul>
           ) : (
             <SpaceTree
               nodes={nodes}
@@ -577,6 +634,18 @@ export function SpacePage() {
               disabled={!activeSpaceId || Boolean(activeSpace?.archivedAt)}
             />
           )}
+
+          {activeSpaceId && !recycleMode ? (
+            <input
+              type="search"
+              className="w-full rounded-md border px-2 py-1 text-xs"
+              style={{ borderColor: "var(--ds-border)" }}
+              placeholder={t("space.searchPlaceholder")}
+              value={searchQuery}
+              data-testid="space-search-input"
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          ) : null}
 
           <span className="mt-auto text-center text-xs opacity-40">
             <input

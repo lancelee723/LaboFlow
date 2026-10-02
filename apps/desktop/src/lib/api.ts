@@ -1898,6 +1898,8 @@ export const api = {
       IPC.invoke.spaceFileUpload,
       input,
     ),
+  spaceSearch: (input: { spaceId: string; query: string; limit?: number }) =>
+    invoke<Array<Record<string, unknown>>>(IPC.invoke.spaceSearch, input),
   spaceFileVersions: (input: { spaceId: string; nodeId: string }) =>
     invoke<Array<Record<string, unknown>>>(IPC.invoke.spaceFileVersions, input),
   spaceFileDownload: (input: { spaceId: string; nodeId: string; version?: number }) =>

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, inArray, lt, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
@@ -440,6 +440,37 @@ export class SpaceService {
   }
 
   // ============================ 文档（MD/CSV 版本链） ============================
+
+  /** 空间内全文检索（FR-TC-21）：标题 + MD/CSV 最新版内容，ILIKE 起步
+   * （NFR-TC2 规模约束内够用）；只返回调用者可见节点。 */
+  async search(
+    spaceId: string, actor: SpaceActor, rawQuery: string, limit = 50,
+  ): Promise<Array<Record<string, unknown>>> {
+    const { space, perm: spacePerm } = await this.requireSpace(spaceId, actor.userId);
+    const query = rawQuery.trim();
+    if (!query) return [];
+    const nodes = await this.db.select().from(spaceNodes).where(eq(spaceNodes.spaceId, space.id));
+    const { visible, permOf } = await this.visibility(space, spacePerm, actor);
+    const needle = `%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const contentHits = await this.db
+      .select({ nodeId: spaceDocVersions.nodeId })
+      .from(spaceDocVersions)
+      .innerJoin(spaceDocs, and(eq(spaceDocs.nodeId, spaceDocVersions.nodeId), eq(spaceDocs.currentVersion, spaceDocVersions.version)))
+      .where(ilike(spaceDocVersions.content, needle));
+    const contentHitIds = new Set(contentHits.map((row) => row.nodeId));
+    const out: Array<Record<string, unknown>> = [];
+    for (const node of nodes) {
+      if (!visible.has(node.id) || node.deletedAt) continue;
+      const inTitle = node.name.toLowerCase().includes(query.toLowerCase());
+      const inContent = contentHitIds.has(node.id);
+      if (!inTitle && !inContent) continue;
+      out.push({ ...this.nodeDto(node, permOf(node.id)), matchedIn: inTitle ? 'title' : 'content' });
+      if (out.length >= Math.max(1, Math.min(limit, 100))) break;
+    }
+    // 标题命中排前，其余按树序
+    out.sort((a, b) => Number(b.matchedIn === 'title') - Number(a.matchedIn === 'title'));
+    return out;
+  }
 
   async getDoc(spaceId: string, actor: SpaceActor, nodeId: string, version?: number): Promise<Record<string, unknown>> {
     const { node } = await this.requireNode(spaceId, actor, nodeId, 'view');

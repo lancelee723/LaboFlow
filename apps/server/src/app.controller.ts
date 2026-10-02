@@ -635,6 +635,15 @@ class CoreController {
     return this.space(this.deps.spaces.tree(id, { userId: actor.userId, teamId: actor.teamId }));
   }
 
+  /** 空间内全文检索（FR-TC-21）：标题 + MD/CSV 正文，仅可见节点。 */
+  @Get('spaces/:id/search')
+  async searchSpace(@Req() req: FastifyRequest & { query: Record<string, string> }, @Param('id') id: string) {
+    const actor = requireActor(req);
+    const q = String((req.query as { q?: string }).q ?? '');
+    const limit = Number((req.query as { limit?: string }).limit ?? '');
+    return this.space(this.deps.spaces.search(id, { userId: actor.userId, teamId: actor.teamId }, q, Number.isFinite(limit) ? limit : undefined));
+  }
+
   /** 文件上传（T52.5）：body.file 透传 base64（≤200MB，同交付物约束）。
    *  multipart 由外层网关处理时走 @FastifyMulticast；这里只收 JSON。 */
   @Post('spaces/:id/files')

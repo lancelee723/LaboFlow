@@ -147,6 +147,13 @@ export function createSpaceClient(deps: SpaceClientDeps) {
         sha256: string;
       }>;
     },
+    search(spaceId: string, query: string, limit?: number): Promise<Array<Record<string, unknown>>> {
+      const params = new URLSearchParams({ q: query });
+      if (limit !== undefined) params.set("limit", String(limit));
+      return deps.getJson(`/spaces/${id(spaceId)}/search?${params.toString()}`) as Promise<
+        Array<Record<string, unknown>>
+      >;
+    },
     listFileVersions(spaceId: string, nodeId: string): Promise<Array<Record<string, unknown>>> {
       return deps.getJson(`/spaces/${id(spaceId)}/files/${id(nodeId)}/versions`) as Promise<
         Array<Record<string, unknown>>
@@ -420,6 +427,17 @@ export function createSpaceIpcHost(deps: SpaceIpcHostDeps): SpaceIpcHost {
               name: input?.name,
               contentBase64: String(input?.contentBase64 ?? ""),
             }),
+          ),
+      );
+      handle(
+        IPC.invoke.spaceSearch,
+        async (input: { spaceId?: string; query?: string; limit?: number }) =>
+          wrap(() =>
+            client.search(
+              String(input?.spaceId ?? ""),
+              String(input?.query ?? ""),
+              typeof input?.limit === "number" ? input.limit : undefined,
+            ),
           ),
       );
       handle(
