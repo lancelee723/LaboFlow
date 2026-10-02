@@ -1898,6 +1898,28 @@ export const api = {
       IPC.invoke.spaceFileUpload,
       input,
     ),
+  spaceYjsAttach: (input: { spaceId: string; nodeId: string }) =>
+    invoke<{ channel: string }>(IPC.invoke.spaceYjsAttach, input),
+  spaceYjsDetach: (input: { channel: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceYjsDetach, input),
+  spaceYjsSend: (input: { channel: string; data: ArrayBuffer }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceYjsSend, input),
+  onSpaceYjsFrame: (
+    listener: (frame: {
+      channel: string;
+      data?: ArrayBuffer;
+      closed?: { code: number; reason: string };
+    }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.spaceYjsFrame, (payload) =>
+      listener((payload ?? {}) as {
+        channel: string;
+        data?: ArrayBuffer;
+        closed?: { code: number; reason: string };
+      }),
+    );
+  },
   spaceSearch: (input: { spaceId: string; query: string; limit?: number }) =>
     invoke<Array<Record<string, unknown>>>(IPC.invoke.spaceSearch, input),
   spaceFileVersions: (input: { spaceId: string; nodeId: string }) =>

@@ -2998,6 +2998,15 @@ export const ptBR = {
     },
     html: {
       placeholder: "HTML co-editing (Yjs CRDT) arrives in a later batch (T52.12/13).",
+      connected: 'Ao vivo',
+      connecting: 'Conectando…',
+      closed: 'Desconectado',
+      preview: 'Pré-visualizar',
+      edit: 'Editar',
+      export: 'Exportar HTML',
+      removeBlock: 'Remover',
+      imageSrc: 'URL da imagem',
+      addBlock: 'Adicionar bloco',
     },
     file: {
       placeholder: "File preview and upload arrive in the next batch (T52.5).",

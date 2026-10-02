@@ -2998,6 +2998,15 @@ export const es = {
     },
     html: {
       placeholder: "La coedición HTML (Yjs CRDT) llegará en un lote posterior (T52.12/13).",
+      connected: 'En vivo',
+      connecting: 'Conectando…',
+      closed: 'Desconectado',
+      preview: 'Vista previa',
+      edit: 'Editar',
+      export: 'Exportar HTML',
+      removeBlock: 'Quitar',
+      imageSrc: 'URL de imagen',
+      addBlock: 'Añadir bloque',
     },
     file: {
       placeholder: "La vista previa y subida de archivos llegan en el siguiente lote (T52.5).",

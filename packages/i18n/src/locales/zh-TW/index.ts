@@ -2998,6 +2998,15 @@ export const zhTW = {
     },
     html: {
       placeholder: "HTML 協同編輯（Yjs CRDT）將在後續批次提供（T52.12/13）。",
+      connected: '即時協同中',
+      connecting: '連線中…',
+      closed: '已斷線',
+      preview: '預覽',
+      edit: '編輯',
+      export: '匯出 HTML',
+      removeBlock: '刪除',
+      imageSrc: '圖片 URL',
+      addBlock: '新增塊',
     },
     file: {
       placeholder: "檔案預覽與上傳將在下一批提供（T52.5）。",

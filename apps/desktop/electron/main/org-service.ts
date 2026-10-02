@@ -110,6 +110,37 @@ export class OrgService {
     );
   }
 
+  /**
+   * Open an authenticated websocket to the org server (T52.13 yjs sync). The
+   * access token stays in the main process — the renderer only ever sees the
+   * binary protocol frames forwarded over Electron IPC.
+   */
+  async openOrgWebSocket(
+    path: string,
+    handlers: {
+      onOpen: () => void;
+      onMessage: (data: ArrayBuffer) => void;
+      onClose: (code: number, reason: string) => void;
+    },
+  ): Promise<{ send: (data: ArrayBuffer) => void; close: () => void }> {
+    const session = await this.currentSession();
+    if (!session) throw Object.assign(new Error("not signed in"), { errorCode: "ORG_NOT_SIGNED_IN" });
+    const url = `${session.serverUrl.replace(/^http/, "ws")}${path}?token=${encodeURIComponent(session.accessToken)}`;
+    const socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+    socket.onopen = () => handlers.onOpen();
+    socket.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) handlers.onMessage(event.data);
+    };
+    socket.onclose = (event) => handlers.onClose(event.code, event.reason);
+    return {
+      send: (data) => {
+        if (socket.readyState === socket.OPEN) socket.send(data);
+      },
+      close: () => socket.close(),
+    };
+  }
+
   private async api(
     session: StoredSession,
     path: string,

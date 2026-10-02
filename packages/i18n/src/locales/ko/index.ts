@@ -2998,6 +2998,15 @@ export const ko = {
     },
     html: {
       placeholder: "HTML 공동 편집(Yjs CRDT)은 이후 배치에서 제공됩니다 (T52.12/13).",
+      connected: '실시간',
+      connecting: '연결 중…',
+      closed: '연결 끊김',
+      preview: '미리보기',
+      edit: '편집',
+      export: 'HTML 내보내기',
+      removeBlock: '삭제',
+      imageSrc: '이미지 URL',
+      addBlock: '블록 추가',
     },
     file: {
       placeholder: "파일 미리보기와 업로드는 다음 배치에서 제공됩니다 (T52.5).",

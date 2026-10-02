@@ -35,6 +35,7 @@ import { OrgService } from "../org-service";
 import { OrgWorkspaceHub } from "../org-workspaces";
 import { createChannelRegistryHost } from "../channels/registry";
 import { createSpaceClient, createSpaceIpcHost } from "../space-client";
+import { createYjsBridge } from "./yjs-bridge";
 import { createChannelCredentialStore } from "../channels/credential-store";
 import { createFeishuAdapterFactory } from "../channels/feishu";
 import { createWecomAdapterFactory } from "../channels/wecom";
@@ -201,6 +202,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
   // result is sent back over the channel adapter.
   let spaceHost: ReturnType<typeof createSpaceIpcHost> | undefined;
   let spaceClient: ReturnType<typeof createSpaceClient> | undefined;
+  let yjsBridgeDisposal: (() => void) | undefined;
   /** Org-session accessors for channel adapters that need them (wechat_mp). */
   const orgChannelContext: {
     tokenProvider?: () => Promise<string>;
@@ -525,6 +527,18 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     channelHost.registerIpc(laboflowHandle);
     // Module 02: team-space tree/docs/comments/revisions/events IPC.
     spaceHost?.registerIpc(laboflowHandle);
+
+    // Module 02/T52.13: yjs CRDT frame bridge (token stays main-side).
+    yjsBridgeDisposal = createYjsBridge({
+      orgService,
+      handle: laboflowHandle,
+      handleWithEvent: laboflowHandleWithEvent,
+      forward: (channel, payload) =>
+        sendToRenderer(IPC.event.spaceYjsFrame, { channel, ...payload }),
+      assertMainWindowSender: (event) => deps.assertMainWindowSender(event),
+      warn: (context, message) =>
+        logger.app("space", "info", "yjs bridge", { data: `${context}: ${message}` }),
+    }).dispose;
 
     laboflowHandleWithEvent(
       IPC.invoke.composerAttachSession,

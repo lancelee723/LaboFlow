@@ -2998,6 +2998,15 @@ export const zhCN = {
     },
     html: {
       placeholder: "HTML 协同编辑（Yjs CRDT）将在后续批次提供（T52.12/13）。",
+      connected: '实时协同中',
+      connecting: '连接中…',
+      closed: '已断开',
+      preview: '预览',
+      edit: '编辑',
+      export: '导出 HTML',
+      removeBlock: '删除',
+      imageSrc: '图片 URL',
+      addBlock: '添加块',
     },
     file: {
       placeholder: "文件预览与上传将在下一批提供（T52.5）。",

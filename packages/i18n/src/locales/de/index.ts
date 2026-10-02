@@ -2998,6 +2998,15 @@ export const de = {
     },
     html: {
       placeholder: "Gemeinsames HTML-Bearbeiten (Yjs CRDT) folgt in einem späteren Batch (T52.12/13).",
+      connected: 'Live',
+      connecting: 'Verbinde…',
+      closed: 'Getrennt',
+      preview: 'Vorschau',
+      edit: 'Bearbeiten',
+      export: 'HTML exportieren',
+      removeBlock: 'Entfernen',
+      imageSrc: 'Bild-URL',
+      addBlock: 'Block hinzufügen',
     },
     file: {
       placeholder: "Dateivorschau und Upload folgen im nächsten Batch (T52.5).",

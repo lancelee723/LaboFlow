@@ -2998,6 +2998,15 @@ export const tr = {
     },
     html: {
       placeholder: "HTML ortak düzenleme (Yjs CRDT) sonraki bir aşamada gelecek (T52.12/13).",
+      connected: 'Canlı',
+      connecting: 'Bağlanıyor…',
+      closed: 'Bağlantı kesildi',
+      preview: 'Önizleme',
+      edit: 'Düzenle',
+      export: 'HTML dışa aktar',
+      removeBlock: 'Kaldır',
+      imageSrc: 'Görsel URL',
+      addBlock: 'Blok ekle',
     },
     file: {
       placeholder: "Dosya önizleme ve yükleme bir sonraki aşamada gelecek (T52.5).",

@@ -2998,6 +2998,15 @@ export const fr = {
     },
     html: {
       placeholder: "La coédition HTML (Yjs CRDT) arrivera dans un lot ultérieur (T52.12/13).",
+      connected: 'En direct',
+      connecting: 'Connexion…',
+      closed: 'Déconnecté',
+      preview: 'Aperçu',
+      edit: 'Modifier',
+      export: 'Exporter en HTML',
+      removeBlock: 'Supprimer',
+      imageSrc: "URL de l'image",
+      addBlock: 'Ajouter un bloc',
     },
     file: {
       placeholder: "L'aperçu et le téléversement de fichiers arrivent au prochain lot (T52.5).",

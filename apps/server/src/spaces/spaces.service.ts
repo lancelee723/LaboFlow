@@ -873,6 +873,11 @@ export class SpaceService {
     return { ok: true };
   }
 
+  /** yjs hub 的连接鉴权（T52.13）：view 档即可打开 html 文档；none 伪装 404。 */
+  async assertHtmlDocAccess(spaceId: string, userId: string, nodeId: string): Promise<void> {
+    await this.requireNode(spaceId, { userId, teamId: null }, nodeId, 'view');
+  }
+
   // ============================ 文件上传（T52.5：file 走卷存储） ============================
 
   /** 上传为新 file 节点，或对既有 file 节点追加版本。20 版滚动窗口与交付物一致。 */

@@ -2996,6 +2996,15 @@ export const en = {
     },
     html: {
       placeholder: "HTML co-editing (Yjs CRDT) arrives in a later batch (T52.12/13).",
+      connected: 'Live',
+      connecting: 'Connecting…',
+      closed: 'Disconnected',
+      preview: 'Preview',
+      edit: 'Edit',
+      export: 'Export HTML',
+      removeBlock: 'Remove',
+      imageSrc: 'Image URL',
+      addBlock: 'Add block',
     },
     file: {
       placeholder: "File preview and upload arrive in the next batch (T52.5).",

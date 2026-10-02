@@ -721,7 +721,7 @@ export function SpacePage() {
               onDocLoaded={setDoc}
             />
           ) : selectedNode.type === "html" ? (
-            <HtmlCollabEditor node={selectedNode} />
+            <HtmlCollabEditor node={selectedNode} spaceId={activeSpaceId ?? ""} />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center" style={{ borderColor: "var(--ds-border-strong)" }}>
               <span className="text-sm">{selectedNode.name}</span>

@@ -22,6 +22,7 @@ import { KbServerService, KbError, type KbPatchInput } from './kb/kb.service.js'
 import { SecretBox } from './kb/secret-box.js';
 import { ExpertPackService, ExpertPackError } from './experts/expert-packs.service.js';
 import { SpaceService, SpaceError } from './spaces/spaces.service.js';
+import { YjsHub } from './spaces/yjs-hub.js';
 import { WechatMpService, WechatMpError, type WechatMpUpsertInput } from './wechat/wechat-mp.service.js';
 import type { WechatFetchLike } from './wechat/wechat-mp.client.js';
 import { SERVER_VERSION } from './index.js';
@@ -42,6 +43,7 @@ export interface ServerDeps {
   kb: KbServerService;
   expertPacks: ExpertPackService;
   spaces: SpaceService;
+  yjsHub: YjsHub;
   wechatMp: WechatMpService;
 }
 
@@ -1188,6 +1190,10 @@ export async function bootstrap(options: {
     )),
     expertPacks: new ExpertPackService(db),
     spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail), options.storageDir),
+    yjsHub: new YjsHub(db, {
+      assertHtmlDocAccess: (spaceId, nodeId, userId) =>
+        deps.spaces.assertHtmlDocAccess(spaceId, userId, nodeId),
+    }, (message) => console.warn(`[yjs-hub] ${message}`)),
     wechatMp: new WechatMpService(db, SecretBox.forServer(
       options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
       options.jwtSecret,
@@ -1249,6 +1255,22 @@ export async function bootstrap(options: {
       conn.on('close', () => off());
     })();
   });
+  // T52.13: HTML CRDT sync endpoint — same y-protocols wire format as the
+  // standard y-websocket client; JWT + html-node visibility checked per conn.
+  fastify.get('/spaces/:id/yjs/:nodeId', { websocket: true }, (conn: { close: (code: number, reason: string) => void; send: (s: Buffer | string) => void; on: (ev: string, cb: (raw?: Buffer) => void) => void }, req: { params?: Record<string, string>; query?: Record<string, string> }) => {
+    const params = req.params ?? {};
+    const query = req.query ?? {};
+    void (async () => {
+      try {
+        const payload = await deps.auth.verifyToken(query.token ?? '');
+        if (payload.typ !== 'access') throw new Error('bad token');
+        await deps.yjsHub.connect(params.id as string, params.nodeId as string, payload.sub, conn);
+      } catch {
+        conn.close(4001, 'unauthorized');
+      }
+    })();
+  });
+
   const port = options.port ?? 0; // 0 = ephemeral (tests)
   await app.listen(port, '127.0.0.1');
   const address = await app.getUrl();

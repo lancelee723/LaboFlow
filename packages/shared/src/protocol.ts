@@ -428,6 +428,9 @@ export const IPC = {
     spaceFileVersions: "pi-desktop/space/file/versions",
     spaceFileDownload: "pi-desktop/space/file/download",
     spaceSearch: "pi-desktop/space/search",
+    spaceYjsAttach: "pi-desktop/space/yjs/attach",
+    spaceYjsDetach: "pi-desktop/space/yjs/detach",
+    spaceYjsSend: "pi-desktop/space/yjs/send",
     spaceCommentsList: "pi-desktop/space/comments/list",
     spaceCommentsCreate: "pi-desktop/space/comments/create",
     spaceCommentsReply: "pi-desktop/space/comments/reply",
@@ -484,6 +487,7 @@ export const IPC = {
     /** Module 02: space event frames (per-space poll loop in the main
      * process; SPEC §3.2 frame types forwarded verbatim). */
     spaceEvent: "pi-desktop/event/spaceFrame",
+    spaceYjsFrame: "pi-desktop/event/spaceYjsFrame",
     mcpOauth: "pi-desktop/mcp/oauth/event",
     voiceStateChanged: "pi-desktop/voice/event/stateChanged",
     voiceModelProgress: "pi-desktop/voice/event/modelProgress",
