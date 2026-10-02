@@ -380,7 +380,9 @@
 | T6.4.15/16 | feat(slides): 成本预估（~6 万/页）+ stage2 预算闸（PPT_BUDGET_EXCEEDED）+ 工作台页级重生成指令复制 | 3 测试 |
 | T6.4.17 | feat(experts): 专家 .md 分享导出 + FR-E-19 会话级同名优先（org 会话 org 优先，否则个人优先） | 3 测试 |
 
-**验证终态（全绿）**：desktop 3563 用例 0 fail；host-core 697/697；server 209/209；typecheck/build:js 干净。E2E/实机场景（§6 AC-01~06）未执行——按 §6.0 总则需用户逐轮确认后以 computer-use 驱动真实桌面运行。
+**验证终态（全绿）**：desktop 3563 用例 0 fail；host-core 697/697；server 209/209；typecheck/build:js 干净。
+
+**实机验收第一轮（2026-10-03，已完成，见 [acceptance/20261003-031918/ACCEPTANCE-ROUND1.md](acceptance/20261003-031918/ACCEPTANCE-ROUND1.md)）**：AC-01 ✓ 9/9（真实 LLM persona 回复+任务标记）；AC-04 Tier-1 ✓ 3/3（粘贴解析/空值语义/分诊断）；AC-03 核心 ✓ 3/3（通道 chips/直派真实回复/统一历史）；**AC-06 ✗ 未走通**（Stage-1 会话内确认送达后 agent 回合停滞，README 已知模型约束，PPT 管线本批零回归面，换档补验）；AC-02/05 环境阻塞（本机无 PG/WeKnora）。**实机抓到并修复 1 个真缺陷**：六个新 fork handler 的 event 形参误用（laboflowHandle vs WithEvent），助理会话创建实机必炸——已修复并复验。另有死代码清理 7 项（refactor 提交），其中 settleUnattendedAsk 未接线为真 bug。
 
 **仍开放（T6.4.18 + 明确延后项）**：
 - FR-E-17 多专家串行指派（需 mention 派发器的排序模型，见提交说明）。
