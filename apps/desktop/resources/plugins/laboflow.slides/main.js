@@ -524,7 +524,16 @@ async function detectRuntimeCached(maxAgeMs = 5_000) {
  * crash): pendingConfirm lives in memory only. Recover the waiting stage from
  * the pipeline state files on disk so the card never shows "nothing pending"
  * while a project actually awaits confirmation.
+ *
+ * Recovering is bounded in time: an abandoned flow leaves its "submitted"
+ * status on disk forever, and surfacing it on every workbench open turned the
+ * confirmation section into a permanent fixture. Only submissions from the
+ * last PENDING_RECOVERY_WINDOW_MS recover automatically; older projects stay
+ * reachable through the pipeline input, and a live ppt_stage_submit always
+ * shows regardless of age.
  */
+const PENDING_RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 async function recoverPendingFromDisk() {
   if (pendingConfirm) return pendingConfirm;
   try {
@@ -543,6 +552,10 @@ async function recoverPendingFromDisk() {
       }
       for (const stage of ["stage1", "stage2"]) {
         if (state?.stages?.[stage]?.status === "submitted") {
+          const submittedAt = Date.parse(state.stages[stage]?.submittedAt ?? "");
+          if (!Number.isFinite(submittedAt) || Date.now() - submittedAt > PENDING_RECOVERY_WINDOW_MS) {
+            continue;
+          }
           const mtime = statSync(stateFile).mtimeMs;
           if (!best || mtime > best.mtime) {
             best = { projectDir: join(projectsDir, entry.name), stage, mtime };

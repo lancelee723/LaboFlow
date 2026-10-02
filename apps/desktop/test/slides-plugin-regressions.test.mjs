@@ -74,3 +74,18 @@ test("panel pages define the theme token pair for both color schemes", () => {
     );
   }
 });
+
+test("disk recovery of pending stages is time-bounded, not a permanent fixture", () => {
+  // Regression (LaboFlow): recoverPendingFromDisk re-pended every abandoned
+  // "submitted" stage forever, so the workbench confirmation section always
+  // showed something — the user wanted it strictly trigger-scoped. Live
+  // submissions (ppt_stage_submit) recover regardless of age; disk recovery
+  // only within the window.
+  const mainSource = readPlugin("main.js");
+  assert.match(mainSource, /PENDING_RECOVERY_WINDOW_MS\s*=/);
+  assert.match(
+    mainSource,
+    /Date\.now\(\) - submittedAt > PENDING_RECOVERY_WINDOW_MS/,
+    "recovery must skip submissions older than the window",
+  );
+});

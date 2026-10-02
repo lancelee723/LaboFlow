@@ -138,11 +138,12 @@ export function confirmStage(projectDir, stage, { waive = false, waiveReason = n
   }
   // The spec gates are light confirmations: they close with the stage result
   // by default (the strategist corpus still requires the agent to run them).
-  if (stage === "stage1" && state.stages.spec_gate1.status === "pending") {
-    state.stages.spec_gate1.status = waive ? "waived" : "confirmed";
-  }
-  if (stage === "stage2" && state.stages.spec_gate2.status === "pending") {
-    state.stages.spec_gate2.status = waive ? "waived" : "confirmed";
+  // Normalize first — a hand-edited state without the gate keys must not
+  // crash the save below and leave the stage stuck on "submitted".
+  const gateKey = stage === "stage1" ? "spec_gate1" : "spec_gate2";
+  const gateState = (state.stages[gateKey] ??= { status: "pending" });
+  if (gateState.status === "pending") {
+    gateState.status = waive ? "waived" : "confirmed";
   }
   saveState(projectDir, state);
   return { state };
