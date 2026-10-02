@@ -438,6 +438,8 @@ export const IPC = {
     spaceMembersRemove: "pi-desktop/space/members/remove",
     spaceInviteCreate: "pi-desktop/space/invites/create",
     spaceInviteRedeem: "pi-desktop/space/invites/redeem",
+    assistantWebhookGet: "pi-desktop/assistant/webhook/get",
+    assistantWebhookSet: "pi-desktop/assistant/webhook/set",
     spaceNotificationsPull: "pi-desktop/space/notifications/pull",
     spaceNotificationsRead: "pi-desktop/space/notifications/read",
     spaceCommentsList: "pi-desktop/space/comments/list",

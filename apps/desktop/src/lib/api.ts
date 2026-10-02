@@ -1921,6 +1921,15 @@ export const api = {
     ),
   spaceNotificationsRead: (input: { ids: string[] }) =>
     invoke<{ ok: true }>(IPC.invoke.spaceNotificationsRead, input),
+  assistantWebhookGet: () =>
+    invoke<{ running: boolean; port: number | null; lanOpen: boolean; secretSet: boolean; secretPreview: string }>(
+      IPC.invoke.assistantWebhookGet,
+    ),
+  assistantWebhookSet: (input: { port?: number; lanOpen?: boolean }) =>
+    invoke<{ running: boolean; port: number | null; lanOpen: boolean; secretSet: boolean; secretPreview: string }>(
+      IPC.invoke.assistantWebhookSet,
+      input,
+    ),
   spaceClip: (input: { url: string }) =>
     invoke<{
       url: string;

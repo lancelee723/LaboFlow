@@ -27,6 +27,7 @@ import type { RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
 import type { AgentEventEnvelope } from "@pi-desktop/shared";
 import { ClawhubClient } from "../clawhub";
 import { createHeadlessAgentDriver, beginDurableTurnAndPrompt } from "../headless-agent-driver";
+import { createWebhookServer } from "../assistant/im-server";
 import { ForegroundSessionRegistry } from "../expert-foreground";
 import { ExpertService } from "../expert-service";
 import { TeamRunner } from "../team-runner";
@@ -519,6 +520,53 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     }
     return response.json().catch(() => ({}));
   }
+  // Module 03/T53.3: local webhook server. Secret lives in the sealed
+  // secrets table (generated on first boot); the task runner shares the
+  // headless driver with channels and scheduled runs.
+  const webhookServer = createWebhookServer({
+    config: {
+      secret: "pending",
+      port: 3800,
+      lanOpen: false,
+      syncBudgetMs: 30_000,
+    },
+    runner: async ({ message }) => {
+      const handle = await headlessAgentDriver.start({
+        newSession: { title: "Webhook 任务" },
+        prompt: message,
+        timeoutMs: 15 * 60_000,
+      });
+      const result = await handle.completion;
+      if (result.status !== "completed") {
+        throw new Error(result.errorCode ?? "headless run failed");
+      }
+      return { reply: result.finalText, files: [] };
+    },
+    listSchedules: async () => {
+      const h = host();
+      if (!h) return [];
+      return h.call("scheduled.list", {});
+    },
+    log: (level, message) => logger.app("assistant", level, "webhook", { data: message }),
+  });
+  void (async () => {
+    try {
+      const h = host();
+      if (!h) return;
+      const secretRef = "assistant.webhook.secret";
+      const existing = await h.call<{ value?: string | null }>("secrets.getForRuntime", { secretRef });
+      let secret = existing?.value ?? "";
+      if (!secret) {
+        secret = `wf_${randomUUID().replace(/-/g, "")}`;
+        await h.call("secrets.set", { secretRef, value: secret });
+      }
+      webhookServer.reconfigure({ secret });
+      await webhookServer.start();
+    } catch (error) {
+      logger.app("assistant", "warn", "webhook start failed", { data: String(error) });
+    }
+  })();
+
   spaceHost = createSpaceIpcHost({
     client: (spaceClient = createSpaceClient({
       getJson: (path) => orgService.getOrgJson(path),
@@ -590,6 +638,22 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       const { clipWebPage } = await import("../web-clipper");
       return clipWebPage(url);
     });
+
+    // Module 03/T53.3: webhook settings (read masked status / reconfigure).
+    laboflowHandle(IPC.invoke.assistantWebhookGet, async (event) => {
+      deps.assertMainWindowSender(event);
+      return webhookServer.describe();
+    });
+    laboflowHandle(
+      IPC.invoke.assistantWebhookSet,
+      async (event, input: { port?: unknown; lanOpen?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        return webhookServer.reconfigure({
+          ...(Number.isFinite(Number(input?.port)) ? { port: Number(input.port) } : {}),
+          ...(typeof input?.lanOpen === "boolean" ? { lanOpen: input.lanOpen } : {}),
+        });
+      },
+    );
 
     // Module 02/T52.13: yjs CRDT frame bridge (token stays main-side).
     yjsBridgeDisposal = createYjsBridge({

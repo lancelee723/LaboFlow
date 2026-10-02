@@ -213,9 +213,89 @@ export function AssistantChannelsPage() {
     );
   };
 
+  // T53.3 webhook server card state
+  const [webhook, setWebhook] = useState<{
+    running: boolean;
+    port: number | null;
+    lanOpen: boolean;
+    secretSet: boolean;
+    secretPreview: string;
+  } | null>(null);
+  const [webhookPort, setWebhookPort] = useState("3800");
+  useEffect(() => {
+    api
+      .assistantWebhookGet()
+      .then((status) => {
+        setWebhook(status);
+        if (status?.port) setWebhookPort(String(status.port));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const saveWebhook = () => {
+    if (!webhook) return;
+    setBusy(true);
+    api
+      .assistantWebhookSet({ port: Number(webhookPort), lanOpen: webhook.lanOpen })
+      .then((next) => {
+        setWebhook(next);
+        showToast(t("settings.assistant.webhookSaveOk"), { variant: "success" });
+      })
+      .catch((error) =>
+        showToast(error instanceof Error ? error.message : String(error), { variant: "error" }),
+      )
+      .finally(() => setBusy(false));
+  };
+
   return (
     <div className="settings-section flex flex-col gap-4">
       <p className="text-sm opacity-70">{t("settings.assistant.description")}</p>
+      <div
+        className="rounded-lg border p-4"
+        style={{ borderColor: "var(--ds-border)" }}
+        data-webhook-card=""
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${webhook?.running ? "bg-emerald-500" : "bg-neutral-400"}`}
+            aria-hidden
+          />
+          <span className="font-medium">{t("settings.assistant.webhookTitle")}</span>
+          {webhook?.running ? (
+            <Badge tone="success">{t("settings.assistant.webhookRunning")}</Badge>
+          ) : (
+            <Badge tone="neutral">{t("settings.assistant.webhookStopped")}</Badge>
+          )}
+        </div>
+        <p className="mt-2 text-xs opacity-60">{t("settings.assistant.webhookHelp")}</p>
+        {webhook ? (
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs">
+              <span>{t("settings.assistant.webhookPort")}</span>
+              <input
+                className="w-24 rounded-md border px-2 py-1.5 text-sm"
+                style={{ borderColor: "var(--ds-border)" }}
+                value={webhookPort}
+                onChange={(event) => setWebhookPort(event.target.value)}
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                checked={webhook.lanOpen}
+                onChange={(event) => setWebhook({ ...webhook, lanOpen: event.target.checked })}
+              />
+              <span>{t("settings.assistant.webhookLan")}</span>
+            </label>
+            <span className="text-xs opacity-60">
+              {t("settings.assistant.webhookSecret")}: <code>{webhook.secretPreview || "—"}</code>
+            </span>
+            <Button size="sm" disabled={busy} onClick={saveWebhook}>
+              {t("settings.assistant.webhookApply")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
       {PROVIDERS.map((provider) => {
         const account = accountFor(provider);
         const draft = draftFor[provider];
