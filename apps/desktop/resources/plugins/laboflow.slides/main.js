@@ -441,7 +441,7 @@ function registerStageTools() {
   void pi.agent.registerTool({
     name: "ppt_stage_submit",
     description:
-      "Submit your design recommendations for user confirmation (PPT-Master Stage-1 沟通契约+模板选择, or Stage-2 三个设计方向). Opens the confirm card for the USER to decide — then STOP and wait: silence confirms nothing. Input: { projectDir, stage: stage1|stage2, recommendations }. After submitting, tell the user what to look at and poll ppt_stage_status; do NOT proceed past a ⛔ BLOCKING gate until status returns confirmed/waived.",
+      "Submit your design recommendations for user confirmation (PPT-Master Stage-1 沟通契约+模板选择, or Stage-2 三个设计方向). The pending decision renders inside the PPT workbench panel (bottom section) — the user confirms there; no popup opens. Then STOP and wait: silence confirms nothing. Input: { projectDir, stage: stage1|stage2, recommendations }. After submitting, tell the user what to look at and poll ppt_stage_status; do NOT proceed past a ⛔ BLOCKING gate until status returns confirmed/waived.",
     risk: "low",
     schema: {
       type: "object",
@@ -459,18 +459,17 @@ function registerStageTools() {
       const verdict = submitStage(projectDir, stage, args?.recommendations);
       if (verdict.error) return { error: verdict.error };
       pendingConfirm = { projectDir, stage, submittedAt: verdict.state.stages[stage]?.submittedAt ?? null };
+      // The docked workbench polls for this pending decision and renders it at
+      // the bottom of the panel; no floating popup anymore. Keep a native
+      // notification so the user knows a decision is waiting even when the
+      // workbench tab is closed (the command-palette card stays as fallback).
       try {
-        await pi.ui.openPanel({ title: "PPT 确认卡" });
-      } catch {
-        /* panel unavailable (e.g. headless) — chat confirmation still applies */
-      }
-      try {
-        pi.ui.showNativeNotification?.("PPT 设计方案待确认", "打开确认卡查看并提交你的选择");
+        pi.ui.showNativeNotification?.("PPT 设计方案待确认", "打开右侧 PPT 工作台，在下方确认（或从命令面板运行「打开 PPT 确认卡」）");
       } catch {
         /* notifications optional */
       }
       return {
-        content: `已提交 ${stage} 设计方案，确认卡已打开：请在卡上选择后提交（或选择快速模式）。**现在停下等待用户操作**——沉默不构成确认。用户操作后用 ppt_stage_status(projectDir, stage) 查询结果；等待期间不要推进任何 ⛔ BLOCKING 之后的步骤。`,
+        content: `已提交 ${stage} 设计方案：请在右侧 PPT 工作台下方的「设计确认」区选择并提交（若工作台未打开，请先在面板「+」中打开它；或从命令面板运行「打开 PPT 确认卡」）。**现在停下等待用户操作**——沉默不构成确认。用户操作后用 ppt_stage_status(projectDir, stage) 查询结果；等待期间不要推进任何 ⛔ BLOCKING 之后的步骤。`,
         details: { statePath: join(projectDir, "laboflow", "pipeline-state.json") },
       };
     },
