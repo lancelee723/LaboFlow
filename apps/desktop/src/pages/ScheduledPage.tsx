@@ -17,6 +17,35 @@ export function ScheduledPage() {
   const [runs, setRuns] = useState<ScheduledTaskRun[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [tab, setTab] = useState<"tasks" | "runs">("tasks");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelected = (id: string) =>
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const bulkRun = async (enabled: boolean) => {
+    for (const id of selectedIds) {
+      await api.updateScheduled({ id, enabled });
+    }
+    setSelectedIds(new Set());
+    await refresh();
+  };
+  const bulkDelete = async () => {
+    for (const id of selectedIds) {
+      await api.deleteScheduled(id);
+    }
+    setSelectedIds(new Set());
+    await refresh();
+  };
+  const applyTemplate = (template: { title: string; prompt: string; cadence: string; schedule?: unknown }) => {
+    setEditor("new");
+    setTemplatePrefill(template);
+  };
+  const [templatePrefill, setTemplatePrefill] = useState<
+    { title: string; prompt: string; cadence: string; schedule?: unknown } | undefined
+  >(undefined);
   const [editor, setEditor] = useState<ScheduledTask | "new" | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -137,6 +166,7 @@ export function ScheduledPage() {
               <ScheduledEditor
                 key={editor === "new" ? "new" : editor.id}
                 task={editor === "new" ? undefined : editor}
+                prefill={editor === "new" ? templatePrefill : undefined}
                 projects={projects}
                 currentWorkspacePath={currentWorkspacePath}
                 busy={busy}
@@ -153,6 +183,35 @@ export function ScheduledPage() {
                 <p className="dest-row-meta">{t("scheduled.description")}</p>
               </Panel>
             )}
+            {!editor && (
+              <div className="flex flex-wrap items-center gap-2 pb-2" data-testid="scheduled-templates">
+                <span className="text-xs opacity-60">{t("scheduled.templates")}:</span>
+                {[
+                  { key: "morning", prompt: "抓取今日 AI 行业要闻，整理成一页晨报（要点+来源链接）。", title: t("scheduled.templateMorning"), cadence: "daily", schedule: { hour: 9, minute: 0, weekday: null } },
+                  { key: "weekly", prompt: "汇总本周工作进展，生成周报初稿（本周完成/下周计划/风险）。", title: t("scheduled.templateWeekly"), cadence: "weekly", schedule: { hour: 17, minute: 0, weekday: 5 } },
+                  { key: "scan", prompt: "扫描本周行业动态与竞对公开信息，输出结构化行业简报。", title: t("scheduled.templateScan"), cadence: "weekly", schedule: { hour: 8, minute: 30, weekday: 1 } },
+                  { key: "monthly", prompt: "刷新本月项目数据面板，输出月度数据快照与变化摘要。", title: t("scheduled.templateMonthly"), cadence: "monthly", schedule: { hour: 10, minute: 0, day: 1, weekday: null } },
+                ].map((template) => (
+                  <Button key={template.key} size="sm" variant="ghost" onClick={() => applyTemplate(template)}>
+                    {template.title}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {selectedIds.size > 0 && (
+              <div className="flex items-center gap-2 pb-2" data-testid="scheduled-bulk-bar">
+                <span className="text-xs opacity-70">{t("scheduled.selected", { count: selectedIds.size })}</span>
+                <Button size="sm" disabled={busy} onClick={() => void action(() => bulkRun(true))}>
+                  {t("scheduled.bulkEnable")}
+                </Button>
+                <Button size="sm" disabled={busy} onClick={() => void action(() => bulkRun(false))}>
+                  {t("scheduled.bulkDisable")}
+                </Button>
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action(() => bulkDelete())}>
+                  {t("scheduled.bulkDelete")}
+                </Button>
+              </div>
+            )}
             <div className="dest-list">
               {tasks.map((task) => {
                 const running = runs.some(
@@ -160,6 +219,13 @@ export function ScheduledPage() {
                 );
                 return (
                   <div className="dest-row" key={task.id}>
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      aria-label={t("scheduled.selectOne", { title: task.title })}
+                      checked={selectedIds.has(task.id)}
+                      onChange={() => toggleSelected(task.id)}
+                    />
                     <div className="dest-row-icon">
                       <IconClock size={16} />
                     </div>

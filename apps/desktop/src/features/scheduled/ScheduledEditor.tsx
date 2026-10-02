@@ -28,6 +28,7 @@ export function ScheduledEditor({
   busy,
   save,
   cancel,
+  prefill,
 }: {
   task?: ScheduledTask;
   projects: readonly ProjectRecord[];
@@ -35,16 +36,28 @@ export function ScheduledEditor({
   busy: boolean;
   save: (draft: ScheduledDraft) => Promise<void>;
   cancel: () => void;
+  /** FR-MC-14 template prefill (new-task mode only). */
+  prefill?: { title: string; prompt: string; cadence: string; schedule?: unknown };
 }) {
   const { t } = useTranslation();
   const settings = useAppStore((state) => state.settings);
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [prompt, setPrompt] = useState(task?.prompt ?? "");
-  const [cadence, setCadence] = useState<ScheduledTask["cadence"]>(task?.cadence ?? "manual");
-  const [hour, setHour] = useState(String(task?.schedule?.hour ?? 9).padStart(2, "0"));
-  const [minute, setMinute] = useState(String(task?.schedule?.minute ?? 0).padStart(2, "0"));
+  const [title, setTitle] = useState(task?.title ?? prefill?.title ?? "");
+  const [prompt, setPrompt] = useState(task?.prompt ?? prefill?.prompt ?? "");
+  const [cadence, setCadence] = useState<ScheduledTask["cadence"]>(
+    task?.cadence ?? ((prefill?.cadence as ScheduledTask["cadence"]) ?? "manual"),
+  );
+  const [hour, setHour] = useState(
+    String(task?.schedule?.hour ?? (prefill?.schedule as { hour?: number } | undefined)?.hour ?? 9).padStart(2, "0"),
+  );
+  const [minute, setMinute] = useState(
+    String(task?.schedule?.minute ?? (prefill?.schedule as { minute?: number } | undefined)?.minute ?? 0).padStart(2, "0"),
+  );
   const [weekdays, setWeekdays] = useState<number[]>(
-    task?.schedule?.weekdays ?? [task?.schedule?.weekday ?? 0],
+    task?.schedule?.weekdays ?? [
+      (prefill?.schedule as { weekday?: number } | undefined)?.weekday ??
+        task?.schedule?.weekday ??
+        0,
+    ],
   );
   // LaboFlow module 03 (R5-1): 5-field cron mode alongside the calendar UI.
   const [cronExpr, setCronExpr] = useState(task?.cronExpr ?? "");

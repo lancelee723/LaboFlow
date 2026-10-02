@@ -311,6 +311,31 @@ mod tests {
     }
 
     #[test]
+    fn three_consecutive_failures_auto_pause_the_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_in_dir(dir.path()).unwrap();
+        let task = create_task(&db, &json!({"prompt":"nightly scan", "cadence":"manual"})).unwrap();
+        assert!(task.enabled);
+        for round in 0..3 {
+            let run = begin_run(&db, &task.id, None).unwrap();
+            finish_run(&db, &run, "error", Some("EBOOM")).unwrap();
+            let after = crate::scheduled::get_task(&db, &task.id).unwrap().unwrap();
+            let expected_enabled = round < 2;
+            assert_eq!(after.enabled, expected_enabled, "round {round}");
+        }
+        // A succeeding task never trips the breaker.
+        let other = create_task(&db, &json!({"prompt":"ok task", "cadence":"manual"})).unwrap();
+        let run = begin_run(&db, &other.id, None).unwrap();
+        finish_run(&db, &run, "error", None).unwrap();
+        let run = begin_run(&db, &other.id, None).unwrap();
+        finish_run(&db, &run, "completed", None).unwrap();
+        let run = begin_run(&db, &other.id, None).unwrap();
+        finish_run(&db, &run, "error", None).unwrap();
+        let after = crate::scheduled::get_task(&db, &other.id).unwrap().unwrap();
+        assert!(after.enabled);
+    }
+
+    #[test]
     fn due_paused_overlap_missed_and_restart_paths() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open_in_dir(dir.path()).unwrap();
