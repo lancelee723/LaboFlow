@@ -1840,6 +1840,44 @@ export const api = {
     );
   },
 
+  // --- Module 04: IM channels (registry-owned; credentials never returned) ---
+  channelsList: () =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView[]>(
+      IPC.invoke.channelsList,
+    ),
+  channelsSave: (
+    input: import("@pi-desktop/shared").ChannelAccountSaveInput,
+  ) =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView>(
+      IPC.invoke.channelsSave,
+      input,
+    ),
+  channelsDelete: (accountId: string) =>
+    invoke<void>(IPC.invoke.channelsDelete, accountId),
+  channelsConnect: (accountId: string) =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView>(
+      IPC.invoke.channelsConnect,
+      accountId,
+    ),
+  channelsDisconnect: (accountId: string) =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView>(
+      IPC.invoke.channelsDisconnect,
+      accountId,
+    ),
+  channelsTest: (accountId: string) =>
+    invoke<import("@pi-desktop/shared").ChannelTestResult>(
+      IPC.invoke.channelsTest,
+      accountId,
+    ),
+  onChannelState: (
+    listener: (event: import("@pi-desktop/shared").ChannelStateEvent) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.channelState, (payload) =>
+      listener((payload ?? {}) as import("@pi-desktop/shared").ChannelStateEvent),
+    );
+  },
+
   // --- Module 02: Team Spaces (T52.4-11; SPEC §3.5) -------------------------
   listSpaces: () =>
     invoke<import("@pi-desktop/shared").SpaceDto[]>(IPC.invoke.spaceList),

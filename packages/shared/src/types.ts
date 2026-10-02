@@ -234,6 +234,46 @@ export interface DiagInfo {
   rawCode?: string;
 }
 
+/** Account row as returned over IPC — credentials are never included. */
+export interface ChannelAccountView {
+  id: string;
+  provider: ChannelProvider;
+  name: string;
+  scope: ChannelAccountScope;
+  allowlist: string[];
+  enabled: boolean;
+  hasCredentials: boolean;
+  state: ChannelState;
+  diag?: DiagInfo;
+  lastConnectedAt?: number;
+}
+
+/** Result of the channels/test IPC (connection health check). */
+export interface ChannelTestResult {
+  ok: boolean;
+  diag?: DiagInfo;
+}
+
+/** State change event pushed to the renderer (`IPC.event.channelState`). */
+export interface ChannelStateEvent {
+  accountId: string;
+  provider: ChannelProvider;
+  state: ChannelState;
+  diag?: DiagInfo;
+  lastConnectedAt?: number;
+}
+
+/** Save input accepted over IPC; empty credential values mean "unchanged". */
+export interface ChannelAccountSaveInput {
+  id?: string;
+  provider: ChannelProvider;
+  name?: string;
+  scope?: ChannelAccountScope;
+  allowlist?: string[];
+  enabled?: boolean;
+  credentials?: Record<string, string>;
+}
+
 export interface InboundMessage {
   /** ChannelAccount.id the message arrived on. */
   channelId: string;

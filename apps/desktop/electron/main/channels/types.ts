@@ -23,12 +23,18 @@ import type {
   OutboundPayload,
 } from "@pi-desktop/shared";
 
+// Boundary DTOs (account views, save input, test result, state events) live in
+// shared so the renderer mirrors them without importing main-process code.
 export type {
   ChannelAccount,
+  ChannelAccountSaveInput,
   ChannelAccountScope,
+  ChannelAccountView,
   ChannelCapabilities,
   ChannelProvider,
   ChannelState,
+  ChannelStateEvent,
+  ChannelTestResult,
   DiagInfo,
   InboundMessage,
   OutboundPayload,
@@ -60,46 +66,6 @@ export interface ChannelAdapter {
 
 /** Creates one adapter instance for an account id (called per account). */
 export type ChannelAdapterFactory = (channelId: string) => ChannelAdapter;
-
-/** Account row as returned over IPC — credentials are never included. */
-export interface ChannelAccountView {
-  id: string;
-  provider: ChannelProvider;
-  name: string;
-  scope: ChannelAccount["scope"];
-  allowlist: string[];
-  enabled: boolean;
-  hasCredentials: boolean;
-  state: ChannelState;
-  diag?: DiagInfo;
-  lastConnectedAt?: number;
-}
-
-/** Result of the channels/test IPC (connection health check). */
-export interface ChannelTestResult {
-  ok: boolean;
-  diag?: DiagInfo;
-}
-
-/** State change event pushed to the renderer (`IPC.event.channelState`). */
-export interface ChannelStateEvent {
-  accountId: string;
-  provider: ChannelProvider;
-  state: ChannelState;
-  diag?: DiagInfo;
-  lastConnectedAt?: number;
-}
-
-/** Save input accepted over IPC; empty credential values mean "unchanged". */
-export interface ChannelAccountSaveInput {
-  id?: string;
-  provider: ChannelProvider;
-  name?: string;
-  scope?: ChannelAccount["scope"];
-  allowlist?: string[];
-  enabled?: boolean;
-  credentials?: Record<string, string>;
-}
 
 /**
  * The slice of HeadlessAgentDriver the registry needs (structural, so tests

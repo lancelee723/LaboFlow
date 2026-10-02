@@ -94,6 +94,7 @@ import {
   UserRound,
   Users,
   Undo2,
+  MessagesSquare,
   Video,
   Webhook,
   Workflow,
@@ -231,6 +232,7 @@ export const IconListChecks = icon(ListChecks);
 /** Goal mode: an outcome to reach, as opposed to Plan's list of steps. */
 export const IconTarget = icon(Target);
 export const IconBrowser = icon(AppWindow);
+export const IconMessages = icon(MessagesSquare);
 export const IconHook = icon(Webhook);
 export const IconWorkflow = icon(Workflow);
 export const IconLink = icon(Link);
