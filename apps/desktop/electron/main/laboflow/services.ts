@@ -528,6 +528,13 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     // Module 02: team-space tree/docs/comments/revisions/events IPC.
     spaceHost?.registerIpc(laboflowHandle);
 
+    laboflowHandle(IPC.invoke.spaceClip, async (event, input: { url?: unknown }) => {
+      deps.assertMainWindowSender(event);
+      const url = typeof input?.url === "string" ? input.url : "";
+      const { clipWebPage } = await import("../web-clipper");
+      return clipWebPage(url);
+    });
+
     // Module 02/T52.13: yjs CRDT frame bridge (token stays main-side).
     yjsBridgeDisposal = createYjsBridge({
       orgService,

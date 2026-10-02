@@ -46,6 +46,45 @@ function blockVm(id: string, map: Y.Map<unknown>): BlockVm {
   };
 }
 
+/** Turn clipped article HTML into editor blocks (T52.5 seeding). Pure DOM
+ * parsing — runs in the renderer where DOMParser exists. */
+export function parseHtmlToBlocks(html: string): Array<{
+  type: BlockType;
+  text: string;
+  src: string;
+}> {
+  const document_ = new DOMParser().parseFromString(html, "text/html");
+  const out: Array<{ type: BlockType; text: string; src: string }> = [];
+  const pushText = (type: BlockType, el: Element) => {
+    const text = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (text) out.push({ type, text, src: "" });
+  };
+  const walk = (element: Element) => {
+    for (const child of Array.from(element.children)) {
+      const tag = child.tagName.toLowerCase();
+      if (tag === "h1") pushText("h1", child);
+      else if (tag === "h2") pushText("h2", child);
+      else if (tag === "h3" || tag === "h4") pushText("h2", child);
+      else if (tag === "ul" || tag === "ol") {
+        for (const li of Array.from(child.querySelectorAll("li"))) pushText(tag === "ul" ? "bullet" : "numbered", li);
+      } else if (tag === "img") {
+        const src = child.getAttribute("src") ?? "";
+        if (src) out.push({ type: "image", text: "", src });
+      } else if (tag === "figure") {
+        const img = child.querySelector("img");
+        if (img?.getAttribute("src")) out.push({ type: "image", text: "", src: img.getAttribute("src") ?? "" });
+        else walk(child);
+      } else if (tag === "table") {
+        const text = (child.textContent ?? "").replace(/\s+/g, " ").trim();
+        if (text) out.push({ type: "chart", text: text.slice(0, 500), src: "" });
+      } else if (child.children.length) walk(child);
+      else pushText("paragraph", child);
+    }
+  };
+  walk(document_.body);
+  return out;
+}
+
 /** Minimal HTML serializer (FR-TC-14 export): stable, no deps. */
 export function blocksToHtml(blocks: BlockVm[]): string {
   const escaped = (value: string) =>
@@ -73,8 +112,13 @@ export function blocksToHtml(blocks: BlockVm[]): string {
   return `<!doctype html>\n<html>\n<head><meta charset="utf-8"></head>\n<body>\n${body}\n</body>\n</html>\n`;
 }
 
-export function HtmlCollabEditor(props: { node: SpaceNode; spaceId: string }) {
-  const { node, spaceId } = props;
+export function HtmlCollabEditor(props: {
+  node: SpaceNode;
+  spaceId: string;
+  /** T52.5 clip seed: parsed into blocks on first load when the doc is empty. */
+  initialHtml?: string;
+}) {
+  const { node, spaceId, initialHtml } = props;
   const { t } = useTranslation();
 
   const [status, setStatus] = useState<"connecting" | "connected" | "closed">("connecting");
@@ -153,6 +197,32 @@ export function HtmlCollabEditor(props: { node: SpaceNode; spaceId: string }) {
       awarenessRef.current = null;
     };
   }, [spaceId, node.id, myColor, refreshBlocks]);
+
+  // Seed once after connect: an empty doc plus a clip payload imports it.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!initialHtml || seededRef.current) return;
+    const blocks = blocksRef.current;
+    const doc = docRef.current;
+    if (!blocks || !doc) return;
+    if (blocks.length > 0) {
+      seededRef.current = true;
+      return;
+    }
+    const parsed = parseHtmlToBlocks(initialHtml);
+    if (!parsed.length) return;
+    seededRef.current = true;
+    doc.transact(() => {
+      for (const block of parsed) {
+        const map = new Y.Map();
+        map.set("id", crypto.randomUUID());
+        map.set("type", block.type);
+        map.set("text", new Y.Text(block.text));
+        if (block.src) map.set("src", block.src);
+        blocks.insert(blocks.length, [map]);
+      }
+    });
+  }, [initialHtml]);
 
   const mutateBlock = (id: string, mutate: (map: Y.Map<unknown>) => void) => {
     docRef.current?.transact(() => {

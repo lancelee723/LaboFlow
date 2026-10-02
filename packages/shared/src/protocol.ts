@@ -431,6 +431,7 @@ export const IPC = {
     spaceYjsAttach: "pi-desktop/space/yjs/attach",
     spaceYjsDetach: "pi-desktop/space/yjs/detach",
     spaceYjsSend: "pi-desktop/space/yjs/send",
+    spaceClip: "pi-desktop/space/clip",
     spaceCommentsList: "pi-desktop/space/comments/list",
     spaceCommentsCreate: "pi-desktop/space/comments/create",
     spaceCommentsReply: "pi-desktop/space/comments/reply",

@@ -14,6 +14,7 @@ import { Badge, Button, cx } from "../components/ui";
 import {
   IconArchive,
   IconArchiveRestore,
+  IconGlobe,
   IconNewProject,
   IconPlus,
   IconRefresh,
@@ -32,7 +33,8 @@ type PromptDialog =
   | { kind: "new-space"; value: string }
   | { kind: "new-node"; parentId: string | null; types: SpaceNodeType[]; value: string; nodeType: SpaceNodeType }
   | { kind: "rename"; node: SpaceNode; value: string }
-  | { kind: "confirm-delete"; node: SpaceNode };
+  | { kind: "confirm-delete"; node: SpaceNode }
+  | { kind: "clip"; value: string };
 
 /**
  * Team Spaces page (T52.4-10 client slice, FR-TC-01/03/08/09/10/20 v1):
@@ -204,6 +206,33 @@ export function SpacePage() {
     return () => window.clearTimeout(timer);
   }, [searchQuery, activeSpaceId]);
 
+  /** T52.5 clip: main fetches + Readability-parses; we create an html node
+   * and hand the article HTML to the editor as its initial seed. */
+  const [clipSeed, setClipSeed] = useState<{ nodeId: string; html: string } | null>(null);
+  const runClip = async (url: string) => {
+    if (!activeSpaceId) return;
+    try {
+      const article = await api.spaceClip({ url });
+      const parentId = selectedNode
+        ? selectedNode.type === "folder"
+          ? selectedNode.id
+          : selectedNode.parentId
+        : null;
+      const node = await api.spaceNodeCreate({
+        spaceId: activeSpaceId,
+        parentId,
+        type: "html",
+        name: article.title || article.url,
+      });
+      await loadTree();
+      setSelectedId(node.id);
+      setClipSeed({ nodeId: node.id, html: article.contentHtml });
+      showToast(t("space.clipDone", { title: article.title }), { variant: "success" });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    }
+  };
+
   const loadComments = useCallback(async () => {
     if (!activeSpaceId || !selectedId) {
       setComments([]);
@@ -322,6 +351,10 @@ export function SpacePage() {
         if (!name) throw new Error(t("space.nameRequired"));
         await api.spaceNodeRename({ spaceId: activeSpaceId, nodeId: dialog.node.id, name });
         await loadTree();
+      } else if (dialog.kind === "clip") {
+        if (!activeSpaceId) return;
+        if (!dialog.value.trim()) throw new Error(t("space.clipUrlRequired"));
+        await runClip(dialog.value.trim());
       } else if (dialog.kind === "confirm-delete") {
         if (!activeSpaceId) return;
         await api.spaceNodeDelete({ spaceId: activeSpaceId, nodeId: dialog.node.id });
@@ -436,6 +469,7 @@ export function SpacePage() {
     if (current.kind === "rename") return t("space.rename");
     if (current.kind === "confirm-delete")
       return t("space.deleteConfirm", { name: current.node.name });
+    if (current.kind === "clip") return t("space.clip");
     return current.parentId ? t("space.newChild") : t("space.newDoc");
   };
 
@@ -515,23 +549,35 @@ export function SpacePage() {
             </span>
             <span className="flex items-center gap-0.5">
               {!recycleMode && activeSpaceId && !activeSpace?.archivedAt && activeSpace?.myPerm !== "viewer" ? (
-                <button
-                  type="button"
-                  className="rounded-sm p-1 opacity-70 hover:opacity-100"
-                  title={t("space.newDoc")}
-                  aria-label={t("space.newDoc")}
-                  onClick={() =>
-                    setDialog({
-                      kind: "new-node",
-                      parentId: null,
-                      types: ["folder", "md", "csv", "html"],
-                      value: "",
-                      nodeType: "md",
-                    })
-                  }
-                >
-                  <IconPlus size={13} />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="rounded-sm p-1 opacity-70 hover:opacity-100"
+                    title={t("space.newDoc")}
+                    aria-label={t("space.newDoc")}
+                    onClick={() =>
+                      setDialog({
+                        kind: "new-node",
+                        parentId: null,
+                        types: ["folder", "md", "csv", "html"],
+                        value: "",
+                        nodeType: "md",
+                      })
+                    }
+                  >
+                    <IconPlus size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-sm p-1 opacity-70 hover:opacity-100"
+                    title={t("space.clip")}
+                    aria-label={t("space.clip")}
+                    data-testid="space-clip-button"
+                    onClick={() => setDialog({ kind: "clip", value: "" })}
+                  >
+                    <IconGlobe size={13} />
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"
@@ -721,7 +767,11 @@ export function SpacePage() {
               onDocLoaded={setDoc}
             />
           ) : selectedNode.type === "html" ? (
-            <HtmlCollabEditor node={selectedNode} spaceId={activeSpaceId ?? ""} />
+            <HtmlCollabEditor
+                node={selectedNode}
+                spaceId={activeSpaceId ?? ""}
+                initialHtml={clipSeed && clipSeed.nodeId === selectedNode.id ? clipSeed.html : undefined}
+              />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center" style={{ borderColor: "var(--ds-border-strong)" }}>
               <span className="text-sm">{selectedNode.name}</span>
@@ -835,7 +885,13 @@ export function SpacePage() {
                 className="field-input text-sm"
                 autoFocus
                 value={dialog.value}
-                placeholder={dialog.kind === "new-space" ? t("space.spaceName") : t("space.nodeName")}
+                placeholder={
+                  dialog.kind === "new-space"
+                    ? t("space.spaceName")
+                    : dialog.kind === "clip"
+                      ? t("space.clipUrlPlaceholder")
+                      : t("space.nodeName")
+                }
                 onChange={(event) =>
                   setDialog({ ...dialog, value: event.target.value } as PromptDialog)
                 }
@@ -858,7 +914,11 @@ export function SpacePage() {
                 disabled={busy || (dialog.kind !== "confirm-delete" && !dialog.value.trim())}
                 onClick={() => void submitDialog()}
               >
-                {dialog.kind === "confirm-delete" ? t("space.delete") : t("space.create")}
+                {dialog.kind === "confirm-delete"
+                  ? t("space.delete")
+                  : dialog.kind === "clip"
+                    ? t("space.clipGo")
+                    : t("space.create")}
               </Button>
             </div>
           </div>

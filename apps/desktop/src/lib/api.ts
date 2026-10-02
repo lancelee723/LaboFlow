@@ -1898,6 +1898,15 @@ export const api = {
       IPC.invoke.spaceFileUpload,
       input,
     ),
+  spaceClip: (input: { url: string }) =>
+    invoke<{
+      url: string;
+      title: string;
+      contentHtml: string;
+      textContent: string;
+      byline: string;
+      clippedAt: string;
+    }>(IPC.invoke.spaceClip, input),
   spaceYjsAttach: (input: { spaceId: string; nodeId: string }) =>
     invoke<{ channel: string }>(IPC.invoke.spaceYjsAttach, input),
   spaceYjsDetach: (input: { channel: string }) =>
