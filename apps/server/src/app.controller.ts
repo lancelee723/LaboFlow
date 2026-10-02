@@ -783,6 +783,21 @@ class CoreController {
     }));
   }
 
+  /** 空间通知（FR-TC-10）：我的未读/已读流转，轮询消费。 */
+  @Get('spaces/notifications')
+  async mySpaceNotifications(@Req() req: FastifyRequest & { query: Record<string, string> }) {
+    const actor = requireActor(req);
+    const since = (req.query as { since?: string }).since;
+    return this.deps.spaces.listNotifications(actor.userId, since || undefined);
+  }
+
+  @Post('spaces/notifications/read')
+  @HttpCode(200)
+  async markSpaceNotificationsRead(@Req() req: FastifyRequest, @Body() body: { ids?: string[] }) {
+    const actor = requireActor(req);
+    return this.deps.spaces.markNotificationsRead(actor.userId, Array.isArray(body.ids) ? body.ids.map(String) : []);
+  }
+
   @Get('spaces/:id/nodes/:nid/revisions')
   async listRevisions(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
     const actor = requireActor(req);

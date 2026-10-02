@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   comments, inviteLinks, revisionSuggestions, spaceDocVersions, spaceDocs,
-  spaceEvents, spaceFileVersions, spaceMembers, spaceNodeOverrides, spaceNodes, spaces, users,
+  spaceEvents, spaceFileVersions, spaceMembers, spaceNodeOverrides, spaceNodes,
+  spaceNotifications, spaces, users,
 } from '../db/schema.js';
 import {
   canSpace, effectivePerm, isNodePerm, isSpacePerm,
@@ -665,7 +666,49 @@ export class SpaceService {
       })
       .returning();
     await this.emit(spaceId, 'revision.created', { nodeId, suggestionId: r!.id, producedBy }, actor.userId);
+    // FR-TC-10: an AI-produced suggestion batch pings the node's open comment
+    // authors (never the requester) so they review what touched their comments.
+    if (producedBy === 'agent') {
+      const openComments = await this.db
+        .selectDistinct({ authorId: comments.authorId })
+        .from(comments)
+        .where(and(eq(comments.nodeId, nodeId), eq(comments.status, 'open')));
+      const recipients = new Set(
+        openComments.map((row) => row.authorId).filter((id): id is string => Boolean(id) && id !== actor.userId),
+      );
+      for (const userId of recipients) {
+        await this.db.insert(spaceNotifications).values({
+          userId, spaceId, nodeId,
+          kind: 'revision.review-requested',
+          payload: { suggestionId: r!.id, count: recipients.size },
+        });
+      }
+    }
     return this.revisionDto(r!);
+  }
+
+  /** 我的未读空间通知（轮询消费；frontier = createdAt ISO 游标）。 */
+  async listNotifications(userId: string, sinceIso?: string): Promise<Array<Record<string, unknown>>> {
+    const rows = await this.db
+      .select()
+      .from(spaceNotifications)
+      .where(and(eq(spaceNotifications.userId, userId), gt(spaceNotifications.createdAt, sinceIso ? new Date(sinceIso) : new Date(0))))
+      .orderBy(asc(spaceNotifications.createdAt))
+      .limit(100);
+    return rows.map((row) => ({
+      id: row.id, spaceId: row.spaceId, nodeId: row.nodeId,
+      kind: row.kind, payload: row.payload, readAt: row.readAt,
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async markNotificationsRead(userId: string, ids: string[]): Promise<{ ok: true }> {
+    if (!ids.length) return { ok: true };
+    await this.db
+      .update(spaceNotifications)
+      .set({ readAt: new Date() })
+      .where(and(eq(spaceNotifications.userId, userId), inArray(spaceNotifications.id, ids)));
+    return { ok: true };
   }
 
   /**

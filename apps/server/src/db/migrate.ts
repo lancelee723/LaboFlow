@@ -362,6 +362,23 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       );`,
     ],
   },
+  {
+    version: 8,
+    name: 'space-notifications',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS space_notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL,
+        space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}',
+        read_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_space_notifications_user ON space_notifications(user_id, created_at);`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {

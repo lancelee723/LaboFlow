@@ -28,6 +28,7 @@ import { CsvEditor } from "../components/space/CsvEditor";
 import { HtmlCollabEditor } from "../components/space/HtmlCollabEditor";
 import { CommentSidebar, groupThreads } from "../components/space/CommentSidebar";
 import { RevisionPanel } from "../components/space/RevisionPanel";
+import { SpaceSharePanel } from "../components/space/SpaceSharePanel";
 
 type PromptDialog =
   | { kind: "new-space"; value: string }
@@ -209,6 +210,36 @@ export function SpacePage() {
   /** T52.5 clip: main fetches + Readability-parses; we create an html node
    * and hand the article HTML to the editor as its initial seed. */
   const [clipSeed, setClipSeed] = useState<{ nodeId: string; html: string } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  useEffect(() => {
+    if (!activeSpaceId) return;
+    let stop = false;
+    let cursor: string | undefined;
+    const poll = async () => {
+      try {
+        const rows = await api.spaceNotificationsPull({ since: cursor });
+        if (stop) return;
+        if (rows.length) {
+          cursor = rows[rows.length - 1]!.createdAt;
+          setUnreadNotifications((count) => count + rows.length);
+          const first = rows[0] as { kind?: string };
+          if (first.kind === "revision.review-requested") {
+            showToast(t("space.revisions.reviewRequested"), { variant: "info" });
+          }
+          void api.spaceNotificationsRead({ ids: rows.map((row) => row.id) }).catch(() => undefined);
+        }
+      } catch {
+        // org unreachable: silent — the offline banner already shows
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 8000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [activeSpaceId, showToast, t]);
   const runClip = async (url: string) => {
     if (!activeSpaceId) return;
     try {
@@ -570,6 +601,16 @@ export function SpacePage() {
                   <button
                     type="button"
                     className="rounded-sm p-1 opacity-70 hover:opacity-100"
+                    title={t("space.share.title")}
+                    aria-label={t("space.share.title")}
+                    data-testid="space-share-button"
+                    onClick={() => setShareOpen((value) => !value)}
+                  >
+                    <IconUsers size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-sm p-1 opacity-70 hover:opacity-100"
                     title={t("space.clip")}
                     aria-label={t("space.clip")}
                     data-testid="space-clip-button"
@@ -853,6 +894,17 @@ export function SpacePage() {
       </div>
 
       {/* ---------------- prompt / confirm dialog ---------------- */}
+      {shareOpen && activeSpaceId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShareOpen(false)}>
+          <div
+            className="w-96 max-w-full rounded-lg border bg-[color:var(--ds-bg-elevated-opaque)] p-4"
+            style={{ borderColor: "var(--ds-border-default)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <SpaceSharePanel spaceId={activeSpaceId} myPerm={activeSpace?.myPerm ?? "viewer"} onClose={() => setShareOpen(false)} />
+          </div>
+        </div>
+      ) : null}
       {dialog ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"

@@ -147,6 +147,26 @@ export function createSpaceClient(deps: SpaceClientDeps) {
         sha256: string;
       }>;
     },
+    listMembers(spaceId: string): Promise<Array<{ userId: string; username: string; displayName: string | null; perm: string }>> {
+      return deps.getJson(`/spaces/${id(spaceId)}/members`) as Promise<
+        Array<{ userId: string; username: string; displayName: string | null; perm: string }>
+      >;
+    },
+    addMember(spaceId: string, input: { userId: string; perm: string }): Promise<{ ok: true }> {
+      return deps.postJson(`/spaces/${id(spaceId)}/members`, input) as Promise<{ ok: true }>;
+    },
+    updateMember(spaceId: string, userId: string, input: { perm: string }): Promise<{ ok: true }> {
+      return deps.patchJson(`/spaces/${id(spaceId)}/members/${id(userId)}`, input) as Promise<{ ok: true }>;
+    },
+    removeMember(spaceId: string, userId: string): Promise<{ ok: true }> {
+      return deps.deleteJson(`/spaces/${id(spaceId)}/members/${id(userId)}`) as Promise<{ ok: true }>;
+    },
+    createInvite(
+      spaceId: string,
+      input: { perm?: string; expiresInDays?: number; maxUses?: number | null },
+    ): Promise<Record<string, unknown>> {
+      return deps.postJson(`/spaces/${id(spaceId)}/invites`, input) as Promise<Record<string, unknown>>;
+    },
     search(spaceId: string, query: string, limit?: number): Promise<Array<Record<string, unknown>>> {
       const params = new URLSearchParams({ q: query });
       if (limit !== undefined) params.set("limit", String(limit));
@@ -266,6 +286,15 @@ export interface SpaceIpcHostDeps {
   pollMs?: number;
   /** Optional warn sink (main logger). */
   warn?(context: string, message: string): void;
+  /**
+   * FR-TC-10 production: the LLM-backed review-by-comments pipeline lives in
+   * the main process (it needs the session model); when supplied it replaces
+   * the legacy passthrough that assumed a server route.
+   */
+  reviewByComments?(
+    spaceId: string,
+    nodeId: string,
+  ): Promise<RevisionSuggestion[]>;
 }
 
 export interface SpaceIpcHost {
@@ -569,7 +598,12 @@ export function createSpaceIpcHost(deps: SpaceIpcHostDeps): SpaceIpcHost {
       handle(
         IPC.invoke.spaceRevisionsReviewByComments,
         async (input: { spaceId?: string; nodeId?: string }) =>
-          wrap(() => client.reviewByComments(String(input?.spaceId ?? ""), String(input?.nodeId ?? ""))),
+          wrap(() => {
+            const spaceId = String(input?.spaceId ?? "");
+            const nodeId = String(input?.nodeId ?? "");
+            if (deps.reviewByComments) return deps.reviewByComments(spaceId, nodeId);
+            return client.reviewByComments(spaceId, nodeId);
+          }),
       );
       handle(IPC.invoke.spaceEventsPull, async (input: { spaceId?: string; since?: number }) =>
         wrap(() => client.pullEvents(String(input?.spaceId ?? ""), Number(input?.since ?? -1))),

@@ -1898,6 +1898,29 @@ export const api = {
       IPC.invoke.spaceFileUpload,
       input,
     ),
+  spaceMembersList: (input: { spaceId: string }) =>
+    invoke<Array<{ userId: string; username: string; displayName: string | null; perm: string; createdAt: string }>>(
+      IPC.invoke.spaceMembersList,
+      input,
+    ),
+  spaceMembersAdd: (input: { spaceId: string; userId: string; perm: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceMembersAdd, input),
+  spaceMembersUpdate: (input: { spaceId: string; userId: string; perm: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceMembersUpdate, input),
+  spaceMembersRemove: (input: { spaceId: string; userId: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceMembersRemove, input),
+  spaceInviteCreate: (
+    input: { spaceId: string; perm?: string; expiresInDays?: number; maxUses?: number | null },
+  ) => invoke<{ id: string; token: string; perm: string; expiresAt: string | null }>(IPC.invoke.spaceInviteCreate, input),
+  spaceInviteRedeem: (input: { token: string }) =>
+    invoke<{ spaceId: string; perm: string }>(IPC.invoke.spaceInviteRedeem, input),
+  spaceNotificationsPull: (input: { since?: string }) =>
+    invoke<Array<{ id: string; spaceId: string; nodeId: string; kind: string; payload: Record<string, unknown>; readAt: string | null; createdAt: string }>>(
+      IPC.invoke.spaceNotificationsPull,
+      input,
+    ),
+  spaceNotificationsRead: (input: { ids: string[] }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceNotificationsRead, input),
   spaceClip: (input: { url: string }) =>
     invoke<{
       url: string;

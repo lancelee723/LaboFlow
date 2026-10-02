@@ -302,6 +302,21 @@ export const spaceDocVersions = pgTable(
   (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
 );
 
+/** 空间内通知（FR-TC-10：按评论修订完成后通知评论者复核）。 */
+export const spaceNotifications = pgTable(
+  'space_notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    spaceId: uuid('space_id').notNull(),
+    nodeId: uuid('node_id').notNull(),
+    kind: text('kind').notNull(), // revision.review-requested
+    payload: jsonb('payload').notNull().default({}),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
 /** file 节点的二进制版本：内容落卷（storageKey），元数据在 PG（T52.5 上传）。 */
 export const spaceFileVersions = pgTable(
   'space_file_versions',

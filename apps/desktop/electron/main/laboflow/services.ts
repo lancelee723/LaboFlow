@@ -34,6 +34,8 @@ import { KbService } from "../kb-service";
 import { OrgService } from "../org-service";
 import { OrgWorkspaceHub } from "../org-workspaces";
 import { createChannelRegistryHost } from "../channels/registry";
+import { completeOneShot } from "@pi-desktop/agent-runtime";
+import type { RevisionSuggestion } from "@pi-desktop/shared";
 import { createSpaceClient, createSpaceIpcHost } from "../space-client";
 import { createYjsBridge } from "./yjs-bridge";
 import { createChannelCredentialStore } from "../channels/credential-store";
@@ -190,6 +192,59 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     } catch {
       return null;
     }
+  }
+
+  /** FR-TC-10: LLM-backed review-by-comments production (main-side seam). */
+  async function reviewByComments(spaceId: string, nodeId: string): Promise<RevisionSuggestion[]> {
+    if (!spaceClient) throw new Error("space client unavailable");
+    const { buildReviewUserPrompt, parseReviewSuggestions, REVIEW_SYSTEM_PROMPT } =
+      await import("./revision-review");
+    const comments = (await spaceClient.listComments(spaceId, nodeId)).filter(
+      (comment) => comment.status === "open",
+    );
+    if (!comments.length) return [];
+    const doc = await spaceClient.getDoc(spaceId, nodeId);
+    const oneShot = await getOneShotProvider();
+    if (!oneShot) {
+      throw Object.assign(new Error("model not configured"), {
+        errorCode: "MODEL_NOT_CONFIGURED",
+      });
+    }
+    const result = await completeOneShot(
+      oneShot.provider,
+      {
+        systemPrompt: REVIEW_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user" as const,
+            content: buildReviewUserPrompt(
+              doc.content ?? "",
+              comments.map((comment) => ({
+                id: comment.id,
+                authorId: comment.authorId,
+                body: comment.body,
+                status: comment.status,
+                anchor: (comment as { anchor?: { textPrefix?: string } }).anchor ?? null,
+              })),
+            ),
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      oneShot.thinkingLevel,
+      { sessionId: `space-review:${nodeId}` },
+    );
+    const drafts = parseReviewSuggestions(result.text ?? "");
+    const created: RevisionSuggestion[] = [];
+    for (const draft of drafts) {
+      created.push(
+        await spaceClient.createRevision(spaceId, nodeId, {
+          ...draft,
+          producedBy: "agent" as const,
+        }),
+      );
+    }
+    return created;
   }
 
   const kbService = new KbService({
@@ -472,6 +527,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       putJson: (path, body) => spaceOrgRequest("PUT", path, body),
       deleteJson: (path) => spaceOrgRequest("DELETE", path),
     })),
+    reviewByComments: (spaceId, nodeId) => reviewByComments(spaceId, nodeId),
     emit: (frame) => sendToRenderer(IPC.event.spaceEvent, frame),
     warn: (context, message) =>
       logger.app("session", "warn", "space events poll", {
