@@ -872,3 +872,93 @@
   max-height: 100%;
   border-radius: var(--radius-sm);
 }
+
+/* In-app document preview: pdf.js canvas, docx-preview DOM, pptx-renderer
+   slides, and SheetJS tables all share the same scroll shell. */
+
+.doc-preview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.doc-preview-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.doc-preview-toolbar [role="tab"] {
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+}
+
+.doc-preview-toolbar [role="tab"].active {
+  background: var(--ds-bg-subtle);
+  font-weight: 600;
+}
+
+.doc-preview-page {
+  min-width: 64px;
+  text-align: center;
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-preview-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.doc-preview-pdf-canvas {
+  max-width: 100%;
+  height: auto !important;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 18%);
+  background: #fff;
+}
+
+.doc-preview-docx-container {
+  width: 100%;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 6px rgb(0 0 0 / 18%);
+}
+
+.doc-preview-pptx-container {
+  width: 100%;
+}
+
+.doc-preview-sheet {
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  background: var(--ds-bg-elevated, var(--ds-bg));
+}
+
+.doc-preview-sheet td {
+  border: 1px solid var(--ds-border-subtle);
+  padding: 4px 8px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-preview-loading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ds-text-muted);
+}

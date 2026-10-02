@@ -1,8 +1,39 @@
 import { resolve } from "node:path";
+import { cpSync, existsSync, rmSync } from "node:fs";
 import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import type { Plugin } from "vite";
+
+// pdf.js resolves its CJK cmaps, standard fonts, and image-decoder WASM from
+// URLs the host page must serve. Copy those assets into the renderer's public
+// tree (git-ignored, regenerated here on dev start and build) so relative
+// "pdfjs/…" URLs work in both the dev server and the packaged file:// build.
+function copyPdfjsAssets(): Plugin {
+  const from = resolve(__dirname, "node_modules/pdfjs-dist");
+  const to = resolve(__dirname, "public/pdfjs");
+  const copy = () => {
+    for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs"]) {
+      const src = resolve(from, dir);
+      if (!existsSync(src)) continue;
+      rmSync(resolve(to, dir), { recursive: true, force: true });
+      cpSync(src, resolve(to, dir), { recursive: true });
+    }
+    for (const file of ["LICENSE", "LICENSE_JBIG2", "LICENSE_OPENJPEG", "LICENSE_PDFJS_JBIG2", "LICENSE_PDFJS_OPENJPEG", "LICENSE_PDFJS_QCMS", "LICENSE_QCMS"]) {
+      const src = resolve(from, file);
+      if (existsSync(src)) cpSync(src, resolve(to, file));
+    }
+  };
+  return {
+    name: "pi-copy-pdfjs-assets",
+    configureServer() {
+      copy();
+    },
+    closeBundle() {
+      copy();
+    },
+  };
+}
 
 // Dev needs 'unsafe-eval' for vite HMR tooling; production must not ship it.
 function tightenCsp(): Plugin {
@@ -109,7 +140,7 @@ export default defineConfig({
         },
       },
     },
-    plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks()],
+    plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks(), copyPdfjsAssets()],
     resolve: {
       alias: {
         "@renderer": resolve("src"),

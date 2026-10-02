@@ -67,3 +67,4 @@ __pycache__/
 
 .playwright-cli
 worktrees
+apps/desktop/public/pdfjs/

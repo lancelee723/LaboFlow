@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import {
+  readOpenableFile,
   readOpenableImage,
   resolveOpenablePath,
   resolveRealOpenablePath,
@@ -159,5 +160,55 @@ it("keeps relative, absolute and workspace-boundary behavior", async () => {
   expect(await resolveRealOpenablePath("", root, [scratch])).toBeNull();
   if (process.platform !== "win32") {
     expect(await resolveRealOpenablePath("/etc/passwd", root, [scratch])).toBeNull();
+  }
+});
+
+it("classifies modern documents for in-app preview and keeps legacy formats binary", async () => {
+  const { mkdirSync, mkdtempSync } = await import("node:fs");
+  const root = mkdtempSync(join(tmpdir(), "doc-preview-"));
+  try {
+    const { writeFileSync } = await import("node:fs");
+    // Minimal PK zip header — document kinds are classified by extension, the
+    // bytes only have to exist and not trip the image classifier.
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    for (const [name, kind] of [
+      ["report.pdf", "pdf"],
+      ["spec.docx", "docx"],
+      ["deck.pptx", "pptx"],
+      ["table.xlsx", "xlsx"],
+    ] as const) {
+      const p = join(root, name);
+      writeFileSync(p, bytes);
+      const result = await readOpenableFile(name, root, [], undefined);
+      expect(result.kind).toBe("document");
+      expect(result.documentKind).toBe(kind);
+      expect(result.dataUrl?.startsWith("data:")).toBe(true);
+    }
+    // A client cannot reclassify text files by asking for an office mime.
+    const md = join(root, "notes.md");
+    writeFileSync(md, "# hello\n");
+    expect((await readOpenableFile("notes.md", root, [], "application/pdf")).kind).toBe("text");
+    // Extension-less attachment blobs classify by allowlisted declared mime;
+    // they resolve inside an extra root named "attachments".
+    const attachmentsDir = join(root, "attachments");
+    mkdirSync(attachmentsDir);
+    const sha = "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a";
+    writeFileSync(join(attachmentsDir, sha), bytes);
+    const blobResult = await readOpenableFile(
+      `attachments/${sha}`,
+      root,
+      [attachmentsDir],
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    );
+    expect(blobResult.kind).toBe("document");
+    expect(blobResult.documentKind).toBe("pptx");
+    // Legacy OLE formats have no browser renderer and stay binary. The null
+    // bytes in the OLE header would classify them binary anyway; assert the
+    // explicit contract that they never become "document".
+    const legacy = join(root, "old.doc");
+    writeFileSync(legacy, Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0x00, 0x00]));
+    expect((await readOpenableFile("old.doc", root, [], undefined)).kind).toBe("binary");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

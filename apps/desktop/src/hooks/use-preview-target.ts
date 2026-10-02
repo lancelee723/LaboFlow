@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { isDocumentPreviewPath } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
 import { api } from "../lib/api";
 import { isHtmlFilePath, toWorkspaceRel, type ChatPreviewTarget } from "../lib/chat-links";
@@ -160,6 +161,14 @@ export function useOpenChatFileRef() {
           isHtmlFilePath(resolved.relativePath)
         ) {
           openUrl(resolved.relativePath);
+          return;
+        }
+        // PDF/Office documents always take the host file tab: that is the
+        // surface with the in-app document renderers (pdf.js, docx-preview,
+        // pptx-renderer, SheetJS). The file-manager editor has no renderer
+        // for them and used to dead-end on its binary message.
+        if (isDocumentPreviewPath(resolved.path)) {
+          openFile(resolved.path, mimeType);
           return;
         }
         if (resolved.inProject && fileViewAvailable) {

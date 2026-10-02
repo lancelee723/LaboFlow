@@ -1,6 +1,12 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { FsEntry, FsImageDataUrlResult, FsReadResult } from "@pi-desktop/shared";
+import {
+  DOCUMENT_PREVIEW_MIME,
+  type FsDocumentKind,
+  type FsEntry,
+  type FsImageDataUrlResult,
+  type FsReadResult,
+} from "@pi-desktop/shared";
 
 /**
  * Read-only workspace file access for the work panel files tab
@@ -26,6 +32,9 @@ const IGNORED_NAMES = new Set([
 
 export const MAX_TEXT_BYTES = 512 * 1024;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Office/PDF documents are streamed whole to in-app renderers; 50MB covers
+ * realistic decks while bounding both IPC transfer and parser memory. */
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
 export const IMAGE_MIME: Record<string, string> = {
   png: "image/png",
@@ -300,6 +309,29 @@ export function imageMimeFor(displayPath: string, mimeType?: string): string | u
 }
 
 /**
+ * In-app document renderer for the Files tab. A known document extension
+ * always wins so a client cannot reclassify `notes.md`; extension-less
+ * `attachments/<sha256>` blobs use an allowlisted stored mimeType. Legacy
+ * OLE formats (.doc/.ppt/.xls) are intentionally absent: no browser-side
+ * renderer exists for them, so they stay "binary".
+ */
+export function documentKindFor(
+  displayPath: string,
+  mimeType?: string,
+): FsDocumentKind | undefined {
+  const base = displayPath.replace(/\\/g, "/").split("/").pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+  if (ext && ext in DOCUMENT_PREVIEW_MIME) return ext as FsDocumentKind;
+  if (ext) return undefined;
+  const declared = String(mimeType ?? "").trim().toLowerCase();
+  const entry = (Object.entries(DOCUMENT_PREVIEW_MIME) as [FsDocumentKind, string][]).find(
+    ([, mime]) => mime.toLowerCase() === declared,
+  );
+  return entry?.[0];
+}
+
+/**
  * Classify one already-contained regular file for in-app preview.
  * Used by the host Files tab and by `pi.fs.readPreview` so the two
  * surfaces cannot drift on size caps or image detection.
@@ -326,6 +358,25 @@ export async function previewFile(
     return {
       kind: "image",
       dataUrl: `data:${imageMime};base64,${buffer.toString("base64")}`,
+      size: buffer.length,
+    };
+  }
+
+  // Documents are inherently binary, so this must run before the text-size
+  // and null-byte probes would reclassify them.
+  const documentKind = documentKindFor(rel, mimeType);
+  if (documentKind) {
+    if (info.size > MAX_DOCUMENT_BYTES) {
+      return { kind: "tooLarge", size: info.size };
+    }
+    const buffer = await readFile(fullPath);
+    if (buffer.length > MAX_DOCUMENT_BYTES) {
+      return { kind: "tooLarge", size: buffer.length };
+    }
+    return {
+      kind: "document",
+      documentKind,
+      dataUrl: `data:${DOCUMENT_PREVIEW_MIME[documentKind]};base64,${buffer.toString("base64")}`,
       size: buffer.length,
     };
   }

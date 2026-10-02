@@ -31,6 +31,7 @@ import {
   IconFolder,
 } from "../icons";
 import { WorkTabEmpty } from "./WorkTabEmpty";
+import { DocumentPreview } from "./DocumentPreview";
 
 const VIEWER_LINE_CAP = 5000;
 
@@ -371,6 +372,11 @@ export function FilesTab() {
             <div className="file-viewer-image">
               <img src={file.dataUrl} alt={selected} />
             </div>
+          ) : file.kind === "document" && file.documentKind && file.dataUrl ? (
+            <DocumentPreview
+              documentKind={file.documentKind}
+              dataUrl={file.dataUrl}
+            />
           ) : (
             <WorkTabEmpty
               icon={IconFileText}
