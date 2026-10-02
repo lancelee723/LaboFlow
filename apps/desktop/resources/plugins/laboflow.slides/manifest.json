@@ -8,7 +8,10 @@
   "main": "main.js",
   "ui": {
     "panel": "renderer/confirm-card.html",
-    "title": { "en": "PPT confirm card", "zh-CN": "PPT 确认卡" }
+    "title": {
+      "en": "PPT confirm card",
+      "zh-CN": "PPT 确认卡"
+    }
   },
   "contributes": {
     "agentTools": [
@@ -19,10 +22,19 @@
         "schema": {
           "type": "object",
           "properties": {
-            "topic": { "type": "string", "description": "Deck subject and core message" },
-            "outline": { "type": "object", "description": "Your drafted outline: { deckTitle, pages: [...] }" }
+            "topic": {
+              "type": "string",
+              "description": "Deck subject and core message"
+            },
+            "outline": {
+              "type": "object",
+              "description": "Your drafted outline: { deckTitle, pages: [...] }"
+            }
           },
-          "required": ["topic", "outline"]
+          "required": [
+            "topic",
+            "outline"
+          ]
         }
       },
       {
@@ -32,31 +44,61 @@
         "schema": {
           "type": "object",
           "properties": {
-            "deckTitle": { "type": "string" },
-            "fileName": { "type": "string" },
+            "deckTitle": {
+              "type": "string"
+            },
+            "fileName": {
+              "type": "string"
+            },
             "theme": {
               "type": "object",
               "properties": {
-                "accent": { "type": "string" },
-                "font": { "type": "string" }
+                "accent": {
+                  "type": "string"
+                },
+                "font": {
+                  "type": "string"
+                }
               }
             },
-            "pages": { "type": "array", "items": { "type": "object", "properties": { "layout": { "type": "string" }, "title": { "type": "string" } } } }
+            "pages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "layout": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
-          "required": ["deckTitle", "pages"]
+          "required": [
+            "deckTitle",
+            "pages"
+          ]
         }
       },
       {
         "name": "ppt_master_status",
         "description": "Check the PPT-Master (L2 精制引擎, vendored ppt-master) Python runtime and get { stage, skillDir, pythonPath, doctor }. ALWAYS call first before PPT-Master work; use the returned paths for every script call — never guess.",
         "risk": "low",
-        "schema": { "type": "object", "properties": {} }
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "ppt_master_setup",
         "description": "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard) as a background job. Returns { jobId } — poll with ppt_job_status. Call only when the user asked for L2 setup or approved it.",
         "risk": "medium",
-        "schema": { "type": "object", "properties": {} }
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "ppt_job_status",
@@ -64,7 +106,11 @@
         "risk": "low",
         "schema": {
           "type": "object",
-          "properties": { "jobId": { "type": "string" } }
+          "properties": {
+            "jobId": {
+              "type": "string"
+            }
+          }
         }
       },
       {
@@ -73,8 +119,14 @@
         "risk": "low",
         "schema": {
           "type": "object",
-          "properties": { "path": { "type": "string" } },
-          "required": ["path"]
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
         }
       },
       {
@@ -84,10 +136,28 @@
         "schema": {
           "type": "object",
           "properties": {
-            "script": { "type": "string", "enum": ["project_manager", "source_to_md", "text_measure", "quality_checker", "finalize_svg", "total_md_split", "svg_to_pptx", "image_search"] },
-            "args": { "type": "object", "description": "Per-script args, upstream-argparse-faithful (e.g. quality_checker: { target, stage, json }; svg_to_pptx: { projectPath, output?, source?, format? })" }
+            "script": {
+              "type": "string",
+              "enum": [
+                "project_manager",
+                "source_to_md",
+                "text_measure",
+                "quality_checker",
+                "finalize_svg",
+                "total_md_split",
+                "svg_to_pptx",
+                "image_search"
+              ]
+            },
+            "args": {
+              "type": "object",
+              "description": "Per-script args, upstream-argparse-faithful (e.g. quality_checker: { target, stage, json }; svg_to_pptx: { projectPath, output?, source?, format? })"
+            }
           },
-          "required": ["script", "args"]
+          "required": [
+            "script",
+            "args"
+          ]
         }
       },
       {
@@ -97,11 +167,25 @@
         "schema": {
           "type": "object",
           "properties": {
-            "projectDir": { "type": "string" },
-            "stage": { "type": "string", "enum": ["stage1", "stage2"] },
-            "recommendations": { "type": "object" }
+            "projectDir": {
+              "type": "string"
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "stage1",
+                "stage2"
+              ]
+            },
+            "recommendations": {
+              "type": "object"
+            }
           },
-          "required": ["projectDir", "stage", "recommendations"]
+          "required": [
+            "projectDir",
+            "stage",
+            "recommendations"
+          ]
         }
       },
       {
@@ -111,10 +195,20 @@
         "schema": {
           "type": "object",
           "properties": {
-            "projectDir": { "type": "string" },
-            "stage": { "type": "string", "enum": ["stage1", "stage2"] }
+            "projectDir": {
+              "type": "string"
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "stage1",
+                "stage2"
+              ]
+            }
           },
-          "required": ["projectDir"]
+          "required": [
+            "projectDir"
+          ]
         }
       }
     ],
@@ -122,19 +216,31 @@
       {
         "id": "openConfirmCard",
         "title": "Slides: 打开 PPT 确认卡 / Open PPT confirm card",
-        "keywords": ["ppt", "确认", "confirm", "slides", "设计"]
+        "keywords": [
+          "ppt",
+          "确认",
+          "confirm",
+          "slides",
+          "设计"
+        ]
       }
     ],
     "views": [
       {
         "id": "workbench",
-        "title": { "en": "PPT workbench", "zh-CN": "PPT 工作台" },
+        "title": {
+          "en": "PPT workbench",
+          "zh-CN": "PPT 工作台"
+        },
         "icon": "sparkles",
         "entry": "renderer/workbench.html",
         "order": 12
       }
     ],
-    "skills": ["./skills/slides.md", "./skills/ppt-master.md"],
+    "skills": [
+      "./skills/slides.md",
+      "./skills/ppt-master.md"
+    ],
     "settings": [
       {
         "key": "accentColor",
@@ -155,16 +261,40 @@
         "type": "select",
         "default": "default",
         "enum": [
-          { "label": "默认（官方源 / Default）", "value": "default" },
-          { "label": "清华 TUNA", "value": "https://pypi.tuna.tsinghua.edu.cn/simple" },
-          { "label": "阿里云", "value": "https://mirrors.aliyun.com/pypi/simple/" }
+          {
+            "label": "默认（官方源 / Default）",
+            "value": "default"
+          },
+          {
+            "label": "清华 TUNA",
+            "value": "https://pypi.tuna.tsinghua.edu.cn/simple"
+          },
+          {
+            "label": "阿里云",
+            "value": "https://mirrors.aliyun.com/pypi/simple/"
+          }
         ],
         "title": "Python package mirror",
         "description": "Index for PPT-Master runtime installs (pip/uv)"
+      },
+      {
+        "key": "budgetTokens",
+        "type": "number",
+        "default": 600000,
+        "title": "Deck token budget",
+        "description": "FR-PPT-16: estimated generation tokens per deck; stage-2 submission refuses when the estimate exceeds it"
       }
     ]
   },
-  "permissions": ["agent.tool.register", "agent.prompt.inject", "workspace.read", "fs.write", "ui.panel", "ui.view", "notify"],
+  "permissions": [
+    "agent.tool.register",
+    "agent.prompt.inject",
+    "workspace.read",
+    "fs.write",
+    "ui.panel",
+    "ui.view",
+    "notify"
+  ],
   "engines": {
     "piDesktop": ">=0.8.0"
   },

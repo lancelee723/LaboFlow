@@ -49,7 +49,21 @@ import {
   STAGES,
   submitStage,
 } from "./lib/ppt-state.js";
+import { budgetVerdict } from "./lib/ppt-estimate.js";
 import { PPT_SCRIPTS, planScript } from "./lib/ppt-script.js";
+
+/** FR-PPT-16: best-effort page count from the stage payload — directions
+ * carry page lists upstream; fall back to an explicit pageCount field. */
+function countStagePages(recommendations) {
+  if (!recommendations || typeof recommendations !== "object") return 0;
+  if (Number.isFinite(recommendations.pageCount)) return recommendations.pageCount;
+  const directions = recommendations.directions ?? recommendations.options ?? [];
+  if (!Array.isArray(directions) || !directions.length) return 0;
+  const first = directions[0] ?? {};
+  if (Array.isArray(first.pages)) return first.pages.length;
+  if (Number.isFinite(first.pageCount)) return first.pageCount;
+  return 0;
+}
 
 let toolsRegistered = false;
 let jobManager = null;
@@ -456,8 +470,22 @@ function registerStageTools() {
       const projectDir = String(args?.projectDir ?? "").trim();
       const stage = String(args?.stage ?? "").trim();
       if (!projectDir) return { error: "projectDir is required" };
+      // FR-PPT-16: cost estimate rides every submission; stage-2 refuses when
+      // the configured deck budget is exceeded (settings → budgetTokens).
+      const settings = await pi.plugin.getSettings().catch(() => ({}));
+      const pageCount = countStagePages(args?.recommendations);
+      const estimate = budgetVerdict(pageCount, settings?.budgetTokens);
+      if (stage === "stage2" && !estimate.ok) {
+        return {
+          error: `预估消耗 ${estimate.estimate} tokens，超过预算上限 ${estimate.budget}（可在插件设置调整 budgetTokens）`,
+          code: estimate.code,
+          estimate: estimate.estimate,
+          budget: estimate.budget,
+        };
+      }
       const verdict = submitStage(projectDir, stage, args?.recommendations);
       if (verdict.error) return { error: verdict.error };
+      return { ...verdict, estimate: estimate.estimate };
       pendingConfirm = { projectDir, stage, submittedAt: verdict.state.stages[stage]?.submittedAt ?? null };
       // The docked workbench polls for this pending decision and renders it at
       // the bottom of the panel; no floating popup anymore. Keep a native

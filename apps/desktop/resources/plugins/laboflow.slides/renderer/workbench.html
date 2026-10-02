@@ -89,6 +89,7 @@
   <span class="muted" id="pg-label">0 / 0</span>
   <button id="pg-next">→</button>
   <span class="muted" id="pg-placeholder"></span>
+    <button id="btn-regen" class="btn" type="button" title="把重生成指令复制到剪贴板，粘贴到会话即可驱动代理重绘该页">重生成该页</button>
 </div>
 
 <h2 id="t-exports"></h2>
@@ -248,6 +249,19 @@ async function showPage() {
   const page = pages[pageIndex];
   document.getElementById("pg-label").textContent = `${pageIndex + 1} / ${pages.length}`;
   document.getElementById("pg-placeholder").textContent = page.name + (page.bytes ? ` · ${bytes(page.bytes)}` : "");
+  // FR-PPT-04 页级操作: one-click regenerate instruction lands on the
+  // clipboard; the user pastes it into the chat to drive the agent.
+  const regen = document.getElementById("btn-regen");
+  if (regen) {
+    regen.onclick = async () => {
+      const instruction = `重新生成第 ${pageIndex + 1} 页（${page.name}）：`;
+      try {
+        await navigator.clipboard.writeText(instruction);
+        regen.textContent = "已复制";
+        window.setTimeout(() => { regen.textContent = "重生成该页"; }, 1200);
+      } catch { regen.textContent = "复制失败"; }
+    };
+  }
   const { svg, error } = await bridge.invoke("ppt.readSvg", { path: `${projectDir}/${page.dir}/${page.name}` });
   const preview = document.getElementById("preview");
   if (error || !svg) {
