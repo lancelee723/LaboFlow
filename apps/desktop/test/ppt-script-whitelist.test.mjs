@@ -6,13 +6,15 @@ import { EXPORT_SCRIPTS, planScript, PPT_SCRIPTS } from "../resources/plugins/la
 import { assertExportAllowed } from "../resources/plugins/laboflow.slides/lib/ppt-state.js";
 
 const PLUGIN_DIR = "/plugins/laboflow.slides";
+const planScriptHelper = () => ({ plan });
 const plan = (script, args, exportGate) =>
   planScript({ pluginDir: PLUGIN_DIR, script, args, exportGate: exportGate ?? (() => ({ ok: true })) });
 
-test("the whitelist is exactly the deterministic tail (8 pinned entries)", () => {
+test("the whitelist is exactly the deterministic tail (9 pinned entries)", () => {
   assert.deepEqual(Object.keys(PPT_SCRIPTS).sort(), [
     "finalize_svg",
     "image_search",
+    "pptx_template_import",
     "project_manager",
     "quality_checker",
     "source_to_md",
@@ -87,6 +89,17 @@ test("argspec snapshot: svg_to_pptx keeps -s project-relative (never absolute)",
     "--native-charts-and-tables",
   ]);
   assert.equal(plan("svg_to_pptx", {}).code, "PPT_SCRIPT_INVALID_ARGS");
+});
+
+test("argspec snapshot: pptx_template_import requires source and user-dir output", () => {
+  const { plan } = planScriptHelper();
+  const missing = plan("pptx_template_import", {});
+  assert.equal(missing.ok, false);
+  const missingOutput = plan("pptx_template_import", { pptxFile: "/w/src.pptx" });
+  assert.equal(missingOutput.ok, false);
+  const ok = plan("pptx_template_import", { pptxFile: "/w/src.pptx", output: "/home/u/.laboflow/slide-templates/brand-a" });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.argv, ["/w/src.pptx", "-o", "/home/u/.laboflow/slide-templates/brand-a"]);
 });
 
 test("argspec snapshot: text_measure calibrate and image_search", () => {

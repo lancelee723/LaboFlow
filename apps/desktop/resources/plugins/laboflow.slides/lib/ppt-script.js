@@ -216,6 +216,18 @@ export const PPT_SCRIPTS = {
     },
   },
 
+  pptx_template_import: {
+    script: "scripts/pptx_template_import.py",
+    summary: "模板蒸馏第一步：把用户自有 .pptx 解析为可复用参考工作区（analysis 清单 + 分层 SVG 视图），输出目录必须显式指定在用户模板目录下",
+    buildArgs: (args) => {
+      if (!safeToken(args.pptxFile).trim()) return { error: "需要 pptxFile（源 .pptx 绝对路径）" };
+      if (!safeToken(args.output).trim()) return { error: "需要 output（模板工作区绝对路径，须位于用户模板目录）" };
+      const argv = [safeToken(args.pptxFile), "-o", safeToken(args.output)];
+      if (args.manifestOnly) argv.push("--manifest-only");
+      if (args.inheritanceMode) argv.push("--inheritance-mode", safeToken(args.inheritanceMode));
+      return { argv };
+    },
+  },
   image_search: {
     script: "scripts/image_search.py",
     summary: "免 key 图片搜索下载（Openverse/Wikimedia），来源清单落 image_sources.json",

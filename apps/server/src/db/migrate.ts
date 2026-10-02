@@ -391,6 +391,24 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       );`,
     ],
   },
+  {
+    version: 10,
+    name: 'org-slide-templates',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS org_slide_templates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id TEXT NOT NULL DEFAULT 'default',
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        contract JSONB NOT NULL DEFAULT '{}',
+        usage_note TEXT NOT NULL DEFAULT '',
+        storage_key TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        published_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {

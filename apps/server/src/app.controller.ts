@@ -44,6 +44,7 @@ export interface ServerDeps {
   expertPacks: ExpertPackService;
   spaces: SpaceService;
   yjsHub: YjsHub;
+  storageDir: string;
   wechatMp: WechatMpService;
 }
 
@@ -413,6 +414,11 @@ class CoreController {
     // Module 01 组织专家库下发（FR-E-18）：enabled 的专家/专家团定义包
     // [{kind, name, payload, version}]；客户端落为只读副本（source=org）。
     const expertPacks = await this.deps.expertPacks.deliveryFor();
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const slideTemplates = await this.deps.db.select({
+      id: orgSlideTemplates.id, name: orgSlideTemplates.name, version: orgSlideTemplates.version,
+      contract: orgSlideTemplates.contract, usageNote: orgSlideTemplates.usageNote,
+    }).from(orgSlideTemplates).where(eq(orgSlideTemplates.enabled, true));
     return {
       org: { name: 'LaboFlow Org', teamId: actor.teamId, teamName },
       me: { userId: actor.userId, username: user.username, displayName: user.displayName, role: actor.role },
@@ -422,6 +428,7 @@ class CoreController {
       policyFloor,
       orgSkills: skills,
       kbServers,
+      slideTemplates,
       expertPacks,
     };
   }
@@ -499,6 +506,61 @@ class CoreController {
       if (err instanceof KbError) throw new HttpException(err.message, err.status);
       throw err;
     }
+  }
+
+  // ----- FR-PPT-14 组织模板包：发布/列表/bootstrap 下发 -----
+  @Post('org/slide-templates')
+  @HttpCode(200)
+  async publishSlideTemplate(@Req() req: FastifyRequest, @Body() body: { name?: string; contract?: unknown; usageNote?: string; contentBase64?: string }) {
+    const actor = requireActor(req);
+    if (actor.role !== 'sys_admin' && actor.role !== 'team_admin') throw new HttpException('仅管理员可发布模板包', 403);
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const content = Buffer.from(String(body.contentBase64 ?? ''), 'base64');
+    if (!content.length) throw new HttpException('模板包内容为空', 422);
+    const [row] = await this.deps.db.insert(orgSlideTemplates).values({
+      name: String(body.name ?? 'template'),
+      contract: (body.contract ?? {}) as object,
+      usageNote: String(body.usageNote ?? ''),
+      storageKey: 'pending',
+      publishedBy: actor.userId,
+    }).returning();
+    const key = path.join(this.deps.storageDir, 'slide-templates', row!.id, 'v1');
+    fs.mkdirSync(path.dirname(key), { recursive: true });
+    fs.writeFileSync(key, content);
+    await this.deps.db.update(orgSlideTemplates).set({ storageKey: key }).where(eq(orgSlideTemplates.id, row!.id));
+    return { id: row!.id, name: row!.name, version: row!.version };
+  }
+
+  @Get('org/slide-templates')
+  async listSlideTemplates() {
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const rows = await this.deps.db.select({
+      id: orgSlideTemplates.id, name: orgSlideTemplates.name, version: orgSlideTemplates.version,
+      contract: orgSlideTemplates.contract, usageNote: orgSlideTemplates.usageNote, enabled: orgSlideTemplates.enabled,
+    }).from(orgSlideTemplates);
+    return rows;
+  }
+
+  @Delete('org/slide-templates/:id')
+  async deleteSlideTemplate(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    if (actor.role !== 'sys_admin' && actor.role !== 'team_admin') throw new HttpException('仅管理员可删除模板包', 403);
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    await this.deps.db.update(orgSlideTemplates).set({ enabled: false }).where(eq(orgSlideTemplates.id, id));
+    return { ok: true };
+  }
+
+  /** 模板包内容下发（成员端拉取，24h 语义之外的直读）。 */
+  @Get('org/slide-templates/:id/content')
+  async slideTemplateContent(@Req() req: FastifyRequest, @Param('id') id: string) {
+    requireActor(req);
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const [row] = await this.deps.db.select().from(orgSlideTemplates).where(eq(orgSlideTemplates.id, id)).limit(1);
+    if (!row || !row.enabled) throw new HttpException('模板包不存在', 404);
+    const fs = await import('node:fs');
+    return { name: row.name, contract: row.contract, contentBase64: fs.readFileSync(row.storageKey).toString('base64') };
   }
 
   // ----- Module 01 组织专家库 (T51.8, FR-E-18/19)：发布/版本/bootstrap 下发 -----
@@ -1223,6 +1285,7 @@ export async function bootstrap(options: {
     )),
     expertPacks: new ExpertPackService(db),
     spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail), options.storageDir),
+    storageDir: options.storageDir ?? './storage',
     yjsHub: new YjsHub(db, {
       assertHtmlDocAccess: (spaceId, nodeId, userId) =>
         deps.spaces.assertHtmlDocAccess(spaceId, userId, nodeId),
