@@ -559,6 +559,12 @@ export const ptBR = {
     fileGroup: "Files",
     expertGroup: "Experts",
     teamGroup: "Expert teams",
+    pickSpaceDoc: "Espaço de equipe",
+    spaceAllSpaces: "Todos os espaços",
+    spaceDocsEmpty: "Sem documentos neste espaço",
+    spaceDocsLoading: "Carregando…",
+    noSpacesYet: "Ainda não há espaços de equipe",
+    spaceDocAttached: "{{name}} anexado",
   },
   session: {
     renameTitle: "Renomear tarefa",
@@ -1592,6 +1598,8 @@ export const ptBR = {
     usage: {
       totalTokens: "Total tokens",
       peakTokens: "Peak day",
+      weekTotal: "Total semanal",
+      monthTotal: "Total mensal",
       currentStreak: "Current streak",
       longestStreak: "Longest streak",
       totalTurns: "Total turns",
