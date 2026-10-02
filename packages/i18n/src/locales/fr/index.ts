@@ -559,6 +559,12 @@ export const fr = {
     fileGroup: "Fichiers",
     expertGroup: "Experts",
     teamGroup: "Équipes d'experts",
+    pickSpaceDoc: "Espace d'équipe",
+    spaceAllSpaces: "Tous les espaces",
+    spaceDocsEmpty: "Aucun document dans cet espace",
+    spaceDocsLoading: "Chargement…",
+    noSpacesYet: "Aucun espace d'équipe pour le moment",
+    spaceDocAttached: "{{name}} joint",
   },
   session: {
     renameTitle: "Renommer la tâche",

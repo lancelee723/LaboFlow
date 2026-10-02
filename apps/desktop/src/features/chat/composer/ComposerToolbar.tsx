@@ -22,6 +22,9 @@ import { TooltipButton } from "../../../components/ui";
 import {
   IconArrowUp,
   IconAtSign,
+  IconChevronLeft,
+  IconFileText,
+  IconFolder,
   IconGraduationCap,
   IconNewSession,
   IconPaperclip,
@@ -33,7 +36,7 @@ import {
   IconUsers,
 } from "../../../components/icons";
 import { api, type ExpertListItem, type ExpertTeamListItem } from "../../../lib/api";
-import type { SessionSummary } from "@pi-desktop/shared";
+import type { SessionSummary, SpaceDto, SpaceNode } from "@pi-desktop/shared";
 import { ModeIcon } from "./ComposerModeIcon";
 import { LiveVoiceControls } from "../../voice/live/LiveVoiceControls";
 import { ComposerModelPicker } from "./ComposerModelPicker";
@@ -45,6 +48,25 @@ import type { useComposerModelMenu } from "./hooks/useComposerModelMenu";
 
 type ModelMenuController = ReturnType<typeof useComposerModelMenu>;
 type ContextUsage = Parameters<typeof ContextUsageInspector>[0];
+
+/** Flatten a space tree (parent-before-child rows with attached children)
+ * into an indented list of attachable documents — only md/csv/html nodes the
+ * user can read; folders are navigation-only in the plus menu. */
+function spaceDocEntries(
+  nodes: SpaceNode[],
+): Array<{ node: SpaceNode; depth: number }> {
+  const entries: Array<{ node: SpaceNode; depth: number }> = [];
+  const depthById = new Map<string, number>();
+  for (const node of nodes) {
+    if (node.perm === "none") continue;
+    const depth = node.parentId ? (depthById.get(node.parentId) ?? 0) + 1 : 0;
+    depthById.set(node.id, depth);
+    if (node.type === "md" || node.type === "csv" || node.type === "html") {
+      entries.push({ node, depth });
+    }
+  }
+  return entries;
+}
 
 export type ComposerToolbarProps = {
   t: TFunction;
@@ -61,6 +83,12 @@ export type ComposerToolbarProps = {
   pickAndAttach: () => Promise<void>;
   /** LaboFlow FR-C-34/module 01: attach a conversation transcript as context. */
   onAttachSession: (session: SessionSummary) => void | Promise<void>;
+  /** LaboFlow FR-TC-17/module 02: attach a team-space document as context. */
+  onAttachSpaceDoc: (
+    spaceId: string,
+    spaceName: string,
+    node: { id: string; name: string },
+  ) => void | Promise<void>;
   /** Insert plain text at the caret (plus menu item actions). */
   insertComposerText: (text: string) => void;
   configureActiveSession: AppState["configureActiveSession"];
@@ -100,6 +128,7 @@ export function ComposerToolbar({
   pasting,
   pickAndAttach,
   onAttachSession,
+  onAttachSpaceDoc,
   insertComposerText,
   configureActiveSession,
   showToast,
@@ -135,6 +164,12 @@ export function ComposerToolbar({
   const [plusContextMode, setPlusContextMode] = useState(false);
   const [plusSkillMode, setPlusSkillMode] = useState(false);
   const [plusExpertMode, setPlusExpertMode] = useState(false);
+  const [plusSpaceMode, setPlusSpaceMode] = useState(false);
+  const [plusSpaces, setPlusSpaces] = useState<SpaceDto[] | null>(null);
+  const [plusSpaceDocs, setPlusSpaceDocs] = useState<{
+    space: SpaceDto;
+    nodes: SpaceNode[];
+  } | null>(null);
   const [contextQuery, setContextQuery] = useState("");
   const [plusSkills, setPlusSkills] = useState<
     Array<{ name: string; title?: string; description?: string }> | null
@@ -161,6 +196,9 @@ export function ComposerToolbar({
     setPlusSkillMode(false);
     setPlusExpertMode(false);
     setPlusContextMode(false);
+    setPlusSpaceMode(false);
+    setPlusSpaces(null);
+    setPlusSpaceDocs(null);
     setContextQuery("");
   };
 
@@ -195,6 +233,41 @@ export function ComposerToolbar({
       cancelled = true;
     };
   }, [plusMenuOpen, plusSkillMode, plusSkills]);
+
+  useEffect(() => {
+    if (!plusMenuOpen || !plusSpaceMode || plusSpaces) return;
+    let cancelled = false;
+    api
+      .listSpaces()
+      .then((result) => {
+        if (!cancelled) setPlusSpaces((result ?? []).filter((space) => !space.archivedAt));
+      })
+      .catch(() => {
+        if (!cancelled) setPlusSpaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plusMenuOpen, plusSpaceMode, plusSpaces]);
+
+  const openSpaceDocs = (space: SpaceDto) => {
+    setPlusSpaceDocs({ space, nodes: [] });
+    api
+      .spaceTree(space.id)
+      .then((nodes) => {
+        // Apply only if the user is still browsing this space's doc list.
+        setPlusSpaceDocs((current) =>
+          current && current.space.id === space.id
+            ? { space, nodes: nodes ?? [] }
+            : current,
+        );
+      })
+      .catch(() => {
+        setPlusSpaceDocs((current) =>
+          current && current.space.id === space.id ? { space, nodes: [] } : current,
+        );
+      });
+  };
 
   useEffect(() => {
     if (!plusMenuOpen || !plusExpertMode || plusExperts) return;
@@ -244,6 +317,9 @@ export function ComposerToolbar({
               setPlusSkillMode(false);
               setPlusExpertMode(false);
               setPlusContextMode(false);
+              setPlusSpaceMode(false);
+              setPlusSpaces(null);
+              setPlusSpaceDocs(null);
               setContextQuery("");
               setPlusMenuOpen((open) => !open);
             }}
@@ -274,6 +350,67 @@ export function ComposerToolbar({
                     <div className="composer-plus-empty">{t("chat.contextEmpty")}</div>
                   ) : null}
                 </>
+              ) : plusSpaceMode ? (
+                plusSpaceDocs ? (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-plus-item"
+                      onClick={() => setPlusSpaceDocs(null)}
+                    >
+                      <IconChevronLeft size={14} />
+                      <span>{t("chat.spaceAllSpaces")}</span>
+                    </button>
+                    {spaceDocEntries(plusSpaceDocs.nodes).map((entry) => (
+                      <button
+                        key={entry.node.id}
+                        type="button"
+                        role="menuitem"
+                        className="composer-plus-item"
+                        style={{ paddingLeft: `${8 + Math.min(entry.depth, 4) * 14}px` }}
+                        title={entry.node.name}
+                        onClick={() => {
+                          const space = plusSpaceDocs.space;
+                          closePlusMenu();
+                          void onAttachSpaceDoc(space.id, space.name, entry.node);
+                        }}
+                      >
+                        <IconFileText size={14} />
+                        <span>{entry.node.name}</span>
+                      </button>
+                    ))}
+                    {plusSpaceDocs.nodes.length &&
+                    !spaceDocEntries(plusSpaceDocs.nodes).length ? (
+                      <div className="composer-plus-empty">{t("chat.spaceDocsEmpty")}</div>
+                    ) : null}
+                    {!plusSpaceDocs.nodes.length ? (
+                      <div className="composer-plus-empty">{t("chat.spaceDocsLoading")}</div>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {(plusSpaces ?? []).map((space) => (
+                      <button
+                        key={space.id}
+                        type="button"
+                        role="menuitem"
+                        className="composer-plus-item"
+                        title={space.description || undefined}
+                        onClick={() => openSpaceDocs(space)}
+                      >
+                        <IconFolder size={14} />
+                        <span>{space.name}</span>
+                      </button>
+                    ))}
+                    {plusSpaces && !plusSpaces.length ? (
+                      <div className="composer-plus-empty">{t("chat.noSpacesYet")}</div>
+                    ) : null}
+                    {!plusSpaces ? (
+                      <div className="composer-plus-empty">{t("chat.spaceDocsLoading")}</div>
+                    ) : null}
+                  </>
+                )
               ) : plusExpertMode ? (
                 <>
                   {(plusExperts ?? []).map((expert) => (
@@ -370,6 +507,17 @@ export function ComposerToolbar({
                   >
                     <IconAtSign size={14} />
                     <span>{t("chat.addContext")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="composer-plus-item"
+                    onClick={() => {
+                      setPlusSpaceMode(true);
+                    }}
+                  >
+                    <IconFolder size={14} />
+                    <span>{t("chat.pickSpaceDoc")}</span>
                   </button>
                   <button
                     type="button"

@@ -559,6 +559,12 @@ export const zhTW = {
     fileGroup: "檔案",
     expertGroup: "專家",
     teamGroup: "專家團隊",
+    pickSpaceDoc: "團隊空間",
+    spaceAllSpaces: "全部空間",
+    spaceDocsEmpty: "該空間暫無文件",
+    spaceDocsLoading: "載入中…",
+    noSpacesYet: "還沒有團隊空間",
+    spaceDocAttached: "已附加 {{name}}",
   },
   session: {
     renameTitle: "重新命名任務",

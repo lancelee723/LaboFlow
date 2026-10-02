@@ -1849,6 +1849,15 @@ export const api = {
     invoke<import("@pi-desktop/shared").SpaceNode[]>(IPC.invoke.spaceTree, {
       spaceId,
     }),
+  composerAttachSpaceDoc: (input: {
+    sessionId: string;
+    spaceId: string;
+    nodeId: string;
+  }) =>
+    invoke<{ files: Array<{ path: string; name: string; kind: string }> }>(
+      IPC.invoke.composerAttachSpaceDoc,
+      input,
+    ),
   spaceNodeCreate: (input: {
     spaceId: string;
     parentId: string | null;

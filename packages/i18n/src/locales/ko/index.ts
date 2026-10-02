@@ -559,6 +559,12 @@ export const ko = {
     fileGroup: "파일",
     expertGroup: "전문가",
     teamGroup: "전문가 팀",
+    pickSpaceDoc: "팀 스페이스",
+    spaceAllSpaces: "모든 스페이스",
+    spaceDocsEmpty: "이 스페이스에 문서가 없습니다",
+    spaceDocsLoading: "불러오는 중…",
+    noSpacesYet: "아직 팀 스페이스가 없습니다",
+    spaceDocAttached: "{{name}} 첨부됨",
   },
   session: {
     renameTitle: "작업 이름 바꾸기",

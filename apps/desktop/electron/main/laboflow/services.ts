@@ -200,6 +200,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
   // that pass the allowlist dispatch through the headless driver and the
   // result is sent back over the channel adapter.
   let spaceHost: ReturnType<typeof createSpaceIpcHost> | undefined;
+  let spaceClient: ReturnType<typeof createSpaceClient> | undefined;
   /** Org-session accessors for channel adapters that need them (wechat_mp). */
   const orgChannelContext: {
     tokenProvider?: () => Promise<string>;
@@ -462,13 +463,13 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     return response.json().catch(() => ({}));
   }
   spaceHost = createSpaceIpcHost({
-    client: createSpaceClient({
+    client: (spaceClient = createSpaceClient({
       getJson: (path) => orgService.getOrgJson(path),
       postJson: (path, body) => orgService.postOrgJson(path, body),
       patchJson: (path, body) => spaceOrgRequest("PATCH", path, body),
       putJson: (path, body) => spaceOrgRequest("PUT", path, body),
       deleteJson: (path) => spaceOrgRequest("DELETE", path),
-    }),
+    })),
     emit: (frame) => sendToRenderer(IPC.event.spaceEvent, frame),
     warn: (context, message) =>
       logger.app("session", "warn", "space events poll", {
@@ -564,6 +565,68 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           targetSessionId,
           source.title || "",
           source.messages ?? [],
+        );
+        return { files: [saved] };
+      },
+    );
+
+    // Team-space doc reference (FR-TC-17): snapshot a server-side space
+    // document into the session scratch dir so the composer can attach it
+    // like an imported file. The fetch rides the user's own org credentials,
+    // so the permission filter stays server-authoritative.
+    laboflowHandle(
+      IPC.invoke.composerAttachSpaceDoc,
+      async (
+        event,
+        input: {
+          sessionId?: unknown;
+          spaceId?: unknown;
+          nodeId?: unknown;
+        } = {},
+      ) => {
+        const { attachSpaceDoc } = await import("../session-attach");
+        deps.assertMainWindowSender(event);
+        if (!spaceClient) throw new Error("space client unavailable");
+        const sessionId =
+          typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        const spaceId =
+          typeof input.spaceId === "string" ? input.spaceId.trim() : "";
+        const nodeId =
+          typeof input.nodeId === "string" ? input.nodeId.trim() : "";
+        if (!sessionId || !spaceId || !nodeId) {
+          throw Object.assign(new Error("invalid space attach input"), {
+            errorCode: "INVALID_ARGUMENT",
+          });
+        }
+        const nodes = await spaceClient.tree(spaceId);
+        const node = nodes.find((entry) => entry.id === nodeId);
+        if (!node) {
+          throw Object.assign(new Error("space node not found"), {
+            errorCode: "NOT_FOUND",
+          });
+        }
+        if (node.type !== "md" && node.type !== "csv" && node.type !== "html") {
+          throw Object.assign(
+            new Error("only md/csv/html documents can be attached"),
+            { errorCode: "NOT_SUPPORTED" },
+          );
+        }
+        if (node.perm === "none") {
+          throw Object.assign(new Error("no access to this document"), {
+            errorCode: "FORBIDDEN",
+          });
+        }
+        const spaces = await spaceClient.listSpaces();
+        const spaceName =
+          spaces.find((space) => space.id === spaceId)?.name ?? spaceId;
+        const doc = await spaceClient.getDoc(spaceId, nodeId);
+        const saved = await attachSpaceDoc(
+          dataDir,
+          sessionId,
+          node.name,
+          node.type,
+          spaceName,
+          doc.content ?? "",
         );
         return { files: [saved] };
       },

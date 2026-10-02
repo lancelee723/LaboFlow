@@ -81,3 +81,56 @@ export async function attachSessionTranscript(
   await writeFile(path, renderSessionMarkdown(title, messages), "utf8");
   return { path, name, kind: "file" };
 }
+
+/** Team-space doc attachment (FR-TC-17): export a server-side space document
+ * into the session scratch directory so the composer can reference it like an
+ * imported file. The agent reads the snapshot with the user's own rights —
+ * the fetch itself already went through the server's permission filter. */
+
+const MAX_SPACE_DOC_CHARS = 400_000;
+
+const SPACE_DOC_EXTENSIONS: Record<string, string> = {
+  md: ".md",
+  csv: ".csv",
+  html: ".html",
+};
+
+export function renderSpaceDocMarkdown(
+  docName: string,
+  spaceName: string,
+  content: string,
+): string {
+  const header = `# 团队空间文档：${docName}\n\n（来源空间：${spaceName}）\n\n`;
+  if (content.length > MAX_SPACE_DOC_CHARS) {
+    return `${header}${content.slice(0, MAX_SPACE_DOC_CHARS)}\n\n（文档过长，已截断）\n`;
+  }
+  return `${header}${content}\n`;
+}
+
+function spaceDocFileName(docName: string, docType: string): string {
+  const base = (docName || "document")
+    .replace(/[\\/:*?"<>|\s]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "document";
+  const ext = SPACE_DOC_EXTENSIONS[docType] ?? ".md";
+  return base.endsWith(ext) ? base : `${base}${ext}`;
+}
+
+export async function attachSpaceDoc(
+  dataDir: string,
+  targetSessionId: string,
+  docName: string,
+  docType: string,
+  spaceName: string,
+  content: string,
+): Promise<AttachedSessionFile> {
+  if (!SAFE_SESSION_ID.test(targetSessionId)) {
+    throw new Error("invalid session id");
+  }
+  const scratchDir = join(dataDir, "scratch", targetSessionId);
+  await mkdir(scratchDir, { recursive: true });
+  const name = spaceDocFileName(docName, docType);
+  const path = join(scratchDir, name);
+  await writeFile(path, renderSpaceDocMarkdown(docName, spaceName, content), "utf8");
+  return { path, name, kind: "file" };
+}

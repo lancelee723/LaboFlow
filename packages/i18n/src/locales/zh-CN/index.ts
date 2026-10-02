@@ -559,6 +559,12 @@ export const zhCN = {
     fileGroup: "文件",
     expertGroup: "专家",
     teamGroup: "专家团队",
+    pickSpaceDoc: "团队空间",
+    spaceAllSpaces: "全部空间",
+    spaceDocsEmpty: "该空间暂无文档",
+    spaceDocsLoading: "加载中…",
+    noSpacesYet: "还没有团队空间",
+    spaceDocAttached: "已附加 {{name}}",
   },
   session: {
     renameTitle: "重命名任务",
