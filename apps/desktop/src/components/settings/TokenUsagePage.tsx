@@ -16,7 +16,8 @@ type RangeId = "7d" | "30d";
 /** ZCode-parity granularity for the activity heatmap. */
 type HeatMode = "day" | "week" | "cumulative";
 
-const HEAT_WEEKS = 26;
+// Half-width cells: 52 columns fit a full year of days in the same canvas.
+const HEAT_WEEKS = 52;
 const TREND_MAX_DAYS = 30;
 /** Categorical palette for per-model trend lines (ZCode reference order). */
 const MODEL_COLORS = [
