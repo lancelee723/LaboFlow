@@ -10,8 +10,8 @@ register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const nodeRequire = createRequire(import.meta.url);
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("clip url guard: http(s) only, no credentials, parse errors mapped", async () => {
-  const { validateClipUrl, clipErrorMessage } = await import(
+test("clip url guard: http(s) only and no credentials", async () => {
+  const { validateClipUrl } = await import(
     "../electron/main/web-clipper.ts"
   );
   const ok = validateClipUrl("  https://example.com/a?b=1 ");
@@ -20,10 +20,6 @@ test("clip url guard: http(s) only, no credentials, parse errors mapped", async 
   assert.throws(() => validateClipUrl("ftp://x"), /http\(s\)/);
   assert.throws(() => validateClipUrl("https://user:pass@example.com/"), /credentials/);
   assert.throws(() => validateClipUrl("not a url"), /invalid url/);
-  assert.equal(clipErrorMessage(403), "page requires login");
-  assert.equal(clipErrorMessage(404), "page not found");
-  assert.equal(clipErrorMessage(502), "server error");
-  assert.equal(clipErrorMessage(418), "http 418");
 });
 
 test("parseHtmlToBlocks converts article markup into editor blocks", async () => {

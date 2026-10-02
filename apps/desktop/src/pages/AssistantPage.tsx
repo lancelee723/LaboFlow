@@ -61,7 +61,7 @@ export function AssistantPage() {
       });
     });
     api
-      .assistantChannelStatus()
+      .channelsList()
       .then((rows) => {
         if (!cancelled) setChannels(rows ?? []);
       })

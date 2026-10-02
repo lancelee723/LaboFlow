@@ -763,11 +763,6 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         return { started: true };
       },
     );
-    laboflowHandle(IPC.invoke.assistantChannelStatus, async (event) => {
-      deps.assertMainWindowSender(event);
-      return channelHost.registry.list();
-    });
-
     // Module 03/T53.3: webhook settings (read masked status / reconfigure).
     laboflowHandle(IPC.invoke.assistantWebhookGet, async (event) => {
       deps.assertMainWindowSender(event);

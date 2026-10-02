@@ -441,7 +441,6 @@ export const IPC = {
     assistantSessionGet: "pi-desktop/assistant/session/get",
     assistantHistory: "pi-desktop/assistant/history",
     assistantSend: "pi-desktop/assistant/send",
-    assistantChannelStatus: "pi-desktop/assistant/channelStatus",
     assistantWebhookGet: "pi-desktop/assistant/webhook/get",
     assistantWebhookSet: "pi-desktop/assistant/webhook/set",
     spaceNotificationsPull: "pi-desktop/space/notifications/pull",

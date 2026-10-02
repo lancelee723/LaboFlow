@@ -1926,10 +1926,6 @@ export const api = {
     invoke<Array<{ role?: string; content?: string; createdAt?: string }>>(IPC.invoke.assistantHistory, input),
   assistantSend: (input: { sessionId: string; text: string }) =>
     invoke<{ started: true }>(IPC.invoke.assistantSend, input),
-  assistantChannelStatus: () =>
-    invoke<Array<{ id: string; provider: string; name: string; state: string }>>(
-      IPC.invoke.assistantChannelStatus,
-    ),
   onAssistantTurnDone: (
     listener: (payload: { sessionId: string; status: string; finalText?: string; error?: string }) => void,
   ) => {

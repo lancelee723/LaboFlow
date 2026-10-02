@@ -44,14 +44,6 @@ export function validateClipUrl(rawUrl: string): URL {
   return parsed;
 }
 
-/** Pure helper (unit-tested): the human message a failed load maps to. */
-export function clipErrorMessage(status: number): string {
-  if (status === 403 || status === 401) return "page requires login";
-  if (status === 404) return "page not found";
-  if (status >= 500) return "server error";
-  return `http ${status}`;
-}
-
 export async function clipWebPage(rawUrl: string): Promise<ClipResult> {
   const url = validateClipUrl(rawUrl);
   const clippedAt = new Date().toISOString();

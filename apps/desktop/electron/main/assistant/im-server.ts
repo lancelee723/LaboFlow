@@ -76,7 +76,6 @@ export function createWebhookServer(input: {
     secret?: string;
     port?: number;
     lanOpen?: boolean;
-    rotateSecret?: boolean;
   }): Promise<WebhookStatus>;
   describe(): WebhookStatus;
 } {
@@ -339,7 +338,6 @@ export function createWebhookServer(input: {
     secret?: string;
     port?: number;
     lanOpen?: boolean;
-    rotateSecret?: boolean;
   }): Promise<WebhookStatus> {
     if (patch.secret !== undefined) config.secret = patch.secret;
     if (patch.lanOpen !== undefined) config.lanOpen = patch.lanOpen;

@@ -12,10 +12,7 @@
  * (none stays a 404-style close), matching the REST face of the space module.
  */
 
-import {
-  applyUpdate, encodeStateAsUpdate, encodeStateVector, Doc as YDoc,
-  applyUpdate as applyUpdateToDoc,
-} from 'yjs';
+import { encodeStateAsUpdate, encodeStateVector, Doc as YDoc, applyUpdate as applyUpdateToDoc } from 'yjs';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
@@ -259,5 +256,3 @@ export class YjsHub {
     return this.rooms.size;
   }
 }
-
-export { applyUpdate };

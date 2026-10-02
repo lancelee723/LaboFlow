@@ -13,6 +13,7 @@ import type { PersistenceOutbox } from "../persistence-outbox";
 import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
 import { withPromptEnhancementTimeout } from "../prompt-enhancement-timeout";
+import { settleUnattendedAsk } from "../assistant/unattended-policy";
 
 export type AgentIpcDependencies = {
   registrar: IpcRegistrar;
@@ -818,6 +819,7 @@ export function registerAgentIpc({
     decision: string;
   }) => {
     if (!host) throw new Error("host unavailable");
+    settleUnattendedAsk(resolution.requestId);
     logger.app("permission", "info", "permission resolved", {
       data: { requestId: resolution.requestId, decision: resolution.decision },
     });

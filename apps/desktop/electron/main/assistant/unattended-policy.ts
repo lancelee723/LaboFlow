@@ -49,7 +49,6 @@ export type UnattendedAskDeps = {
   /** Renderer/notification sink (approval loop, denials). */
   notify: (payload: Record<string, unknown>) => void;
   log: (level: string, message: string) => void;
-  now?: () => number;
 };
 
 /**
