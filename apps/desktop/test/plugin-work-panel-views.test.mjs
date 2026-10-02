@@ -303,3 +303,29 @@ test("closing a tab destroys its plugin view — not only the browser's", () => 
     /else \{\s*\n\s*void api\.pluginViewClose\(ref\.pluginId, ref\.viewId\)/,
   );
 });
+
+test("the view host drops the visible view when the owning renderer goes away", () => {
+  // Regression (LaboFlow): visibility is renderer-owned — PluginViewTab's
+  // cleanup is the only thing that hides an attached view. A reload or a
+  // renderer crash destroys that owner without running any cleanup, so the
+  // workbench kept compositing over the fresh page: no tab strip, no close
+  // button, and session switches could not reach it either.
+  const host = viewHostSource;
+  // The guard listens to both ways the owning page disappears…
+  assert.match(
+    host,
+    /contents\.on\("did-navigate", onGone\)[\s\S]*?contents\.on\("render-process-gone", onGone\)/,
+    "bindRendererGone must register did-navigate and render-process-gone",
+  );
+  // …the handler detaches exactly the visible view…
+  assert.match(
+    host,
+    /const onGone = \(\) => \{\s*\n\s*if \(this\.visibleKey\) this\.detachVisible\(\);\s*\n\s*\};/,
+  );
+  // …and the guard follows the window lifecycle (bind on setWindow, unbind
+  // with the zoom listener teardown).
+  assert.match(host, /this\.bindZoom\(\);\s*\n\s*this\.bindRendererGone\(\);/);
+  assert.match(host, /unbindRendererGone\(\);/);
+  // In-page SPA navigation must not tear the view down: only full navigations.
+  assert.doesNotMatch(host, /contents\.on\("did-navigate-in-page"/);
+});

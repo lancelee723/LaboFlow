@@ -159,9 +159,11 @@ export class PluginViewHost {
     this.unbindZoom();
     this.window = window;
     this.bindZoom();
+    this.bindRendererGone();
   }
 
   private zoomListener: (() => void) | null = null;
+  private rendererGoneListener: (() => void) | null = null;
 
   private bindZoom(): void {
     const contents = this.window && !this.window.isDestroyed() ? this.window.webContents : null;
@@ -190,7 +192,45 @@ export class PluginViewHost {
 
   private unbindZoom(): void {
     this.zoomListener?.();
+    this.unbindRendererGone();
     this.zoomListener = null;
+  }
+
+  /**
+   * Visibility is owned by the renderer: only its tab strip decides which view
+   * is on screen, and `PluginViewTab`'s cleanup hides it again. A reload or a
+   * renderer crash destroys that owner without running any cleanup, so the
+   * attached view would stay composited above the fresh page — covering the
+   * tab strip, its close button, and every later session switch. The host
+   * itself is the only witness left, so it drops the visible view when the
+   * owning page goes away. Cached (detached) views are kept: a tab opened
+   * after the reload reuses them with their plugin state intact.
+   */
+  private bindRendererGone(): void {
+    const contents = this.window && !this.window.isDestroyed() ? this.window.webContents : null;
+    if (!contents || contents.isDestroyed()) return;
+    const onGone = () => {
+      if (this.visibleKey) this.detachVisible();
+    };
+    try {
+      contents.on("did-navigate", onGone);
+      contents.on("render-process-gone", onGone);
+    } catch {
+      // contents already destroyed
+    }
+    this.rendererGoneListener = () => {
+      try {
+        contents.removeListener("did-navigate", onGone);
+        contents.removeListener("render-process-gone", onGone);
+      } catch {
+        // contents already destroyed
+      }
+    };
+  }
+
+  private unbindRendererGone(): void {
+    this.rendererGoneListener?.();
+    this.rendererGoneListener = null;
   }
 
   /** Whether a live web contents exists for this view. */

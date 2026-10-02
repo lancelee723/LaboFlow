@@ -235,3 +235,24 @@ passed-with-warnings，9 条均为咨询性提示）。工作台实机验证：�
 切换（暗色 `#181818`/`#e6e8eb`，与 builtinWindowBackground 一致，标题栏
 取色样本保持吻合）。实机验证暗/亮两模式渲染均正常。潜在后续：宿主 preload
 可考虑向 v2 面板/视图页面统一注入该 token 对（跨插件契约，暂不动）。
+
+### 补充：工作面板插件视图"重载悬挂"修复（2026-10-02）
+
+用户报告工作台再次无法关闭、tab 上没有关闭按钮、切会话也不退出。根因不是
+tab 生命周期，而是**渲染层重载悬挂**：视图可见性由渲染层独占所有
+（`PluginViewTab` 挂载时 `setVisible(true)`、卸载清理 `setVisible(false)`），
+但渲染层重载（vite full reload / Cmd+R / 渲染进程崩溃）会销毁 JS 上下文，
+清理函数永不运行——主进程 `visibleKey` 悬挂，工作台视图继续合成在全新页面
+之上：盖住 tab 条与关闭按钮（"没有关闭按钮"），且已脱离渲染层控制，切会话
+自然无效。OS 级截屏实测复现（修复前重载后视图仍悬挂；注意 CDP 的
+Page.captureScreenshot 只渲染渲染层合成树，拍不到原生子视图——本轮全部
+改用 `screencapture` OS 截屏验证）。
+
+修复：`PluginViewHost.setWindow` 绑定窗口时监听主框架 `did-navigate` 与
+`render-process-gone`，二者发生即 `detachVisible()`（首次加载时无可见视图，
+自然 no-op；SPA 的 did-navigate-in-page 不受影响）。缓存的分离视图保留，
+重开 tab 时 `open()` 复用、工作台状态不丢。
+
+实机验证（OS 截屏 + CDP target）：重载后视图随渲染层消失；切会话面板关闭
+跟随；切回恢复会话的 tab 上下文；关闭按钮可见、点击后 tab 消失且视图
+target 销毁。面板系 4 套件 48/48 绿，typecheck 干净。
