@@ -621,6 +621,14 @@ export const es = {
     loadPlugin: "Cargue un complemento de desarrollo (opcional)",
     dismiss: "Descartar",
   },
+  assistant: {
+    title: "Asistente",
+    noChannels: "Sin canales conectados — la entrada local y el webhook siguen funcionando",
+    empty: "Encarga una tarea al asistente — el historial persiste aquí",
+    inputPlaceholder: "Encarga una tarea…",
+    send: "Enviar",
+    error: "La tarea del asistente falló",
+  },
   settings: {
     power: "Energía",
     keepAwakeWhileRunning: "Mantener el equipo activo",

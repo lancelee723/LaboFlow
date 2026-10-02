@@ -621,6 +621,14 @@ export const ko = {
     loadPlugin: "개발 플러그인 불러오기 (선택 사항)",
     dismiss: "닫기",
   },
+  assistant: {
+    title: "어시스턴트",
+    noChannels: "연결된 채널이 없습니다 — 로컬 입력과 웹훅은 계속 동작합니다",
+    empty: "어시스턴트에게 작업을 지시하세요 — 기록이 여기에 저장됩니다",
+    inputPlaceholder: "어시스턴트에게 작업을 내려주세요…",
+    send: "보내기",
+    error: "어시스턴트 작업 실패",
+  },
   settings: {
     power: "전원",
     keepAwakeWhileRunning: "컴퓨터 절전 방지",

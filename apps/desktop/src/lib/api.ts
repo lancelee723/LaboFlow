@@ -1921,6 +1921,25 @@ export const api = {
     ),
   spaceNotificationsRead: (input: { ids: string[] }) =>
     invoke<{ ok: true }>(IPC.invoke.spaceNotificationsRead, input),
+  assistantSessionGet: () => invoke<{ sessionId: string; created: boolean }>(IPC.invoke.assistantSessionGet),
+  assistantHistory: (input: { sessionId: string }) =>
+    invoke<Array<{ role?: string; content?: string; createdAt?: string }>>(IPC.invoke.assistantHistory, input),
+  assistantSend: (input: { sessionId: string; text: string }) =>
+    invoke<{ started: true }>(IPC.invoke.assistantSend, input),
+  assistantChannelStatus: () =>
+    invoke<Array<{ id: string; provider: string; name: string; state: string }>>(
+      IPC.invoke.assistantChannelStatus,
+    ),
+  onAssistantTurnDone: (
+    listener: (payload: { sessionId: string; status: string; finalText?: string; error?: string }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.assistantTurnDone, (payload) =>
+      listener(
+        (payload ?? {}) as { sessionId: string; status: string; finalText?: string; error?: string },
+      ),
+    );
+  },
   assistantWebhookGet: () =>
     invoke<{ running: boolean; port: number | null; lanOpen: boolean; secretSet: boolean; secretPreview: string }>(
       IPC.invoke.assistantWebhookGet,

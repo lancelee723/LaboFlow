@@ -621,6 +621,14 @@ export const fr = {
     loadPlugin: "Charger un plugin de développement (facultatif)",
     dismiss: "Ignorer",
   },
+  assistant: {
+    title: "Assistant",
+    noChannels: "Aucun canal connecté — la saisie locale et le webhook restent actifs",
+    empty: "Confiez une tâche à l'assistant — l'historique persiste ici",
+    inputPlaceholder: "Donnez une tâche à l'assistant…",
+    send: "Envoyer",
+    error: "Échec de la tâche de l'assistant",
+  },
   settings: {
     power: "Alimentation",
     keepAwakeWhileRunning: "Garder l'ordinateur éveillé",

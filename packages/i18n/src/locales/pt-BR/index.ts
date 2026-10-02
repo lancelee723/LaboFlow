@@ -621,6 +621,14 @@ export const ptBR = {
     loadPlugin: "Carregar um plugin de desenvolvimento (opcional)",
     dismiss: "Dispensar",
   },
+  assistant: {
+    title: "Assistente",
+    noChannels: "Nenhum canal conectado — a entrada local e o webhook continuam funcionando",
+    empty: "Passe uma tarefa ao assistente — o histórico persiste aqui",
+    inputPlaceholder: "Passe uma tarefa ao assistente…",
+    send: "Enviar",
+    error: "Falha na tarefa do assistente",
+  },
   settings: {
     power: "Energia",
     keepAwakeWhileRunning: "Manter o computador ativo",

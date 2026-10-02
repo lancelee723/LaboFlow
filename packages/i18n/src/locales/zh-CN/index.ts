@@ -621,6 +621,14 @@ export const zhCN = {
     loadPlugin: "加载开发插件（可选）",
     dismiss: "关闭",
   },
+  assistant: {
+    title: "助理",
+    noChannels: "尚未连接通道——本页输入与 Webhook 仍可用",
+    empty: "给助理派个任务——历史在这里持久保存",
+    inputPlaceholder: "给助理下任务…",
+    send: "发送",
+    error: "助理任务失败",
+  },
   settings: {
     power: "电源",
     keepAwakeWhileRunning: "保持电脑唤醒",

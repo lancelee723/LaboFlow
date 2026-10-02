@@ -1,4 +1,4 @@
-import { IconClock } from "./icons";
+import { IconBot, IconClock } from "./icons";
 import {
   useCallback,
   useEffect,
@@ -2556,6 +2556,17 @@ export function Sidebar({
               aria-pressed={page === "scheduled"}
             >
               <IconClock size={14} aria-hidden />
+            </TooltipButton>
+            <TooltipButton
+              type="button"
+              className={`footer-action ${page === "assistant" ? "active" : ""}`}
+              data-nav="assistant"
+              tooltip={t("assistant.title")}
+              ariaLabel={t("assistant.title")}
+              onClick={() => setPage("assistant")}
+              aria-pressed={page === "assistant"}
+            >
+              <IconBot size={14} aria-hidden />
             </TooltipButton>
             <TooltipButton
               type="button"

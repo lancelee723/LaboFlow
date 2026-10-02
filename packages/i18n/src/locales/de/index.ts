@@ -621,6 +621,14 @@ export const de = {
     loadPlugin: "Laden Sie ein Entwicklungs-Plugin (optional)",
     dismiss: "Verwerfen",
   },
+  assistant: {
+    title: "Assistent",
+    noChannels: "Keine Kanäle verbunden — lokale Eingabe und Webhook funktionieren weiter",
+    empty: "Gib dem Assistenten eine Aufgabe — der Verlauf bleibt hier erhalten",
+    inputPlaceholder: "Aufgabe für den Assistenten…",
+    send: "Senden",
+    error: "Assistenten-Aufgabe fehlgeschlagen",
+  },
   settings: {
     power: "Energie",
     keepAwakeWhileRunning: "Computer wach halten",

@@ -621,6 +621,14 @@ export const zhTW = {
     loadPlugin: "載入開發外掛（可選）",
     dismiss: "關閉",
   },
+  assistant: {
+    title: "助理",
+    noChannels: "尚未連線通道——本頁輸入與 Webhook 仍可用",
+    empty: "給助理派個任務——歷史在這裡持久保存",
+    inputPlaceholder: "給助理下任務…",
+    send: "傳送",
+    error: "助理任務失敗",
+  },
   settings: {
     power: "電源",
     keepAwakeWhileRunning: "保持電腦喚醒",

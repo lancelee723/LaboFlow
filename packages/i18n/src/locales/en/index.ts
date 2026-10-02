@@ -619,6 +619,14 @@ export const en = {
     loadPlugin: "Load a development plugin (optional)",
     dismiss: "Dismiss",
   },
+  assistant: {
+    title: "Assistant",
+    noChannels: "No channels connected — the local input and the webhook still work",
+    empty: "Send your assistant a task — history persists here",
+    inputPlaceholder: "Give the assistant a task…",
+    send: "Send",
+    error: "Assistant run failed",
+  },
   settings: {
     power: "Power",
     keepAwakeWhileRunning: "Keep computer awake",

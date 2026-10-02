@@ -438,6 +438,10 @@ export const IPC = {
     spaceMembersRemove: "pi-desktop/space/members/remove",
     spaceInviteCreate: "pi-desktop/space/invites/create",
     spaceInviteRedeem: "pi-desktop/space/invites/redeem",
+    assistantSessionGet: "pi-desktop/assistant/session/get",
+    assistantHistory: "pi-desktop/assistant/history",
+    assistantSend: "pi-desktop/assistant/send",
+    assistantChannelStatus: "pi-desktop/assistant/channelStatus",
     assistantWebhookGet: "pi-desktop/assistant/webhook/get",
     assistantWebhookSet: "pi-desktop/assistant/webhook/set",
     spaceNotificationsPull: "pi-desktop/space/notifications/pull",
@@ -499,6 +503,7 @@ export const IPC = {
      * process; SPEC §3.2 frame types forwarded verbatim). */
     spaceEvent: "pi-desktop/event/spaceFrame",
     spaceYjsFrame: "pi-desktop/event/spaceYjsFrame",
+    assistantTurnDone: "pi-desktop/event/assistantTurnDone",
     mcpOauth: "pi-desktop/mcp/oauth/event",
     voiceStateChanged: "pi-desktop/voice/event/stateChanged",
     voiceModelProgress: "pi-desktop/voice/event/modelProgress",

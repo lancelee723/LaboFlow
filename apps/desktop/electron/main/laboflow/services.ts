@@ -195,6 +195,25 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     }
   }
 
+  let assistantSessionId: string | null = null;
+  async function ensureAssistantSessionCached(h: NonNullable<ReturnType<typeof host>>) {
+    if (assistantSessionId) {
+      try {
+        const detail = await h.call<{ session?: { id?: string } }>("session.get", {
+          id: assistantSessionId,
+        });
+        if (detail.session?.id) return { sessionId: assistantSessionId, created: false };
+      } catch {
+        // stale id → fall through and re-locate
+      }
+      assistantSessionId = null;
+    }
+    const { ensureAssistantSession } = await import("../assistant/im-assistant");
+    const ensured = await ensureAssistantSession(h);
+    assistantSessionId = ensured.sessionId;
+    return ensured;
+  }
+
   /** FR-TC-10: LLM-backed review-by-comments production (main-side seam). */
   async function reviewByComments(spaceId: string, nodeId: string): Promise<RevisionSuggestion[]> {
     if (!spaceClient) throw new Error("space client unavailable");
@@ -531,8 +550,12 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       syncBudgetMs: 30_000,
     },
     runner: async ({ message }) => {
+      const h = host();
+      if (!h) throw new Error("host unavailable");
+      const { ensureAssistantSession } = await import("../assistant/im-assistant");
+      const { sessionId } = await ensureAssistantSession(h);
       const handle = await headlessAgentDriver.start({
-        newSession: { title: "Webhook 任务" },
+        sessionId,
         prompt: message,
         timeoutMs: 15 * 60_000,
       });
@@ -637,6 +660,60 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       const url = typeof input?.url === "string" ? input.url : "";
       const { clipWebPage } = await import("../web-clipper");
       return clipWebPage(url);
+    });
+
+    // T53.5: assistant-mode page session (persistent, unified history).
+    laboflowHandle(IPC.invoke.assistantSessionGet, async (event) => {
+      deps.assertMainWindowSender(event);
+      const h = host();
+      if (!h) throw new Error("host unavailable");
+      return ensureAssistantSessionCached(h);
+    });
+    laboflowHandle(
+      IPC.invoke.assistantHistory,
+      async (event, input: { sessionId?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        const h = host();
+        if (!h) throw new Error("host unavailable");
+        const sessionId = String(input?.sessionId ?? "");
+        const { assistantHistory } = await import("../assistant/im-assistant");
+        return assistantHistory(h, sessionId);
+      },
+    );
+    laboflowHandle(
+      IPC.invoke.assistantSend,
+      async (event, input: { sessionId?: unknown; text?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        const sessionId = String(input?.sessionId ?? "");
+        const text = String(input?.text ?? "").trim();
+        if (!sessionId || !text) {
+          throw Object.assign(new Error("invalid assistant send"), {
+            errorCode: "INVALID_ARGUMENT",
+          });
+        }
+        void (async () => {
+          try {
+            const { dispatchAssistantTurn } = await import("../assistant/im-assistant");
+            const result = await dispatchAssistantTurn(headlessAgentDriver, sessionId, text);
+            sendToRenderer(IPC.event.assistantTurnDone, {
+              sessionId,
+              finalText: result.finalText,
+              status: result.status,
+            });
+          } catch (error) {
+            sendToRenderer(IPC.event.assistantTurnDone, {
+              sessionId,
+              status: "error",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+        return { started: true };
+      },
+    );
+    laboflowHandle(IPC.invoke.assistantChannelStatus, async (event) => {
+      deps.assertMainWindowSender(event);
+      return channelHost.registry.list();
     });
 
     // Module 03/T53.3: webhook settings (read masked status / reconfigure).

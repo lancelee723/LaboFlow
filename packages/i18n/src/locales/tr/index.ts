@@ -621,6 +621,14 @@ export const tr = {
     loadPlugin: "Geliştirme eklentisi yükleyin (isteğe bağlı)",
     dismiss: "Kapat",
   },
+  assistant: {
+    title: "Asistan",
+    noChannels: "Bağlı kanal yok — yerel girişve webhook çalışmaya devam eder",
+    empty: "Asistana bir görev ver — geçmiş burada kalıcıdır",
+    inputPlaceholder: "Asistana görev ver…",
+    send: "Gönder",
+    error: "Asistan görevi başarısız",
+  },
   settings: {
     power: "Güç",
     keepAwakeWhileRunning: "Bilgisayarı uyanık tut",
