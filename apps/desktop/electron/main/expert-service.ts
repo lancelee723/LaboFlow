@@ -95,6 +95,9 @@ export interface ExpertServiceDeps {
   }): Promise<void>;
   /** Persona bindings for foreground expert/team sessions (module 01 polish). */
   foregroundRegistry: ForegroundSessionRegistry;
+  /** FR-E-19: when an org session is active, org experts outrank same-name
+   * personal ones; absent keeps personal priority (legacy behaviour). */
+  isOrgActive?: () => boolean;
 }
 
 interface HostExpertRecord {
@@ -258,7 +261,11 @@ export class ExpertService {
         { id },
       )
       .catch(() => ({ expert: null, body: null }));
-    if (user.expert) {
+    const orgPack = this.orgPacks.find(
+      (pack) => pack.kind === "expert" && pack.name === id,
+    );
+    const orgWins = Boolean(orgPack && this.deps.isOrgActive?.());
+    if (user.expert && !orgWins) {
       const expert = user.expert;
       return {
         expert: {
@@ -278,9 +285,6 @@ export class ExpertService {
         body: user.body,
       };
     }
-    const orgPack = this.orgPacks.find(
-      (pack) => pack.kind === "expert" && pack.name === id,
-    );
     if (orgPack) {
       const payload = orgPack.payload;
       const body = String(payload.body ?? "");

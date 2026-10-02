@@ -9,6 +9,7 @@ import type {
 } from "@pi-desktop/shared";
 import { useAppStore } from "../../stores/app-store";
 import { api, type ExpertListItem, type ExpertTeamListItem } from "../../lib/api";
+import { downloadExpertMarkdown } from "../../lib/expert-export";
 import { THINKING_LEVELS } from "@pi-desktop/shared";
 import { Badge, Button, Field, Input, Panel, Select, Textarea, cx } from "../ui";
 import {
@@ -28,7 +29,7 @@ import {
   type McpDraft,
 } from "../extensions/McpEditorSheet";
 import { AgentMultiSelect } from "./AgentMultiSelect";
-import { IconGraduationCap, IconPencil, IconPlus, IconServer, IconUser, IconUsers, IconX } from "../icons";
+import { IconDownload, IconGraduationCap, IconPencil, IconPlus, IconServer, IconUser, IconUsers, IconX } from "../icons";
 
 /** Industry filter chips: the fixed catalog first, then anything else in data. */
 const FIXED_INDUSTRIES = ["通用", "战略与组织", "金融", "先进制造", "TMT", "医疗健康"];
@@ -671,6 +672,49 @@ export function AgentExpertsPage() {
             ) : null}
             {expert.source === "user" ? (
               <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title={t("expert.exportTitle")}
+                  onClick={() =>
+                    void (async () => {
+                      try {
+                        const detail = await api.getExpert(expert.id);
+                        const body = String(detail?.body ?? "");
+                        if (!body.trim()) throw new Error(t("expert.exportEmpty"));
+                        downloadExpertMarkdown(
+                          {
+                            name: expert.name,
+                            description: expert.description,
+                            industry: expert.industry,
+                            tags: expert.tags,
+                            examples: expert.examples,
+                            skills: expert.skills,
+                            mcpServers: expert.mcpServers,
+                            model: expert.model,
+                            thinkingLevel: expert.thinkingLevel,
+                            body,
+                          },
+                          (fileName: string, content: string) => {
+                            const blob = new Blob([content], { type: "text/markdown" });
+                            const url = URL.createObjectURL(blob);
+                            const anchor = document.createElement("a");
+                            anchor.href = url;
+                            anchor.download = fileName;
+                            anchor.click();
+                            URL.revokeObjectURL(url);
+                          },
+                        );
+                        showToast(t("expert.exportDone", { name: expert.name }), { variant: "success" });
+                      } catch (error) {
+                        showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+                      }
+                    })()
+                  }
+                >
+                  <IconDownload size={13} />
+                  {t("expert.export")}
+                </Button>
                 <Button size="sm" variant="secondary" onClick={() => void toggleExpert(expert)}>
                   {expert.enabled ? t("expert.disabled") : t("expert.enabled")}
                 </Button>

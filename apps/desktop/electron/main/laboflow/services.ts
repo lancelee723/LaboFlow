@@ -163,6 +163,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     broadcast: (event) => sendToRenderer(IPC.event.expertTeamRun, event),
     postSessionCard,
     foregroundRegistry: expertForegroundRegistry,
+    isOrgActive: () => Boolean(orgService.getBootstrap()),
   });
 
   async function getOneShotProvider(): Promise<{
@@ -481,6 +482,53 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     expertService.setOrgPacks(bootstrap?.expertPacks ?? []);
   }
 
+  /** FR-PPT-14: org slide-template packs land under the user template dir. */
+  async function applyOrgSlideTemplates(): Promise<void> {
+    const bootstrap = orgService.getBootstrap() as {
+      slideTemplates?: Array<{
+        id: string;
+        name: string;
+        version: number;
+        contract: Record<string, unknown>;
+        usageNote?: string;
+      }>;
+    } | null;
+    const items = bootstrap?.slideTemplates ?? [];
+    if (!items.length) return;
+    const root = join(homedir(), ".laboflow", "slide-templates");
+    const fs = await import("node:fs");
+    const indexPath = join(root, "index.json");
+    const index = fs.existsSync(indexPath)
+      ? (JSON.parse(fs.readFileSync(indexPath, "utf8")) as Record<string, unknown>)
+      : {};
+    const registry = (index.templates as Array<Record<string, unknown>>) ?? [];
+    for (const item of items) {
+      const dir = join(root, item.id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        join(dir, "template.json"),
+        JSON.stringify({ name: item.name, version: item.version, contract: item.contract, usageNote: item.usageNote, source: "org" }, null, 2),
+      );
+      const existing = registry.find((entry) => entry.id === item.id);
+      const meta = { id: item.id, name: item.name, version: item.version, source: "org" };
+      if (existing) Object.assign(existing, meta);
+      else registry.push(meta);
+      try {
+        const content = (await orgService.getOrgJson(
+          `/org/slide-templates/${encodeURIComponent(item.id)}/content`,
+        )) as { contentBase64?: string };
+        if (content?.contentBase64) {
+          fs.writeFileSync(join(dir, "pack.base64"), content.contentBase64);
+        }
+      } catch (error) {
+        logger.app("slides", "warn", "org template pack fetch failed", { data: `${item.id}: ${String(error)}` });
+      }
+    }
+    index.updatedAt = new Date().toISOString();
+    index.templates = registry;
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+  }
+
   /** Org-provided knowledge-base entries land in the MCP registry (T55.6). */
   async function applyOrgKbDelivery(): Promise<void> {
     const bootstrap = orgService.getBootstrap() as {
@@ -609,6 +657,9 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
 
   function applyOrgDeliveryOnConnect(): void {
     applyOrgExpertPacks();
+    void applyOrgSlideTemplates().catch((error) =>
+      logger.app("slides", "warn", "org slide templates delivery failed", { data: String(error) }),
+    );
     void applyOrgKbDelivery().catch((error) =>
       logger.app("kb", "warn", "org kb delivery failed", { data: String(error) }),
     );
