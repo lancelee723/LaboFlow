@@ -361,6 +361,7 @@ export class AgentHost {
       }
       case "turn_start":
       case "turn_end":
+      case "usage":
         this.emit(state, "turn.activity", { event }, meta2);
         return;
       default: {
