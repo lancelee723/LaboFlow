@@ -57,6 +57,17 @@
     align-items: center; justify-content: center; overflow: hidden; }
   #preview svg { width: 100%; height: 100%; }
   .pager { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  /* FR-PPT-04/18: outline tree — page list with per-page actions. */
+  #outline { display: flex; gap: 10px; align-items: flex-start; }
+  #page-list { min-width: 180px; max-height: 340px; overflow: auto; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 10px; padding: 4px; }
+  .page-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .page-item:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+  .page-item.sel { background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+  .page-item .acts { margin-left: auto; display: none; gap: 2px; }
+  .page-item:hover .acts { display: inline-flex; }
+  .page-item .acts button { padding: 0 5px; font-size: 11px; border: 0; background: none; cursor: pointer; color: inherit; opacity: .65; }
+  .page-item .acts button:hover { opacity: 1; }
+  #preview-body { flex: 1; min-width: 0; }
   .filelist { font-size: 12px; }
   .filelist .f { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
   .linkish { text-decoration: underline; cursor: pointer; }
@@ -83,6 +94,9 @@
 <div class="card hidden" id="pipeline"></div>
 
 <h2 id="t-pages"></h2>
+<div id="outline">
+  <div id="page-list" class="muted">载入项目后显示页面列表</div>
+  <div id="preview-body">
 <div id="preview"><span class="muted" id="preview-empty"></span></div>
 <div class="pager hidden" id="pager">
   <button id="pg-prev">←</button>
@@ -90,9 +104,13 @@
   <button id="pg-next">→</button>
   <span class="muted" id="pg-placeholder"></span>
 </div>
+  </div>
+</div>
+<div class="muted" style="margin-top:4px">悬停页面条目：↻ 重生成 · ✕ 删除（入 backup）· ✎ 重命名（NN_ 前缀即页序）。页操作使 final 质检报告失效，导出前需重跑。</div>
 
 <h2 id="t-exports"></h2>
 <div class="card filelist hidden" id="exports"></div>
+<div class="card filelist hidden" id="backups"></div>
 
 <h2 id="t-confirm-section" class="hidden"></h2>
 <div class="card hidden" id="confirm-section">
@@ -223,6 +241,8 @@ async function loadProject() {
   } else {
     await showPage();
   }
+  renderOutline();
+  renderBackups(data);
   const exports = document.getElementById("exports");
   exports.classList.remove("hidden");
   const files = data.listings?.exports ?? [];
@@ -232,6 +252,58 @@ async function loadProject() {
         `<span class="linkish" data-open="${esc(projectDir + "/exports")}">打开 / open</span></span></div>`).join("")
     : `<span class="muted" id="t-noexports">暂无导出 / no exports yet</span>`;
 }
+
+function renderOutline() {
+  const list = document.getElementById("page-list");
+  list.classList.remove("muted");
+  list.innerHTML = pages
+    .filter((pg) => pg.dir === "svg_output")
+    .map(
+      (pg, i) =>
+        `<div class="page-item${i === pageIndex ? " sel" : ""}" data-page="${esc(pg.name)}">` +
+        `<span>${esc(pg.name.replace(/\.svg$/, ""))}</span>` +
+        `<span class="acts">` +
+        `<button title="重生成此页" data-act="regenerate" data-page="${esc(pg.name)}">↻</button>` +
+        `<button title="删除此页（入 backup）" data-act="delete" data-page="${esc(pg.name)}">✕</button>` +
+        `<button title="重命名（NN_ 前缀即页序）" data-act="rename" data-page="${esc(pg.name)}">✎</button>` +
+        `</span></div>`,
+    )
+    .join("");
+}
+
+function renderBackups(data) {
+  const el = document.getElementById("backups");
+  const backups = data.listings?.backups ?? [];
+  el.classList.toggle("hidden", backups.length === 0);
+  el.innerHTML = backups.length
+    ? `<div class="muted">backup/（页操作历史，可恢复）：</div>` +
+      backups.map((name) => `<div class="f"><span>${esc(name)}</span><span class="linkish" data-open="${esc(projectDir + "/backup/" + name)}">打开 / open</span></div>`).join("")
+    : "";
+}
+
+document.getElementById("page-list").addEventListener("click", async (event) => {
+  const act = event.target.closest("[data-act]");
+  const item = event.target.closest(".page-item");
+  if (act) {
+    event.stopPropagation();
+    const page = act.dataset.page;
+    let target = null;
+    if (act.dataset.act === "rename") {
+      const input = window.prompt("新页名（含 NN_ 前缀与 .svg，如 02_new_status.svg）:", page);
+      if (!input) return;
+      target = input;
+    }
+    const result = await bridge.invoke("ppt.pageAction", { projectDir, page, action: act.dataset.act, target });
+    if (result && result.error) { document.getElementById("preview-empty").textContent = result.error; return; }
+    await loadProject();
+    return;
+  }
+  if (item) {
+    const name = item.dataset.page;
+    const idx = pages.findIndex((pg) => pg.dir === "svg_output" && pg.name === name);
+    if (idx >= 0) { pageIndex = idx; showPage(); }
+  }
+});
 
 function renderPipeline(state) {
   const el = document.getElementById("pipeline");

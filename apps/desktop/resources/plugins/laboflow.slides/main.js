@@ -591,6 +591,76 @@ async function recoverPendingFromDisk() {
   return pendingConfirm;
 }
 
+/**
+ * FR-PPT-04 (page ops): delete/rename a page with upstream ownership
+ * semantics — svg_output/ is the design source, so "delete" moves the page
+ * (and its sidecars) into backup/pageActions-<ts>/ instead of destroying it,
+ * and every action appends to laboflow/page-actions.json for the audit log.
+ * Renaming renumbers the NN_ prefix (move semantics).
+ */
+async function pageAction(projectDir, page, action, target) {
+  const fsMod = await import("node:fs");
+  const { renameSync, mkdirSync, existsSync, appendFileSync, copyFileSync } = fsMod;
+  const safePage = String(page ?? "").replace(/[^A-Za-z0-9_-]/g, "");
+  if (!safePage) return { error: "page 名不合法" };
+  const src = join(projectDir, "svg_output", safePage.endsWith(".svg") ? safePage : `${safePage}.svg`);
+  if (!existsSync(src)) return { error: `页面不存在：${safePage}` };
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const auditDir = join(projectDir, "laboflow");
+  mkdirSync(auditDir, { recursive: true });
+  const audit = (entry) => {
+    appendFileSync(
+      join(auditDir, "page-actions.json"),
+      `${JSON.stringify({ at: new Date().toISOString(), page: safePage, action, target: target ?? null, ...entry })}\n`,
+    );
+  };
+
+  if (action === "delete" || action === "regenerate") {
+    const backupDir = join(projectDir, "backup", `pageActions-${stamp}`);
+    mkdirSync(backupDir, { recursive: true });
+    renameSync(src, join(backupDir, safePage.endsWith(".svg") ? safePage : `${safePage}.svg`));
+    // Speaker-note sidecar (upstream naming: notes/slideNN.md).
+    const nn = safePage.slice(0, 2);
+    const note = join(projectDir, "notes", `slide${nn}.md`);
+    if (existsSync(note)) copyFileSync(note, join(backupDir, `slide${nn}.md`));
+    // The final-gate report covers the old page set: drop it so the next
+    // export re-runs the checker (upstream fail-closed fingerprint).
+    const report = join(projectDir, "validation", "svg_quality_final_report.json");
+    if (existsSync(report)) renameSync(report, join(backupDir, "svg_quality_final_report.json"));
+    audit({ backupDir: join(projectDir, "backup", `pageActions-${stamp}`) });
+    return {
+      ok: true,
+      action,
+      note:
+        action === "delete"
+          ? `页面 ${safePage} 已移入 backup（可恢复），final 质检报告已失效——导出前需重跑 quality_checker(final)。`
+          : `页面 ${safePage} 已标记重生成（原稿入 backup）；重新手写 svg_output/${safePage}.svg 后重跑 quality_checker。`,
+    };
+  }
+
+  if (action === "rename") {
+    // Keep dots: the .svg suffix is part of the contract; traversal is
+    // blocked by the segment check below (no "/" or "..").
+    const targetRaw = String(target ?? "").trim();
+    const targetSafe = targetRaw.replace(/[^A-Za-z0-9_.-]/g, "");
+    if (!targetSafe) return { error: "rename 需要 target（新页名，含 NN_ 前缀）" };
+    if (targetSafe.includes("..") || targetSafe.includes("/")) return { error: "target 必须是单段文件名" };
+    if (!targetSafe.endsWith(".svg")) return { error: "target 必须以 .svg 结尾" };
+    const dst = join(projectDir, "svg_output", targetSafe);
+    if (existsSync(dst)) return { error: `目标页已存在：${targetSafe}` };
+    renameSync(src, dst);
+    audit({ renamedTo: targetSafe });
+    return {
+      ok: true,
+      action: "rename",
+      note: `${safePage} → ${targetSafe}。若 NN 序号变化，请同步重排其余页与 design_spec §IX roster，并重跑 quality_checker(final)。`,
+    };
+  }
+
+  return { error: "action 必须是 delete | regenerate | rename" };
+}
+
 function projectListings(projectDir) {
   const safeList = (dir, exts) => {
     try {
@@ -616,6 +686,14 @@ function projectListings(projectDir) {
     svgPages: safeList(join(projectDir, "svg_output"), [".svg"]),
     svgFinal: safeList(join(projectDir, "svg_final"), [".svg"]),
     exports: safeList(join(projectDir, "exports"), [".pptx"]),
+    backups: existsSync(join(projectDir, "backup"))
+      ? readdirSync(join(projectDir, "backup"), { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+          .sort()
+          .reverse()
+          .slice(0, 10)
+      : [],
   };
 }
 
@@ -680,6 +758,11 @@ export async function onPanelInvoke(channel, payload = {}) {
       } catch (error) {
         return { error: error?.message ?? String(error) };
       }
+    }
+    case "ppt.pageAction": {
+      const projectDir = String(payload.projectDir ?? "");
+      if (!projectDir) return { error: "projectDir required" };
+      return pageAction(projectDir, payload.page, payload.action, payload.target);
     }
     case "ppt.openPath": {
       const path = String(payload.path ?? "");

@@ -13,7 +13,9 @@ description: Vendored PPT-Master pipeline: consulting-grade native editable PPTX
 4. **确认面替换**：正文/`references/confirm-surface.md` 中"启动确认页（Flask confirm_ui）"的分支**不可用**（本环境未安装 flask）。两阶段确认一律走 **chat 分支**：把 `recommendations.stage1/stage2` 的内容完整呈现在对话里，然后**停下等待用户显式回复**——沉默不构成确认，禁止代用户确认（上游原文纪律原样适用）。用户明确说"快速生成/不用确认"时才可按上游 Quick profile 跳过。
 5. **禁用路线**：PDF 源转换（PyMuPDF，AGPL 规避）不可用——用户给 PDF 时请其先转 docx/md 或粘贴文本；旁白 TTS 与 .epub 输入不可用。其余路线（DOCX/XLSX/PPTX/URL/MD/主题、模板、编辑原生 PPTX）可用。
 6. **宿主权限提示**：本管线需要 Bash 权限。会话权限为 ask 模式时，先提示用户切换到 accept-edits/auto，避免逐步授权打断管线（历史失败主因之一）。**子代理不可用插件工具与技能——整个管线必须在主会话执行**，不要尝试派生子代理。
-7. **跨会话续跑**：用户在新会话说"继续生成 projects/<name>"时：先 `ppt_master_status` 取路径，再 `ppt_read_doc` 读 `workflows/stages/resume-execute.md`，以项目目录文件（design_spec/spec_lock/svg_output）恢复进度，不依赖会话记忆。
+7. **页级操作语义（FR-PPT-04）**：用户要求删除/重排/重生成单页时——删除与重生成由工作台 `ppt.pageAction` 通道完成（页面入 `backup/pageActions-*/` 可恢复，final 质检报告自动失效）；Agent 重写页面后**必须**：① 若 NN 序号变化，同步重排其余页与 design_spec §IX roster（v6.6.0 checker 强制 roster 数量一致）；② 重跑 `quality_checker --stage final`；③ 再导出。用户在会话里说「重新生成第 N 页」时，按上游 resume 语义只重写该页，不要全量重跑。
+
+8. **跨会话续跑**：用户在新会话说"继续生成 projects/<name>"时：先 `ppt_master_status` 取路径，再 `ppt_read_doc` 读 `workflows/stages/resume-execute.md`，以项目目录文件（design_spec/spec_lock/svg_output）恢复进度，不依赖会话记忆。
 
 ---
 
