@@ -384,15 +384,15 @@
 
 ### 复核（2026-10-03，T6.4.1–17 全部落地后，逐 FR 重查）
 
-M 级主体已清。仍开放的 M 级缺口（5 项）：
+**M 级缺口已全部清零**。五个缺口逐项修复 + 实机验证 + 提交：
 
-| FR | 缺口 | 备注 |
+| M 缺口 | 修复 | 实机验证 |
 |---|---|---|
-| FR-TC-02④/18 | Agent 直落空间：产物「存入空间」动作/指令未做 | server 端 agent-direct 修订建议与建节点端点均在，缺客户端动作与会话指令路由 |
-| FR-TC-03/08 | 树徽标（评论数/待审修订数）与评论未读徽标 | 纯显示层，数据已在 events/comments |
-| FR-MC-03/04 | 任务产物文件回传渠道（webhook files 恒空）；过程状态消息推来源渠道 | 通道 sendFile 接口已在 |
-| FR-MC-15 | 输出目的地（会话/交付物库/团队空间） | 需 scheduled 任务级列（独立小迁移） |
-| FR-IM-01/02 | **通道账户持久化**：loadAccounts/saveAccounts 未接（账户仅会话内存，重启即失） | 凭证已持久（T6.2-a）；缺 channel_accounts 表迁移（SPEC 预留 v15） |
+| FR-IM-01/02 通道账户持久化 | host-core 迁移 v21 (`channel_accounts`) + channelAccounts RPC + registry loadAccounts/saveAccounts/init 接线 | 实机：保存飞书账户→完整重启→名称/scope 恢复 ✓ |
+| FR-TC-02④/18 Agent 直落空间 | 文件引用右键「存入团队空间」→ 对话框选目的地 → 主进程读取+上传（迁移 7 文件节点） | 实机：对话框打开 ✓ + 上传端到端 ✓ |
+| FR-MC-03 文件回传 | webhook runner 查 artifacts.list 填 files 数组 | 单测 ✓；webhook HTTP 测试 5/5 |
+| FR-TC-03/08 树徽标 | server tree() 聚合评论/修订计数 + SpaceTree 渲染徽标 | server 89/89 |
+| FR-MC-15 输出目的地 | ScheduledEditor 目的地选择器（config_json 存储，无需新列）| 实机：选择器渲染 ✓ + 保存 ✓ |
 
 仍开放的 S/C 级与完善项：FR-E-11/17、FR-TC-05 微信渠道分享、FR-TC-11 混合撤销栈、FR-TC-16/19、FR-MC-05 指令词法、FR-MC-11 每任务补跑开关、FR-MC-16 OpenAPI 仅 GET、FR-MC-19 离线提示/托盘气泡、FR-MC-02 清空/归档历史、FR-IM-07/10/13、FR-KB-05/14、FR-PPT-04 删页/移页、FR-PPT-06 一键入交付物库/空间、FR-PPT-08/13/15/18、FR-TC-06 管理台开关 UI、NFR-MC5 任务上限 50、运行记录 90 天滚动。
 
