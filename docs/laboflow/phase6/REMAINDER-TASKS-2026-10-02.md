@@ -398,6 +398,8 @@
 
 外部项不变（T6.3）。AC-06 L2 受模型长上下文约束，L1 全链已实机验证。
 
+**实机验收第四轮（2026-10-04，CDP 深度 UI 自动化尝试）**：使用 CDP Input 域真实输入（鼠标点击/键入）驱动应用完成 M-1 重启恢复(✓)、M-5 目的地选择器(✓)、M-2 对话框打开(✓)、M-3 webhook 3800 在线+401(✓)、M-4 server 数据确认 commentCount=1(✓)。L2 全链(PPT-Master L2)和 M-3 文件回传端到端因 glm-5.3-flash 模型长上下文空响应(README 已知约束)未能在自动化脚本内稳定复现，需要用户手动在应用内操作后配合验证。CDP 驱动脚本已归档在 `.acceptance-tmp/` 供后续复用。
+
 **实机验收第三轮（2026-10-04，M 级缺口补验，见 [acceptance/20261004-001847-round3-m3m4/ACCEPTANCE-ROUND3.md](acceptance/20261004-001847-round3-m3m4/ACCEPTANCE-ROUND3.md)）**：PG 15 本地启动(5992) + org server 运行(3999) + 测试数据(空间/MD/评论)创建 → server API 确认 commentCount=1 ✓。桌面集成测试 209/209(真实 PG)。**SpaceTree 徽标 UI 渲染的截图确认与 M-2 上传端到端、M-3 全链 webhook end-to-end 需要用户在应用内完成组织登录后配合验证**（三个验证均需真实凭据，代码层已全部通过测试）。
 
 **实机验收第二轮（2026-10-03，可见运行+纯 GUI 真实输入，见 [acceptance/20261003-095620-round2/ACCEPTANCE-ROUND2.md](acceptance/20261003-095620-round2/ACCEPTANCE-ROUND2.md)）**：M1 专家 6/6、M2 通道卡 5/5（修复 Webhook 启动静默放弃+i18n 错位后）、M3 助理页核心过（**重启持久性实机验证：历史跨多次重启保留**）、M4 团队空间源 3/3、M5 PPT L1 全链 3/3（真实落盘 PPTX 61KB 含备注）。再抓 3 缺陷并修复复验：webhook 启动静默放弃（改有界轮询）、webhook 卡九语言键插错命名空间（迁回 settings.assistant）、useAppShellRuntime 白名单缺 assistant。
