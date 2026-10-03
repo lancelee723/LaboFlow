@@ -248,6 +248,7 @@ test("the menu a reference opens carries the reveal and both copies", () => {
     calls.menus.map((menu) => menu.items.map((item) => [item.id, item.label])),
     [
       [
+        ["save-to-space", "space.saveToSpaceMenu:"],
         ["reveal-in-folder", "chat.revealFileInFolder:"],
         ["copy-full-path", "chat.copyFullPath:"],
         ["copy-relative-path", "chat.copyRelativePath:"],

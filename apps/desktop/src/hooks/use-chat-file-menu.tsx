@@ -17,7 +17,7 @@
 import { useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useContextMenu, type ContextMenuItem } from "../components/ContextMenu";
-import { IconCopy, IconFolderOpen } from "../components/icons";
+import { IconCopy, IconFolderOpen, IconSave } from "../components/icons";
 import { useCopyChatFileRef, useRevealChatFileRef } from "./use-preview-target";
 
 export type ChatFileMenuTarget = {
@@ -31,8 +31,19 @@ export function useChatFileMenuItems() {
   const { t } = useTranslation();
   const revealFileRef = useRevealChatFileRef();
   const copyFileRef = useCopyChatFileRef();
+  const saveToSpace = useCallback((path: string) => {
+    window.dispatchEvent(
+      new CustomEvent("laboflow:save-to-space", { detail: { path } }),
+    );
+  }, []);
   return useCallback(
     ({ path, baseDir }: ChatFileMenuTarget): ContextMenuItem[] => [
+      {
+        id: "save-to-space",
+        label: t("space.saveToSpaceMenu"),
+        icon: <IconSave size={14} />,
+        onSelect: () => saveToSpace(path),
+      },
       {
         id: "reveal-in-folder",
         label: t("chat.revealFileInFolder"),
@@ -53,7 +64,7 @@ export function useChatFileMenuItems() {
         onSelect: () => copyFileRef(path, baseDir, "relative"),
       },
     ],
-    [copyFileRef, revealFileRef, t],
+    [copyFileRef, revealFileRef, saveToSpace, t],
   );
 }
 

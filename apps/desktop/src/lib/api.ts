@@ -1887,6 +1887,16 @@ export const api = {
     invoke<import("@pi-desktop/shared").SpaceNode[]>(IPC.invoke.spaceTree, {
       spaceId,
     }),
+  spaceSaveFromPath: (input: {
+    path: string;
+    spaceId: string;
+    parentId?: string | null;
+    name?: string;
+  }) =>
+    invoke<{ nodeId: string; name: string; versionNo: number; size: number; sha256: string }>(
+      IPC.invoke.spaceSaveFromPath,
+      input,
+    ),
   spaceFileUpload: (input: {
     spaceId: string;
     nodeId?: string;
