@@ -382,6 +382,22 @@
 
 **验证终态（全绿）**：desktop 3563 用例 0 fail；host-core 697/697；server 209/209；typecheck/build:js 干净。
 
+### 复核（2026-10-03，T6.4.1–17 全部落地后，逐 FR 重查）
+
+M 级主体已清。仍开放的 M 级缺口（5 项）：
+
+| FR | 缺口 | 备注 |
+|---|---|---|
+| FR-TC-02④/18 | Agent 直落空间：产物「存入空间」动作/指令未做 | server 端 agent-direct 修订建议与建节点端点均在，缺客户端动作与会话指令路由 |
+| FR-TC-03/08 | 树徽标（评论数/待审修订数）与评论未读徽标 | 纯显示层，数据已在 events/comments |
+| FR-MC-03/04 | 任务产物文件回传渠道（webhook files 恒空）；过程状态消息推来源渠道 | 通道 sendFile 接口已在 |
+| FR-MC-15 | 输出目的地（会话/交付物库/团队空间） | 需 scheduled 任务级列（独立小迁移） |
+| FR-IM-01/02 | **通道账户持久化**：loadAccounts/saveAccounts 未接（账户仅会话内存，重启即失） | 凭证已持久（T6.2-a）；缺 channel_accounts 表迁移（SPEC 预留 v15） |
+
+仍开放的 S/C 级与完善项：FR-E-11/17、FR-TC-05 微信渠道分享、FR-TC-11 混合撤销栈、FR-TC-16/19、FR-MC-05 指令词法、FR-MC-11 每任务补跑开关、FR-MC-16 OpenAPI 仅 GET、FR-MC-19 离线提示/托盘气泡、FR-MC-02 清空/归档历史、FR-IM-07/10/13、FR-KB-05/14、FR-PPT-04 删页/移页、FR-PPT-06 一键入交付物库/空间、FR-PPT-08/13/15/18、FR-TC-06 管理台开关 UI、NFR-MC5 任务上限 50、运行记录 90 天滚动。
+
+外部项不变（T6.3）。AC-06 L2 受模型长上下文约束，L1 全链已实机验证。
+
 **实机验收第二轮（2026-10-03，可见运行+纯 GUI 真实输入，见 [acceptance/20261003-095620-round2/ACCEPTANCE-ROUND2.md](acceptance/20261003-095620-round2/ACCEPTANCE-ROUND2.md)）**：M1 专家 6/6、M2 通道卡 5/5（修复 Webhook 启动静默放弃+i18n 错位后）、M3 助理页核心过（**重启持久性实机验证：历史跨多次重启保留**）、M4 团队空间源 3/3、M5 PPT L1 全链 3/3（真实落盘 PPTX 61KB 含备注）。再抓 3 缺陷并修复复验：webhook 启动静默放弃（改有界轮询）、webhook 卡九语言键插错命名空间（迁回 settings.assistant）、useAppShellRuntime 白名单缺 assistant。
 
 **实机验收第一轮（2026-10-03，已完成，见 [acceptance/20261003-031918/ACCEPTANCE-ROUND1.md](acceptance/20261003-031918/ACCEPTANCE-ROUND1.md)）**：AC-01 ✓ 9/9（真实 LLM persona 回复+任务标记）；AC-04 Tier-1 ✓ 3/3（粘贴解析/空值语义/分诊断）；AC-03 核心 ✓ 3/3（通道 chips/直派真实回复/统一历史）；**AC-06 ✗ 未走通**（Stage-1 会话内确认送达后 agent 回合停滞，README 已知模型约束，PPT 管线本批零回归面，换档补验）；AC-02/05 环境阻塞（本机无 PG/WeKnora）。**实机抓到并修复 1 个真缺陷**：六个新 fork handler 的 event 形参误用（laboflowHandle vs WithEvent），助理会话创建实机必炸——已修复并复验。另有死代码清理 7 项（refactor 提交），其中 settleUnattendedAsk 未接线为真 bug。
