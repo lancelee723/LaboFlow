@@ -1,2 +1,1 @@
-aee33e5 fix: table parity lets explicit run colour and weight override the cell default
-v6.3.2 post (aee33e5), vendored 2026-09-12; pruned: references/ai-image-comparison (AI-image route, disabled), templates/sounds (narration, disabled); SPONSORS files KEPT (upstream attribution guard requires them)
+a50758ac chore: bump version to 6.6.0 (tag v6.6.0), vendored 2026-10-03; pruned: references/ai-image-comparison (AI-image route, disabled), templates/sounds (narration, disabled); SPONSORS/LICENSE kept (upstream attribution guard requires them); laboflow_guard.py + requirements-laboflow.txt + VENDOR_README are LaboFlow-owned

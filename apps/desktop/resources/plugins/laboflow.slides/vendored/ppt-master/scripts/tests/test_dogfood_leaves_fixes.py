@@ -129,6 +129,7 @@ class PdfClauseAndScanTests(unittest.TestCase):
 
 class ImportSourcesProjectTreeTests(unittest.TestCase):
     def test_research_web_sources_dir_is_not_a_project(self) -> None:
+        PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=PROJECTS_ROOT) as tmp:
             root = Path(tmp)
             scratch = root.with_name(root.name + "_web_sources")
@@ -521,10 +522,10 @@ class RtlAndTemplateExportTests(unittest.TestCase):
             '<a:lvl1pPr marL="0" algn="r" rtl="1"/><a:lvl1pPr algn="ctr" rtl="1"/>')
 
     def test_rtl_theme_script_slot(self) -> None:
-        from svg_to_pptx.drawingml.theme_fonts import _rtl_theme_scripts
-        self.assertEqual(_rtl_theme_scripts("ar-SA"), ("Arab",))
-        self.assertEqual(_rtl_theme_scripts("he-IL"), ("Hebr",))
-        self.assertEqual(_rtl_theme_scripts("zh-CN"), ())
+        from svg_to_pptx.drawingml.theme_fonts import _complex_theme_scripts
+        self.assertEqual(_complex_theme_scripts("ar-SA"), ("Arab",))
+        self.assertEqual(_complex_theme_scripts("he-IL"), ("Hebr",))
+        self.assertEqual(_complex_theme_scripts("zh-CN"), ())
 
 
 class IntakeHousekeepingTests(unittest.TestCase):

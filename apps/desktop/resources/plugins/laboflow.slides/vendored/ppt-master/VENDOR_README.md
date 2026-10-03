@@ -33,3 +33,14 @@ Re-vendor recipe (when scheduled): copy skills/ppt-master@v6.6.0 → prune
 ai-image-comparison + templates/sounds → keep SPONSORS/LICENSE (attribution
 guard) → refresh requirements-laboflow.txt against the new upstream list →
 rerun ppt-script-whitelist argspec snapshots + bundled + PPT_IT.
+
+## Re-vendor 2026-10-03: pin moved aee33e5 -> v6.6.0 (a50758ac)
+
+Audited 92 upstream commits before moving. requirements.txt identical to the
+pin (no new AGPL/GPL exposure); every flag our ppt_script argspecs pin still
+exists at v6.6.0 (svg_to_pptx cli.py drifted 444 lines, text_measure 278,
+total_md_split 21 — snapshot tests re-baselined on v6.6.0). Gains: bundled
+font advance tables (Segoe UI/Cambria/Trebuchet MS/Tahoma/Garamond),
+Indic/Thai/mixed-run typography fixes, Morph planning, edit-native
+hardening, --kiosk. Pruned again: references/ai-image-comparison +
+templates/sounds; guard and trimmed requirements unchanged.

@@ -31,7 +31,7 @@ from pptx_shapes import (
     svg_preset_preview_fingerprint,
     validate_ooxml_xfrm,
 )
-from language_tags import language_base, language_uses_rtl
+from language_tags import language_base, language_uses_rtl, normalize_language_tag
 
 from .context import AffineMatrix, ConvertContext, IDENTITY_MATRIX
 
@@ -95,6 +95,7 @@ SYSTEM_FONTS = {'system-ui', '-apple-system', 'BlinkMacSystemFont'}
 
 # macOS/Linux-only fonts -> Windows equivalents
 FONT_FALLBACK_WIN = {
+    '微软雅黑': 'Microsoft YaHei',
     'PingFang SC': 'Microsoft YaHei',
     'PingFang TC': 'Microsoft JhengHei',
     'PingFang HK': 'Microsoft JhengHei',
@@ -154,6 +155,11 @@ GENERIC_FONT_MAP = {
     'serif': 'Times New Roman',
 }
 
+_FONT_CANONICAL_NAMES = {
+    name.casefold(): name
+    for name in EA_FONTS | SYSTEM_FONTS | FONT_FALLBACK_WIN.keys() | GENERIC_FONT_MAP.keys()
+}
+
 # When the latin font is serif and no EA font is specified,
 # prefer SimSun (serif CJK) over Microsoft YaHei (sans-serif CJK).
 _SERIF_LATIN = {
@@ -175,9 +181,12 @@ PPT_SAFE_FONTS = frozenset({
     'meiryo', 'meiryo ui',
     'ms gothic', 'ms mincho', 'ms pgothic', 'ms pmincho', 'ms ui gothic',
     'malgun gothic', 'gulim', 'dotum', 'batang',
+    'nirmala ui', 'mangal', 'kokila', 'aparajita', 'utsaah',
+    'leelawadee ui', 'leelawadee', 'cordia new', 'angsana new', 'browallia new',
+    'david', 'miriam', 'frank ruehl', 'gisha', 'levenim mt', 'narkisim', 'aharoni',
     'arial', 'arial black', 'calibri', 'segoe ui', 'verdana',
     'helvetica', 'helvetica neue', 'tahoma', 'trebuchet ms',
-    'times new roman', 'times', 'georgia', 'cambria', 'palatino',
+    'times new roman', 'times', 'georgia', 'cambria', 'cambria math', 'palatino',
     'garamond', 'book antiqua',
     'consolas', 'courier new', 'menlo', 'monaco',
     'impact',
@@ -3246,6 +3255,7 @@ def parse_font_family(
     ea_font = None
 
     for font in fonts:
+        font = _FONT_CANONICAL_NAMES.get(font.casefold(), font)
         if font in SYSTEM_FONTS:
             continue
         if font in GENERIC_FONT_MAP:
@@ -3259,7 +3269,7 @@ def parse_font_family(
         win_font = (
             _JA_FONT_FALLBACK_WIN.get(font) if is_japanese else None
         ) or FONT_FALLBACK_WIN.get(font, font)
-        if font in EA_FONTS:
+        if font in EA_FONTS or win_font in EA_FONTS:
             ea_font = ea_font or win_font
         else:
             latin_font = latin_font or win_font
@@ -3357,6 +3367,18 @@ def _contains_codepoint_range(
         for ch in text
         for start, end in ranges
     )
+
+
+def _explicit_language_script(language: str) -> str | None:
+    """Return the explicit script before any region, variant, or extension."""
+    parts = normalize_language_tag(language).split('-')
+    index = 1
+    if len(parts[0]) <= 3:
+        while index < len(parts) and len(parts[index]) == 3 and parts[index].isalpha():
+            index += 1
+    if index < len(parts) and len(parts[index]) == 4 and parts[index].isalpha():
+        return parts[index]
+    return None
 
 
 def _default_language_for_script(
@@ -3477,7 +3499,30 @@ def detect_text_lang(
             frozenset({'el'}),
             'el-GR',
         )
+    if (
+        default_language
+        and language_base(default_language) in _NON_LATIN_SCRIPT_BASES
+        and _explicit_language_script(default_language) != 'Latn'
+        and any(ch.isalpha() for ch in text)
+    ):
+        # A run of Latin letters inside a CJK/Arabic/... deck (an English
+        # subtitle, a source line) proofs and reads as English, not as the
+        # deck language; digits and punctuation alone keep the deck tag.
+        return 'en-US'
     return default_language or 'en-US'
+
+
+# Language bases whose script the detector recognises above; a Latin-letter
+# run under one of these deck languages is not written in that language.
+_NON_LATIN_SCRIPT_BASES = frozenset({
+    'zh', 'ja', 'ko',
+    'ar', 'fa', 'ps', 'sd', 'ug', 'ur',
+    'he', 'yi',
+    'hi', 'mr', 'ne', 'sa',
+    'th',
+    'be', 'bg', 'kk', 'ky', 'mk', 'mn', 'ru', 'sr', 'uk',
+    'el',
+})
 
 
 def _is_grapheme_extend(ch: str) -> bool:
@@ -3607,6 +3652,36 @@ def resolve_text_run_fonts(text: str, fonts: dict[str, str]) -> dict[str, str]:
     return {'latin': latin, 'ea': ea, 'cs': latin}
 
 
+# Unicode fixed-width spaces carry their width in their definition; bundled
+# advance tables omit them, and the generic 0.55em fallback triples the thin
+# spaces German and French typography sets before '%', units, and '§'.
+_FIXED_SPACE_EMS = {
+    ' ': 0.5,    # en space
+    ' ': 1.0,    # em space
+    ' ': 1 / 3,  # three-per-em space
+    ' ': 0.25,   # four-per-em space
+    ' ': 1 / 6,  # six-per-em space
+    ' ': 0.55,   # figure space
+    ' ': 0.3,    # punctuation space
+    ' ': 0.2,    # thin space
+    ' ': 0.1,    # hair space
+    ' ': 0.2,    # narrow no-break space
+}
+
+
+_UNDECOMPOSED_BASE_LETTERS = str.maketrans('đĐłŁøØħĦ', 'dDlLoOhH')
+
+
+def _base_letter(ch: str) -> str:
+    """Return the unaccented letter a precomposed character advances like."""
+    decomposed = unicodedata.normalize('NFD', ch)
+    if len(decomposed) > 1 and all(
+        unicodedata.category(mark) == 'Mn' for mark in decomposed[1:]
+    ):
+        ch = decomposed[0]
+    return ch.translate(_UNDECOMPOSED_BASE_LETTERS)
+
+
 def _estimate_character_width(ch: str, font_size: float) -> float:
     if (
         0xFF00 <= ord(ch) <= 0xFFEF
@@ -3617,6 +3692,9 @@ def _estimate_character_width(ch: str, font_size: float) -> float:
         return font_size
     if ch == ' ':
         return font_size * 0.3
+    if ch in _FIXED_SPACE_EMS:
+        return font_size * _FIXED_SPACE_EMS[ch]
+    ch = _base_letter(ch)
     if ch in 'mMwWOQ%':
         return font_size * 0.75
     if ch in 'iIlj!|':
@@ -3641,7 +3719,13 @@ def _estimate_grapheme_width(cluster: str, font_size: float) -> float:
         and all(_is_regional_indicator(ch) for ch in bases)
     ) or '\u20e3' in cluster or any(_is_emoji_base(ch) for ch in bases):
         return font_size
-    return max(_estimate_character_width(ch, font_size) for ch in bases)
+    # Spacing combining marks (Indic vowel signs such as Devanagari aa/ii/o)
+    # sit beside the base and advance the pen; non-spacing marks do not.
+    spacing_marks = sum(1 for ch in cluster if unicodedata.category(ch) == 'Mc')
+    return (
+        max(_estimate_character_width(ch, font_size) for ch in bases)
+        + font_size * 0.3 * spacing_marks
+    )
 
 
 _FONT_ADVANCES_CACHE = None
@@ -3695,6 +3779,18 @@ def estimate_text_cluster_widths(
             for ch in cluster
         ):
             widths.append(sum(advances[ch] for ch in cluster) * font_size)
+            continue
+        # A precomposed letter the table lacks advances like its base letter.
+        bases = [
+            _base_letter(ch) for ch in cluster if not _is_grapheme_extend(ch)
+        ]
+        if advances is not None and not cjk and bases and all(
+            ch in advances and not _is_emoji_base(ch) for ch in bases
+        ) and all(
+            unicodedata.category(ch) == 'Mn' and not 0xFE00 <= ord(ch) <= 0xFE0F
+            for ch in cluster if _is_grapheme_extend(ch)
+        ):
+            widths.append(sum(advances[ch] for ch in bases) * font_size)
             continue
         width = _estimate_grapheme_width(cluster, font_size)
         widths.append(width * 1.05 if bold and not cjk else width)
