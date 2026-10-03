@@ -11,7 +11,9 @@ export interface HostCaller {
   call<T = unknown>(method: string, params?: unknown): Promise<T>;
 }
 
-export const ASSISTANT_SESSION_TITLE = "助理模式";
+export const ASSISTANT_SESSION_TITLE = "IM通道";
+/** 改名前的历史标题：定位到旧会话时沿用（保历史连续）并改名为新标题。 */
+export const LEGACY_ASSISTANT_SESSION_TITLE = "助理模式";
 
 type SessionSummary = { id: string; title?: string | null };
 
@@ -23,6 +25,15 @@ export async function ensureAssistantSession(
     (session) => (session.title ?? "").trim() === ASSISTANT_SESSION_TITLE,
   );
   if (existing) return { sessionId: existing.id, created: false };
+  const legacy = (listed.sessions ?? []).find(
+    (session) => (session.title ?? "").trim() === LEGACY_ASSISTANT_SESSION_TITLE,
+  );
+  if (legacy) {
+    await host
+      .call("session.rename", { id: legacy.id, title: ASSISTANT_SESSION_TITLE })
+      .catch(() => undefined);
+    return { sessionId: legacy.id, created: false };
+  }
   const created = await host.call<{ session?: { id?: string } }>("session.create", {
     title: ASSISTANT_SESSION_TITLE,
   });

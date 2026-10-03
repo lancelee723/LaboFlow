@@ -70,8 +70,8 @@ test("settings IA declares the assistant tab and mounts the channel page", async
   assert.match(search, /labelKey: "settings\.nav\.assistant"/);
   assert.match(page, /AssistantChannelsPage/);
   assert.match(page, /tab === "assistant"/);
-  assert.match(i18nEn, /assistantTitle: "Assistant channels"/);
-  assert.match(i18nZh, /assistantTitle: "助理通道"/);
+  assert.match(i18nEn, /assistantTitle: "IM channels"/);
+  assert.match(i18nZh, /assistantTitle: "IM通道"/);
   for (const key of ["feishuAppId", "feishuAppSecret", "wecomSecret", "wechatServerUrl", "credentialUnchanged"]) {
     assert.match(i18nEn, new RegExp(`\\b${key}:`), `en missing ${key}`);
   }
