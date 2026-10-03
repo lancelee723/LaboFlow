@@ -70,7 +70,8 @@ export async function onLoad() {
     },
     execute: async (args) => {
       const action = String(args?.action ?? "").trim();
-      switch (action) {
+      try {
+        switch (action) {
         case "navigate": {
           const state = await pi.browser.navigate({
             url: args?.url ? String(args.url) : undefined,
@@ -134,6 +135,15 @@ export async function onLoad() {
             ok: false,
             error: `unknown action "${action}"; use ${ACTIONS.join(", ")}`,
           };
+        }
+      } catch (error) {
+        // A guest that is not open yet is a normal first-call state, not a
+        // tool failure: surface the remedy as a structured result the agent
+        // can act on instead of an exception.
+        if (error?.code === "UNAVAILABLE") {
+          return { ok: false, action, error: String(error.message ?? error) };
+        }
+        throw error;
       }
     },
   });

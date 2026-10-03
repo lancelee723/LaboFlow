@@ -164,3 +164,19 @@ test("a failed tab never exposes a sibling page", async () => {
   assert.equal(h.panes.some((pane) => pane.visible), false);
   assert.notEqual(h.host.getState()?.url, "A.html");
 });
+
+test("actions before the first navigate fail with the navigate remedy", async () => {
+  const h = harness();
+  await assert.rejects(
+    () => h.host.snapshot(),
+    (error) => {
+      assert.equal(error.code, "UNAVAILABLE");
+      assert.match(error.message, /navigate/);
+      return true;
+    },
+  );
+  // Opening a page clears the condition.
+  await open(h, "A", "one", "A.html");
+  const state = h.host.getState();
+  assert.ok(state?.url);
+});

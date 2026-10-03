@@ -286,13 +286,26 @@ export class BrowserHost {
   }
 
   private currentPage(): BrowserPage {
-    if (!this.active?.started) throw Object.assign(new Error("browser guest is not available"), { code: "UNAVAILABLE" });
+    if (!this.active?.started) {
+      // Agents hit this when an action arrives before any navigation (the
+      // guest is created by the first navigate). Say the remedy, not just
+      // the failure, so the loop self-corrects in one step.
+      throw Object.assign(
+        new Error('no browser page is open yet — call action="navigate" with a URL first'),
+        { code: "UNAVAILABLE" },
+      );
+    }
     return this.active;
   }
 
   private requireWebContents() {
     const wc = this.currentPage().pane.getWebContents();
-    if (!wc || wc.isDestroyed()) throw Object.assign(new Error("browser guest is not available"), { code: "UNAVAILABLE" });
+    if (!wc || wc.isDestroyed()) {
+      throw Object.assign(
+        new Error("the browser page was closed — call action=\"navigate\" to reopen it"),
+        { code: "UNAVAILABLE" },
+      );
+    }
     return wc;
   }
 
