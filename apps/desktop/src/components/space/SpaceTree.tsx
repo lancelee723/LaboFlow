@@ -166,6 +166,16 @@ export function SpaceTree(props: {
               </span>
             )}
             <span className="truncate">{entry.name}</span>
+            {entry.commentCount ? (
+              <span className="ml-auto shrink-0 rounded-full px-1 text-[10px] opacity-60" title="comments">
+                {entry.commentCount}
+              </span>
+            ) : null}
+            {entry.pendingRevisions ? (
+              <span className="ml-auto shrink-0 rounded-full bg-amber-500/20 px-1 text-[10px] text-amber-700 dark:text-amber-300" title="pending revisions">
+                {entry.pendingRevisions}
+              </span>
+            ) : null}
           </button>
           <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
             {actions}

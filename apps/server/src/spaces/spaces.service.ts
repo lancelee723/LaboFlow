@@ -338,6 +338,26 @@ export class SpaceService {
     const { space, perm: spacePerm } = await this.requireSpace(spaceId, actor.userId);
     const nodes = await this.db.select().from(spaceNodes).where(eq(spaceNodes.spaceId, space.id));
     const { visible, permOf } = await this.visibility(space, spacePerm, actor);
+    // FR-TC-03 badges: per-node open comment / pending revision counts
+    const commentCounts = new Map<string, number>();
+    const revisionCounts = new Map<string, number>();
+    const nodeIds = [...visible.keys()];
+    if (nodeIds.length) {
+      for (const row of await this.db
+        .select({ nodeId: comments.nodeId, count: sql<number>`count(*)::int` })
+        .from(comments)
+        .where(and(inArray(comments.nodeId, nodeIds), eq(comments.status, 'open')))
+        .groupBy(comments.nodeId)) {
+        commentCounts.set(row.nodeId, Number(row.count));
+      }
+      for (const row of await this.db
+        .select({ nodeId: revisionSuggestions.nodeId, count: sql<number>`count(*)::int` })
+        .from(revisionSuggestions)
+        .where(and(inArray(revisionSuggestions.nodeId, nodeIds), eq(revisionSuggestions.status, 'pending')))
+        .groupBy(revisionSuggestions.nodeId)) {
+        revisionCounts.set(row.nodeId, Number(row.count));
+      }
+    }
     // 父先于子输出，客户端可直接建树
     const ordered: NodeRow[] = [];
     const seen = new Set<string>();
@@ -353,7 +373,11 @@ export class SpaceService {
       ordered.push(n);
     };
     for (const n of nodes) if (visible.has(n.id)) push(n, new Set());
-    return ordered.map((n) => this.nodeDto(n, permOf(n.id)));
+    return ordered.map((n) => ({
+      ...this.nodeDto(n, permOf(n.id)),
+      commentCount: commentCounts.get(n.id) ?? 0,
+      pendingRevisions: revisionCounts.get(n.id) ?? 0,
+    }));
   }
 
   async updateNode(

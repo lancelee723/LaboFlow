@@ -326,6 +326,10 @@ export interface SpaceNode {
   updatedBy: string | null;
   updatedAt: string;
   createdAt: string;
+  /** FR-TC-03: open comment count (server-computed badge). */
+  commentCount?: number;
+  /** FR-TC-03: pending revision suggestion count. */
+  pendingRevisions?: number;
 }
 
 /** MD/CSV 正文（服务端权威 + 版本链）。version=0 表示尚无版本（content 为空）。 */
