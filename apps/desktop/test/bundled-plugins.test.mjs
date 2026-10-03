@@ -314,6 +314,7 @@ test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", async ()
   const du = (dir) => {
     let total = 0;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "__pycache__") continue; // regenerable bytecode, not shipped intent
       const full = resolve(dir, entry.name);
       if (entry.isDirectory()) total += du(full);
       else total += statSync(full).size;

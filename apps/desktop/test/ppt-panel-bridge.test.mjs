@@ -11,9 +11,10 @@ import test from "node:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PLUGIN_DIR = join(
-  new URL("../resources/plugins/laboflow.slides/", import.meta.url).pathname.replace(/\/$/, ""),
+  fileURLToPath(new URL("../resources/plugins/laboflow.slides/", import.meta.url)),
 );
 
 const workspaces = [];

@@ -22,9 +22,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
-const root = join(dirname(new URL(import.meta.url).pathname), "..");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const hostBin = process.env.PI_DESKTOP_HOST_BIN
   ? resolve(process.env.PI_DESKTOP_HOST_BIN)
   : join(root, "target/debug/pi-desktop-host-core");

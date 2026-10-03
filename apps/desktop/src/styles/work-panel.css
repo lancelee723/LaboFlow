@@ -899,7 +899,7 @@
 
 .doc-preview-toolbar [role="tab"].active {
   background: var(--ds-bg-subtle);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .doc-preview-page {

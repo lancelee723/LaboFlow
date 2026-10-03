@@ -12,6 +12,7 @@ import test from "node:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   detectRuntime,
@@ -22,10 +23,7 @@ import {
   skillRoot,
 } from "../resources/plugins/laboflow.slides/lib/ppt-runtime.js";
 
-const REAL_PLUGIN_DIR = new URL(
-  "../resources/plugins/laboflow.slides/",
-  import.meta.url,
-).pathname.replace(/\/$/, "");
+const REAL_PLUGIN_DIR = fileURLToPath(new URL("../resources/plugins/laboflow.slides/", import.meta.url));
 const IT_ENABLED = process.env.PPT_IT === "1";
 const options = { skip: IT_ENABLED ? false : "PPT_IT=1 未启用：真机集成测试跳过" };
 

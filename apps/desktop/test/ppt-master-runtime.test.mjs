@@ -3,6 +3,7 @@ import test from "node:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   chooseInstaller,
@@ -20,10 +21,7 @@ import {
 } from "../resources/plugins/laboflow.slides/lib/ppt-runtime.js";
 
 // The real vendored skill lives in the repo; resolve relative to the test file.
-const REAL_PLUGIN_DIR = new URL(
-  "../resources/plugins/laboflow.slides/",
-  import.meta.url,
-).pathname.replace(/\/$/, "");
+const REAL_PLUGIN_DIR = fileURLToPath(new URL("../resources/plugins/laboflow.slides/", import.meta.url));
 
 const tmpHome = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 
