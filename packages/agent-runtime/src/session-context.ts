@@ -7,17 +7,17 @@
  * synchronous and keeps the `{ messages }` shape the runtime already uses.
  *
  * The slice-from-latest-compaction and compactionSummary-before-retainedTail
- * order are copied from pi-agent-core; D203 depends on that order. Retained
+ * order preserve the behavior D203 depends on. Retained
  * reasoning turns (#296) sit between the summary and the user tail so strict
  * DeepSeek relays still see real thinking without replaying tool-call pairs.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   createBranchSummaryMessage,
   createCompactionSummaryMessage,
-  type AgentMessage,
-  type Entry,
-} from "@earendil-works/pi-agent-core";
+} from "./pi-runtime-messages.js";
+import type { Entry } from "./pi-runtime-types.js";
 import {
   retainedReasoningFromDetails,
   retainedReasoningToMessages,

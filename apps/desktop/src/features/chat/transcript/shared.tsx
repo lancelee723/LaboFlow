@@ -393,7 +393,7 @@ export function ToolActionIcon({ action }: { action: ToolAction }) {
 /** Actions whose path/url argument makes sense to preview in the panel. */
 export const PREVIEWABLE_ACTIONS = new Set<ToolAction>(["read", "write", "edit", "fetch"]);
 
-export function fileChipIcon(name: string, kind?: "image" | "file") {
+export function fileChipIcon(name: string, kind?: "image" | "file" | "session") {
   if (kind === "image" || /\.(avif|bmp|gif|heic|jpe?g|png|tiff?|webp)$/i.test(name)) {
     return IconImage;
   }
@@ -422,7 +422,7 @@ export function FileRefChip({
 }: {
   name: string;
   path: string;
-  kind?: "image" | "file";
+  kind?: "image" | "file" | "session";
   mimeType?: string;
   onOpen: (path: string, baseDir?: string, mimeType?: string) => void;
 } & SourcePositionProps) {

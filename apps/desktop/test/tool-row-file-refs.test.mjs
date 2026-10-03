@@ -75,6 +75,11 @@ const { useOpenPreviewTarget } = loadModule("../src/hooks/use-preview-target.ts"
   },
   "../lib/chat-links": loadModule("../src/lib/chat-links.ts", {}),
   "../lib/open-http-url": { openHttpUrl: (...args) => calls.urls.push(args) },
+  "@pi-desktop/shared": {
+    // Truthful inline of shared/document-formats so routing assertions stay real.
+    isDocumentPreviewPath: (path) =>
+      /\.(?:pdf|docx|pptx|xlsx)$/i.test(String(path ?? "").replace(/\\/g, "/").split("/").pop() ?? ""),
+  },
   "../lib/work-panel-tabs": workPanelTabs,
 });
 

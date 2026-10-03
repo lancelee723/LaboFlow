@@ -30,17 +30,15 @@
     "dist:linux": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && electron-builder --linux --publish never"
   },
   "dependencies": {
-    "@aiden0z/pptx-renderer": "^1.3.0",
     "@picovoice/pvrecorder-node": "1.2.9",
     "adm-zip": "^0.5.16",
-    "docx-preview": "^0.4.1",
     "electron-updater": "^6.8.9",
-    "pdfjs-dist": "^5.7.284",
-    "transcribe-cpp": "0.2.2",
-    "xlsx": "^0.18.5"
+    "transcribe-cpp": "0.2.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.87.1",
+    "@aiden0z/pptx-renderer": "^1.3.0",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-mcp": "1.0.0",
     "@pi-desktop/agent-host": "workspace:*",
     "@pi-desktop/agent-runtime": "workspace:*",
     "@pi-desktop/host-runtime": "workspace:*",
@@ -56,6 +54,7 @@
     "@types/react-dom": "^19.2.4",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.6.0",
+    "docx-preview": "^0.4.1",
     "dompurify": "^3.4.13",
     "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
@@ -64,6 +63,7 @@
     "katex": "^0.16.47",
     "lucide-react": "^1.31.0",
     "mermaid": "^11.16.1",
+    "pdfjs-dist": "^5.7.284",
     "pinyin-pro": "3.29.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -81,6 +81,7 @@
     "unified": "^11.0.5",
     "vite": "^7.3.6",
     "ws": "8.21.1",
+    "xlsx": "^0.18.5",
     "zustand": "^5.0.15"
   },
   "build": {
@@ -162,8 +163,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "LaboFlow needs local network access so agents can reach OpenAI-compatible providers, Ollama, and other AI endpoints running on your LAN. / LaboFlow 需要本地网络访问权限，以便助手请求同一局域网中的 OpenAI 兼容服务、Ollama 等本地 AI 端点。",
-        "NSMicrophoneUsageDescription": "LaboFlow plugins may use the microphone after you grant them audio access. / 在你授权后，LaboFlow 插件可以使用麦克风。",
+        "NSLocalNetworkUsageDescription": "LaboFlow needs local network access so agents can reach OpenAI-compatible providers, Ollama, and other AI endpoints running on your LAN. / LaboFlow \u9700\u8981\u672c\u5730\u7f51\u7edc\u8bbf\u95ee\u6743\u9650\uff0c\u4ee5\u4fbf\u52a9\u624b\u8bf7\u6c42\u540c\u4e00\u5c40\u57df\u7f51\u4e2d\u7684 OpenAI \u517c\u5bb9\u670d\u52a1\u3001Ollama \u7b49\u672c\u5730 AI \u7aef\u70b9\u3002",
+        "NSMicrophoneUsageDescription": "LaboFlow plugins may use the microphone after you grant them audio access. / \u5728\u4f60\u6388\u6743\u540e\uff0cLaboFlow \u63d2\u4ef6\u53ef\u4ee5\u4f7f\u7528\u9ea6\u514b\u98ce\u3002",
         "NSBonjourServices": [
           "_http._tcp",
           "_https._tcp"

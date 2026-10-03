@@ -1,8 +1,11 @@
+import { planWorkspaceRequiredResult } from "./plan-workspace-error.js";
+import { accountModelStream } from "./request-usage.js";
 import { modeToolDenial, retainModeToolDeclaration, withModeExecutionGuard } from "./mode-tool-access.js";
 import { restoreHostedSearchReplay } from "./hosted-search-replay.js";
 import { requestExtensionUi } from "./extensions/ui-request.js";
 import { readLocalRequestErrorDetails } from "./local-request-errors.js";
 import { imageGenerationDescription, imageGenerationParameters } from "./image-generation/tool.js";
+import { todoWriteDescription, todoWriteParameters } from "./todo-tool.js";
 import { scheduledToolParameters, scheduledToolDescriptions } from "./scheduled-tools.js";
 import { withPiFileOpToolNames } from "./pi-file-ops.js";
 import { randomUUID } from "node:crypto";
@@ -12,13 +15,6 @@ import {
 } from "./delegation-message.js";
 import {
   Agent,
-  BACKGROUND_CONTEXT,
-  compact,
-  convertToLlm,
-  estimateContextTokens,
-  estimateTokens,
-  prepareCompaction,
-  withAbortSignal,
   type AgentContext,
   type AgentEvent,
   type AgentLoopTurnUpdate,
@@ -27,13 +23,8 @@ import {
   type AgentToolResult,
   type AfterToolCallContext,
   type AfterToolCallResult,
-  type CompactionPreparation,
-  type CompactionEntry,
-  type CompactionSettings,
   type BeforeToolCallContext,
   type BeforeToolCallResult,
-  type Entry,
-  type MessageEntry,
   type PrepareNextTurnContext,
 } from "@earendil-works/pi-agent-core";
 import {
@@ -57,10 +48,10 @@ import {
   type TrustedExtensionSpec,
   type TrustedExtensionUiResponse,
 } from "@pi-desktop/shared";
-import {
+import type {
   TrustedExtensionRunner,
-  type RegisteredTrustedExtensionAgent,
-  type TrustedExtensionBridge,
+  RegisteredTrustedExtensionAgent,
+  TrustedExtensionBridge,
 } from "./extensions/runner.js";
 import type {
   AgentActivity,
@@ -132,6 +123,20 @@ import {
 } from "./agent-messages.js";
 import { withExplicitRequired } from "./tool-schema.js";
 import { buildSessionContext } from "./session-context.js";
+import { prepareCompaction } from "./pi-runtime-compaction-plan.js";
+import { compact } from "./pi-runtime-compaction-summary.js";
+import {
+  estimateContextTokens,
+  estimateTokens,
+} from "./pi-runtime-estimates.js";
+import { convertToLlm } from "./pi-runtime-messages.js";
+import type {
+  CompactionEntry,
+  CompactionPreparation,
+  CompactionSettings,
+  Entry,
+  MessageEntry,
+} from "./pi-runtime-types.js";
 import {
   initialSystemTranscript,
   rebuildSystemTranscript,
@@ -212,6 +217,7 @@ import {
   withOpenCodeSessionHeaders,
 } from "./opencode-session-headers.js";
 import { withCompactionRequestHeaders } from "./compaction-request.js";
+import type { CompactionRequestShape } from "./compaction-diagnostics.js";
 import {
   addSummaryUsage,
   compactionSummaryInputLimit,
@@ -263,9 +269,16 @@ import {
 
 export type { RuntimeProviderConfig } from "./provider-binding.js";
 
-export type RuntimePromptAttachment = AgentPromptAttachment & {
+export type RuntimePromptAttachment = Omit<AgentPromptAttachment, "kind"> & {
+  /**
+   * `session` is written by Electron main for a resolved
+   * `pi-desktop://session/<id>` reference; the renderer never sends it.
+   */
+  kind: AgentPromptAttachment["kind"] | "session";
   /** Base64 payload is transient and only crosses the sidecar for this turn. */
   data?: string;
+  /** Bounded excerpt of a referenced conversation (`kind: "session"`). */
+  text?: string;
 };
 
 export type RuntimePrompt = {
@@ -274,9 +287,24 @@ export type RuntimePrompt = {
   attachments?: RuntimePromptAttachment[];
 };
 
+/**
+ * The user's own words plus one quoted block per referenced conversation. The
+ * visible prompt is never rewritten: references are additive, and the model
+ * must receive this text — a reference accounted for by compaction but absent
+ * from the provider request would be context the user never got.
+ */
+function promptText(input: RuntimePrompt): string {
+  const references = (input.attachments ?? [])
+    .map((attachment) => sessionReferenceBlock(attachment))
+    .filter((block): block is string => block !== null);
+  return references.length
+    ? `${input.text}\n\n${references.join("\n\n")}`.trim()
+    : input.text;
+}
+
 function promptContent(input: string | RuntimePrompt): UserMessage["content"] {
   if (typeof input === "string") return input;
-  const text = input.text;
+  const text = promptText(input);
   const images = (input.attachments ?? []).filter(
     (attachment) =>
       attachment.kind === "image" &&
@@ -319,8 +347,30 @@ function runtimeAttachmentFromMessage(
     kind: attachment.kind,
     ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
     ...(attachment.size !== undefined ? { size: attachment.size } : {}),
+    ...(attachment.text ? { text: attachment.text } : {}),
     ...(data ? { data } : {}),
   };
+}
+
+/** Attribute-safe text: a session title may contain quotes or angle brackets. */
+function escapeAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+/**
+ * A referenced conversation travels with the user's message as one delimited
+ * block: it is quoted context, not the user's own words (a session link in the
+ * draft produced it), so the model reads it as reference material.
+ */
+export function sessionReferenceBlock(attachment: RuntimePromptAttachment): string | null {
+  const text = attachment.text?.trim();
+  if (!text) return null;
+  const title = escapeAttribute(attachment.name || attachment.path);
+  return `<session_reference name="${title}" session="${escapeAttribute(attachment.path)}">\n${text}\n</session_reference>`;
 }
 
 // pi-ai's adapter retry is disabled here so setup and mid-stream 429s share
@@ -955,6 +1005,8 @@ export type AgentRuntimeOptions = {
    * a second containment root. */
   scratchDir?: string;
   onEvent: (envelope: AgentEventEnvelope) => void;
+  /** Bounded diagnostics routed to the Electron logger, never the transcript. */
+  onDiagnostic?: (diagnostic: AgentRuntimeDiagnostic) => void;
   /**
    * Subagent definitions this session may delegate to (ADR 0062), already
    * merged and capped by Electron main. Empty means no `Task` tool at all.
@@ -969,6 +1021,14 @@ export type AgentRuntimeOptions = {
   subagentProviders?: Record<string, RuntimeProviderConfig>;
   /** Resolved keys explicitly opted into Task.model selection; pins alone grant no override. */
   subagentModelKeys?: string[];
+};
+
+export type AgentRuntimeDiagnostic = {
+  kind: "compaction_failure" | "compaction_shape";
+  sessionId: string;
+  turnId?: string;
+  requestId: string;
+  data: Record<string, unknown>;
 };
 
 export type RuntimeMatchConfig = {
@@ -1462,16 +1522,12 @@ function selectRetainedUserMessages(
 
 /** Rebuild a pi-ai tool result from a persisted tool row. Rows that never
  * finished (app quit / abort mid-tool) restore as errored results so the
- * model knows the call produced nothing. */
-function toolResultFromUi(
+ * model knows the call produced nothing. Exported for tests. */
+export function toolResultFromUi(
   m: UiMessage,
   timestamp: number,
 ): ToolResultMessage {
-  const raw = m.toolResult as
-    | { content?: unknown; details?: unknown }
-    | string
-    | null
-    | undefined;
+  const raw: unknown = m.toolResult;
   const blocks: ToolResultMessage["content"] = [];
   const rawBlocks =
     isRecord(raw) && Array.isArray(raw.content) ? raw.content : undefined;
@@ -1491,7 +1547,27 @@ function toolResultFromUi(
   } else if (typeof raw === "string" && raw.trim()) {
     blocks.push({ type: "text", text: raw });
   } else if (raw !== undefined && raw !== null) {
-    blocks.push({ type: "text", text: safeJson(raw) });
+    // A host Read of an image file returns a top-level `images` array rather
+    // than content blocks; restore those as real image content so the model
+    // sees the picture across a restart, not just the JSON text (#1073).
+    const rawObject = isRecord(raw) ? raw : undefined;
+    const images = rawObject?.images;
+    if (rawObject && Array.isArray(images)) {
+      const rest = { ...rawObject };
+      delete rest.images;
+      blocks.push({ type: "text", text: safeJson(rest) });
+      for (const image of images) {
+        if (
+          isRecord(image) &&
+          typeof image.data === "string" &&
+          typeof image.mimeType === "string"
+        ) {
+          blocks.push({ type: "image", data: image.data, mimeType: image.mimeType });
+        }
+      }
+    } else {
+      blocks.push({ type: "text", text: safeJson(raw) });
+    }
   }
   const interrupted = m.toolStatus === "running";
   const rawRecord: Record<string, unknown> | undefined = isRecord(raw)
@@ -1601,6 +1677,7 @@ export class DesktopAgentRuntime {
   private thinkingLevel: SessionThinkingLevel;
   private host: RuntimeHost;
   private onEvent: (envelope: AgentEventEnvelope) => void;
+  private onDiagnostic: (diagnostic: AgentRuntimeDiagnostic) => void;
   private streamSink: StreamCoalescer;
   private baseSystemPrompt: string;
   private personaPrompt?: string;
@@ -1613,6 +1690,7 @@ export class DesktopAgentRuntime {
   private pluginSkills: PluginSkillDef[];
   private trustedExtensionSpecs: TrustedExtensionSpec[];
   private extensionRunner?: TrustedExtensionRunner;
+  private trustedExtensionLoad?: Promise<void>;
   private extensionSessionName?: string;
   private extensionTurnIndex = 0;
   /** Headers an extension edited in `before_provider_headers` for the current turn. */
@@ -1783,6 +1861,7 @@ export class DesktopAgentRuntime {
   private pendingSteering = new Map<AgentMessage, string>();
   private pendingOverflow = false;
   private overflowRecoveryAttempted = false;
+  private overflowRecoveryInProgress = false;
   private suppressOverflowRunEnd = false;
   private turnHadError = false;
   /** Bumped at the start of each parent `prompt()` / `executeApprovedPlan()`. */
@@ -1801,6 +1880,13 @@ export class DesktopAgentRuntime {
   private activeToolProgressCleanups = new Set<(flush: boolean) => void>();
   private hostCloseUnsubscribe?: () => void;
   private turnSubagentUsage?: MessageUsage;
+  private compactionRequestShape?: CompactionRequestShape;
+  private compactionShapeLogged = false;
+  private compactionDiagnosticBudget?: {
+    hardLimit: number;
+    outputBudget: number;
+    plannedChunks: number;
+  };
 
   constructor(opts: AgentRuntimeOptions) {
     this.sessionId = opts.sessionId;
@@ -1811,6 +1897,7 @@ export class DesktopAgentRuntime {
     this.thinkingLevel = clampThinkingLevel(opts.provider, opts.thinkingLevel);
     this.infiniteProviderRetry = opts.infiniteProviderRetry === true;
     this.host = opts.host;
+    this.onDiagnostic = opts.onDiagnostic ?? (() => undefined);
     this.hostCloseUnsubscribe = this.host.onClose?.(() => {
       this.cleanupActiveToolProgress();
     });
@@ -1992,14 +2079,19 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             stallAbort.signal,
           ]),
         };
+        const usageTurnId = this.turnId;
         const retryStream = createProviderRetryStream(
           m,
           context,
           attemptOptions,
-          (retryOptions) =>
+          (retryOptions) => accountModelStream(m, () =>
             this.thinkingLevel === "omit"
               ? this.models.stream(omitThinkingModel(m), context, retryOptions)
-              : this.models.streamSimple(m, context, retryOptions),
+              : this.models.streamSimple(m, context, retryOptions), {
+                providerId: this.provider.id,
+                nativeCost: this.provider.modelConfig?.nativeCost,
+                onUsage: (usage) => this.emit({ type: "usage", usage }, usageTurnId),
+              }),
           {
             claim: (error, phase) => this.claimProviderRetry(error, phase),
             headers: () => this.providerRetryHeaders,
@@ -2469,6 +2561,19 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
    */
   async loadTrustedExtensions(): Promise<void> {
     if (this.disposed || this.extensionRunner || this.trustedExtensionSpecs.length === 0) return;
+    if (this.trustedExtensionLoad) return this.trustedExtensionLoad;
+    const loading = this.loadTrustedExtensionsForSession();
+    this.trustedExtensionLoad = loading;
+    try {
+      await loading;
+    } finally {
+      if (this.trustedExtensionLoad === loading) this.trustedExtensionLoad = undefined;
+    }
+  }
+
+  private async loadTrustedExtensionsForSession(): Promise<void> {
+    const { TrustedExtensionRunner } = await import("./extensions/runner.js");
+    if (this.disposed || this.extensionRunner || this.trustedExtensionSpecs.length === 0) return;
     const runner = new TrustedExtensionRunner({
       specs: this.trustedExtensionSpecs,
       bridge: this.createExtensionBridge(),
@@ -2557,6 +2662,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   private extensionModelRegistry(): Record<string, unknown> {
     const getRunner = () => this.extensionRunner;
     const models = () => [this.model, ...(getRunner()?.getAgentModels() ?? [])];
+    const hasConfiguredProvider = (providerId: string) =>
+      providerId === this.provider.id ||
+      providerId === this.model.provider ||
+      (getRunner()?.getAgents().some((agent) => agent.providerId === providerId) ?? false);
     return {
       getAll: () => [...new Map(models().map((model) => [`${model.provider}/${model.id}`, model])).values()],
       getAvailable: () => [...new Map(models().map((model) => [`${model.provider}/${model.id}`, model])).values()],
@@ -2566,12 +2675,11 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         getRunner()?.getAgents().find((agent) => agent.providerId === providerId)?.name ??
         (providerId === this.provider.id ? this.provider.name : providerId),
       getProviderAuthStatus: (providerId: string) => ({
-        configured: [this.provider.id, ...(getRunner()?.getAgents().map((agent) => agent.providerId) ?? [])].includes(providerId),
+        configured: hasConfiguredProvider(providerId),
         source: "plugin",
       }),
       hasConfiguredAuth: (model: { provider?: string }) =>
-        typeof model.provider === "string" &&
-        [this.provider.id, ...(getRunner()?.getAgents().map((agent) => agent.providerId) ?? [])].includes(model.provider),
+        typeof model.provider === "string" && hasConfiguredProvider(model.provider),
     };
   }
 
@@ -2949,6 +3057,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           return `Replace, insert, or delete lines in an existing file. Names positions and supplies new content only — never old_string. Required: path, tag (4 hex from the latest Read/Grep/Write/Edit), ops. Ops: PUT N.=M: replace inclusive lines N–M; PUT <N: insert before N; PUT >N: insert after N; PUT >$: append; CUT N.=M delete; REM delete the file; MV DEST rename after other ops. Body rows are + plus the final line text. Every PUT with body rows must include the trailing colon, for example PUT 48.=48:; PUT 48.=48 followed by + rows is invalid. A colonless PUT is only for a register paste such as PUT <1 @name. No -old or context rows. Ranges name only the lines being changed. Re-ground on the tag returned by every successful write. After one failed Edit, classify the error: Read the live file for a stale tag or unseen lines (or retry unchanged on a complete EDIT_LINES_UNSEEN reveal), but correct syntax or range errors directly; do not guess. Do not edit the same path concurrently.${scratchPathHint}${externalPathHint}`;
         case "Bash":
           return `${commandShellToolDescription(this.commandShell, this.scratchDir)} Use Edit or Write instead of apply_patch, git apply, or patch; do not retry a failed shell patch command repeatedly.`;
+        case "TodoWrite":
+          return todoWriteDescription;
         case ASK_TOOL_NAME:
           return "Ask the user one or more questions. Use Markdown in question text and option labels when formatting helps (for example, emphasis, inline code, or lists); the desktop card renders it safely. Plain strings and existing `{ label, description? }` options are accepted; descriptions remain plain text and answers return the selected source label. The card always provides a custom user-input option.";
         case "PluginScaffold":
@@ -2965,6 +3075,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     // stopped being readable.
     const parameters: Record<string, Parameters<typeof Type.Object>[0]> = {
       GenerateImages: imageGenerationParameters,
+      TodoWrite: todoWriteParameters,
       Read: {
         path: pathParam(
           "Existing regular file only, never a directory; workspace-relative or explicitly approved.",
@@ -3026,14 +3137,30 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       Edit: {
         path: pathParam("File to edit; workspace-relative."),
         file_path: aliasParam("path"),
-        tag: Type.String({
-          description:
-            "4 uppercase hex from the latest Read, Grep, Write, or Edit for this path.",
-        }),
-        ops: Type.String({
-          description:
-            "One or more operation headers with + body rows, newline separated. A PUT with body rows must end its header with `:` (for example, `PUT 48.=48:`); `PUT 48.=48` followed by + rows is invalid. A colonless PUT is only for a register paste such as `PUT <1 @name`.",
-        }),
+        tag: Type.Optional(
+          Type.String({
+            description:
+              "4 uppercase hex from the latest Read, Grep, Write, or Edit for this path. Required unless legacy old_string/new_string is used.",
+          }),
+        ),
+        ops: Type.Optional(
+          Type.String({
+            description:
+              "One or more operation headers with + body rows, newline separated. A PUT with body rows must end its header with `:` (for example, `PUT 48.=48:`); `PUT 48.=48` followed by + rows is invalid. A colonless PUT is only for a register paste such as `PUT <1 @name`. Required unless legacy old_string/new_string is used.",
+          }),
+        ),
+        old_string: Type.Optional(
+          Type.String({
+            description:
+              "Legacy text replacement: exact text to be replaced (must match exactly once in the target file).",
+          }),
+        ),
+        new_string: Type.Optional(
+          Type.String({
+            description:
+              "Legacy text replacement: new text to replace old_string with.",
+          }),
+        ),
       },
       Bash: {
         command: Type.String(),
@@ -3429,6 +3556,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             "Grep",
             "BrowserPreview",
             "PluginCheck",
+            "TodoWrite",
           ]
         : ["Read", "Glob", "Grep", "BrowserPreview", "Bash", "Write", "Edit"];
     if (this.mode === "agent") {
@@ -4742,6 +4870,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     const tagged: UiMessage = {
       ...row,
       parentToolCallId: envelope.parentToolCallId ?? row.parentToolCallId,
+      nestedParentToolCallId: envelope.nestedParentToolCallId ?? row.nestedParentToolCallId,
       agentName: envelope.agentName ?? row.agentName,
     };
     const key =
@@ -4775,6 +4904,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       toolStatus: event.isError ? "error" : "success",
       isError: Boolean(event.isError),
       parentToolCallId: envelope.parentToolCallId,
+      nestedParentToolCallId: envelope.nestedParentToolCallId,
       agentName: envelope.agentName,
     };
   }
@@ -5225,7 +5355,14 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   }
 
   private resetDeferredToolsForPrompt(): void {
-    this.activeDeferredToolNames.clear();
+    // Sticky activation (#1225): on-demand tools stay active for the whole
+    // session instead of being reset at every prompt. A context-only restore
+    // drops the activation whenever the announcing rows fall out of the window
+    // (compaction, long turns), and the next direct call then fails with
+    // "Tool <name> not found" at name resolution — the intermittent 0 ms
+    // rejection on Windows. `rebuildToolCatalog` still prunes names that left
+    // the catalog (mode switches, extension reloads), so the set cannot
+    // outlive the tools it names.
     this.restoreDeferredToolsFromContext();
     this.setAgentTools(this.activeTools());
   }
@@ -5329,6 +5466,8 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             question,
           });
         } catch (error) {
+          const recovery = planWorkspaceRequiredResult(error);
+          if (recovery) return recovery;
           const errorCode =
             (error as { data?: { errorCode?: string } })?.data?.errorCode ??
             "PLAN_SUBMIT_FAILED";
@@ -5751,6 +5890,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   private resetRunRecoveryState(): void {
     this.pendingOverflow = false;
     this.overflowRecoveryAttempted = false;
+    this.overflowRecoveryInProgress = false;
     this.suppressOverflowRunEnd = false;
     this.pendingProviderRetry = undefined;
     this.providerTransientRetryAttempt = 0;
@@ -5910,39 +6050,43 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         this.pendingOverflow = false;
         this.suppressOverflowRunEnd = false;
         this.overflowRecoveryAttempted = true;
-        const messages = [...this.agent.state.messages];
-        while (messages.at(-1)?.role === "assistant") messages.pop();
-        this.setAgentMessages(messages);
-        const compacted = await this.runCompaction(
-          "overflow",
-          true,
-          "active_turn",
-        );
-        if (!compacted) {
-          this.terminateParentTurn();
-          if (this.compactionAborted) {
-            // The user stopped the turn while the checkpoint was being written.
-            // That is an aborted turn, not a compaction failure: close it the
-            // way a stopped stream closes, with no error row.
-            this.finalizeCurrentAssistant("aborted");
-            this.emit({ type: "turn_end" });
-            this.emit({ type: "agent_end", messageIds: [] });
-            return false;
-          }
-          this.emit({
-            type: "error",
-            error: {
+        this.overflowRecoveryInProgress = true;
+        try {
+          const messages = [...this.agent.state.messages];
+          while (messages.at(-1)?.role === "assistant") messages.pop();
+          this.setAgentMessages(messages);
+          const compacted = await this.runCompaction(
+            "overflow",
+            true,
+            "active_turn",
+          );
+          if (!compacted) {
+            this.terminateParentTurn();
+            if (this.compactionAborted) {
+              // The user stopped the turn while the checkpoint was being written.
+              // That is an aborted turn, not a compaction failure: close it the
+              // way a stopped stream closes, with no error row.
+              this.finalizeCurrentAssistant("aborted");
+              this.emit({ type: "turn_end" });
+              this.emit({ type: "agent_end", messageIds: [] });
+              return false;
+            }
+            const error = {
               code: "CONTEXT_COMPACTION_FAILED",
               message: "Context overflow recovery could not create a checkpoint",
               retriable: false,
-            },
-          });
-          return false;
+            } satisfies ReturnType<typeof classifyAgentError>;
+            this.finalizeCurrentAssistant("error", error);
+            this.emit({ type: "error", error });
+            return false;
+          }
+          this.turnHadError = false;
+          this.requestStartedAt = Date.now();
+          await this.agent.continue();
+          await this.waitForIdleAndSteering();
+        } finally {
+          this.overflowRecoveryInProgress = false;
         }
-        this.turnHadError = false;
-        this.requestStartedAt = Date.now();
-        await this.agent.continue();
-        await this.waitForIdleAndSteering();
         continue;
       }
       if (this.pendingSilentTurnRerun) {
@@ -6413,6 +6557,55 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     });
   }
 
+  private emitCompactionDiagnostic(
+    kind: AgentRuntimeDiagnostic["kind"],
+    requestId: string,
+    data: Record<string, unknown>,
+  ): void {
+    this.onDiagnostic({
+      kind,
+      sessionId: this.sessionId,
+      ...(this.turnId ? { turnId: this.turnId } : {}),
+      requestId,
+      data,
+    });
+  }
+
+  private emitCompactionFailureDiagnostic(
+    requestId: string,
+    reason: CompactionFailureReason,
+    tokensBefore: number | undefined,
+    error: unknown,
+    extra: Record<string, unknown> = {},
+  ): void {
+    if (!this.compactionShapeLogged) {
+      this.emitCompactionDiagnostic("compaction_shape", requestId, {
+        requestShape: extra.requestShape ?? "unobserved",
+        ...(this.compactionRequestShape ?? {}),
+      });
+      this.compactionShapeLogged = true;
+    }
+    const candidate = error as {
+      code?: unknown;
+      details?: { providerStatus?: unknown; requestId?: unknown };
+    };
+    this.emitCompactionDiagnostic("compaction_failure", requestId, {
+      provider: this.provider.id,
+      model: this.provider.modelId,
+      reason,
+      ...(typeof candidate.code === "string" ? { errorCode: candidate.code } : {}),
+      ...(typeof candidate.details?.providerStatus === "number"
+        ? { httpStatus: candidate.details.providerStatus }
+        : {}),
+      ...(typeof candidate.details?.requestId === "string"
+        ? { upstreamRequestId: candidate.details.requestId }
+        : {}),
+      ...(tokensBefore !== undefined ? { tokensBefore } : {}),
+      ...(this.compactionDiagnosticBudget ?? {}),
+      ...extra,
+    });
+  }
+
 
   private reasoningReplayIdentity(): ReasoningReplayIdentity {
     const requiresCompletionsReasoningReplay =
@@ -6865,22 +7058,54 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     preparation: ShapedPreparation,
     signal: AbortSignal,
   ): Promise<Awaited<ReturnType<typeof compact>>> {
-    return compact(
-      preparation,
-      // The summary is a provider request like any other turn, but
-      // pi-agent-core builds its options itself and never reaches `streamFn`,
-      // so the headers have to ride on the collection.
-      withCompactionRequestHeaders(this.models, this.provider, this.sessionId),
-      this.model,
-      undefined,
-      agentThinkingLevel(this.thinkingLevel),
-      // Without a policy pi-ai returns the first failed response as-is, which
-      // made a single dropped stream or 503 discard the whole summary (#543).
-      // pi's classifier decides what is transient; the waits honour `signal`.
-      COMPACTION_SUMMARY_RETRY_POLICY,
-      undefined,
-      withAbortSignal(signal, BACKGROUND_CONTEXT),
+    const usageTurnId = this.turnId;
+    const requestId = randomUUID();
+    this.compactionRequestShape = undefined;
+    this.compactionShapeLogged = false;
+    const models = withCompactionRequestHeaders(
+      this.models,
+      this.provider,
+      this.sessionId,
+      (usage) => this.emit({ type: "usage", usage }, usageTurnId),
+      (shape) => {
+        this.compactionRequestShape = shape;
+        this.compactionShapeLogged = true;
+        this.emitCompactionDiagnostic("compaction_shape", requestId, {
+          requestShape: "observed",
+          ...shape,
+        });
+      },
     );
+    try {
+      const result = await compact(
+        preparation,
+        // The summary is a provider request like any other turn. The desktop
+        // compaction adapter calls `completeSimple` directly instead of
+        // `streamFn`, so headers have to ride on the collection.
+        models,
+        this.model,
+        undefined,
+        agentThinkingLevel(this.thinkingLevel),
+        // Without a policy pi-ai returns the first failed response as-is, which
+        // made a single dropped stream or 503 discard the whole summary (#543).
+        // pi's classifier decides what is transient; the waits honour `signal`.
+        COMPACTION_SUMMARY_RETRY_POLICY,
+        undefined,
+        signal,
+      );
+      if (!result.ok) {
+        this.emitCompactionFailureDiagnostic(
+          requestId,
+          "summary_provider",
+          preparation.tokensBefore,
+          result.error,
+        );
+      }
+      return result;
+    } catch (error) {
+      this.emitCompactionFailureDiagnostic(requestId, "summary_provider", preparation.tokensBefore, error);
+      throw error;
+    }
   }
 
   /**
@@ -6940,6 +7165,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     signal: AbortSignal,
     retentionMode: CompactionRetentionMode,
   ): Promise<CheckpointBuild> {
+    this.compactionDiagnosticBudget = undefined;
     const entries = this.entriesWithCompaction();
     const context = buildSessionContext(entries, this.reasoningReplayIdentity());
     const budget = this.contextBudget(context.messages);
@@ -6950,6 +7176,21 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       retentionMode,
     );
     if (!preparation.ok || !preparation.value) {
+      this.emitCompactionFailureDiagnostic(
+        randomUUID(),
+        preparation.ok ? "no_new_history" : "summary_budget",
+        undefined,
+        preparation.ok ? "No new context is available to compact" : preparation.error,
+        {
+          requestShape: "not_sent",
+          hardLimit: budget.hardLimit,
+          outputBudget: compactionSummaryOutputBudget({
+            requestHeadroom: budget.requestHeadroom,
+            modelMaxTokens: this.model.maxTokens,
+          }),
+          plannedChunks: 0,
+        },
+      );
       return {
         ok: false,
         entries,
@@ -6973,7 +7214,30 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     const chunks = summaryInput
       ? undefined
       : this.planSummaryRequests(preparation.value, budget);
+    this.compactionDiagnosticBudget = {
+      hardLimit: budget.hardLimit,
+      outputBudget: compactionSummaryOutputBudget({
+        requestHeadroom: budget.requestHeadroom,
+        modelMaxTokens: this.model.maxTokens,
+      }),
+      plannedChunks: chunks?.length ?? 1,
+    };
     if (!summaryInput && !chunks) {
+      this.emitCompactionFailureDiagnostic(
+        randomUUID(),
+        "summary_budget",
+        preparation.value.tokensBefore,
+        "Compaction summary input exceeds the safe model budget",
+        {
+          requestShape: "not_sent",
+          hardLimit: budget.hardLimit,
+          outputBudget: compactionSummaryOutputBudget({
+            requestHeadroom: budget.requestHeadroom,
+            modelMaxTokens: this.model.maxTokens,
+          }),
+          plannedChunks: 0,
+        },
+      );
       return {
         ok: false,
         entries,
@@ -7214,6 +7478,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         if (this.steeringContinuation) break;
         if (
           this.providerRetryInProgress ||
+          this.overflowRecoveryInProgress ||
           this.silentTurnRerunInProgress ||
           this.progressTurnRerunInProgress
         ) {
@@ -7224,6 +7489,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       case "turn_start":
         if (
           this.providerRetryInProgress ||
+          this.overflowRecoveryInProgress ||
           this.silentTurnRerunInProgress ||
           this.progressTurnRerunInProgress
         ) {
@@ -7238,6 +7504,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           const content = assistantContent((event.message as any).content);
           const retryingAssistant =
             this.providerRetryInProgress ||
+            this.overflowRecoveryInProgress ||
             this.silentTurnRerunInProgress ||
             this.progressTurnRerunInProgress
               ? this.currentAssistant
@@ -7245,7 +7512,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           const initialText =
             content.hasText && content.text.length > 0
               ? content.text
-              : this.progressTurnRerunInProgress
+              : this.progressTurnRerunInProgress || this.overflowRecoveryInProgress
                 ? retryingAssistant?.content ?? ""
                 : content.text;
           this.currentAssistant = {
@@ -7266,6 +7533,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             // duplicate error row when the second request succeeds. The same
             // applies to a silent-turn re-run: one bubble, no empty row.
             this.providerRetryInProgress = false;
+            this.overflowRecoveryInProgress = false;
             this.silentTurnRerunInProgress = false;
             this.progressTurnRerunInProgress = false;
             this.emit({ type: "message_update", message: this.currentAssistant });
@@ -7527,6 +7795,33 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             this.streamStartedAt = undefined;
             break;
           }
+          const canRecoverOverflow =
+            this.compactionEnabled &&
+            overflow &&
+            !this.overflowRecoveryAttempted;
+          if (canRecoverOverflow) {
+            // Keep the failed response inside the same visible assistant bubble
+            // while compaction prepares the retry. A provider overflow is an
+            // internal recovery transition, not a terminal user-facing error.
+            this.currentAssistant = {
+              ...this.currentAssistant,
+              content: nextText,
+              ...(nextThinking
+                ? { thinking: nextThinking }
+                : content.hasThinking
+                  ? { thinking: undefined }
+                  : {}),
+              status: "streaming",
+              modelId: this.provider.modelId,
+              providerId: this.provider.id,
+              ...(usage ? { usage } : {}),
+            };
+            this.emit({ type: "message_update", message: this.currentAssistant });
+            this.streamStartedAt = undefined;
+            this.pendingOverflow = true;
+            this.suppressOverflowRunEnd = true;
+            break;
+          }
           const emptyResponse = silentTurn;
           const diagnosticError = classifiedError;
           const retryProviderAttempt =
@@ -7598,10 +7893,6 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           this.activeProviderRetryAttempt = 0;
           this.streamStartedAt = undefined;
           this.currentAssistant = undefined;
-          const canRecoverOverflow =
-            this.compactionEnabled &&
-            overflow &&
-            !this.overflowRecoveryAttempted;
           if (exemptSilence) {
             // Accepted silence is still nothing worth resending: keep it out
             // of the runtime entries, exactly as a restored transcript would,
@@ -7618,10 +7909,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           } else {
             this.turnHadError = true;
           }
-          if (canRecoverOverflow) {
-            this.pendingOverflow = true;
-            this.suppressOverflowRunEnd = true;
-          } else if (diagnosticError) {
+          if (diagnosticError) {
             this.terminateParentTurn();
             this.emit({ type: "error", error: diagnosticError });
           }
@@ -8076,7 +8364,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       if (typeof modelInput === "string") {
         await this.agent.prompt(modelInput);
       } else {
-        await this.agent.prompt(modelInput.text, promptImages(modelInput));
+        await this.agent.prompt(promptText(modelInput), promptImages(modelInput));
       }
       await this.waitForIdleAndSteering();
       void this.extensionRunner?.emit("agent_settled", { type: "agent_settled" });
