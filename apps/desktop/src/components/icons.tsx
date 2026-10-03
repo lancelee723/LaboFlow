@@ -95,6 +95,7 @@ import {
   Users,
   Undo2,
   MessagesSquare,
+  Presentation,
   Video,
   Webhook,
   Workflow,
@@ -233,6 +234,7 @@ export const IconListChecks = icon(ListChecks);
 export const IconTarget = icon(Target);
 export const IconBrowser = icon(AppWindow);
 export const IconMessages = icon(MessagesSquare);
+export const IconPresentation = icon(Presentation);
 export const IconHook = icon(Webhook);
 export const IconWorkflow = icon(Workflow);
 export const IconLink = icon(Link);

@@ -232,7 +232,7 @@
           "en": "PPT workbench",
           "zh-CN": "PPT 工作台"
         },
-        "icon": "sparkles",
+        "icon": "presentation",
         "entry": "renderer/workbench.html",
         "order": 12
       }

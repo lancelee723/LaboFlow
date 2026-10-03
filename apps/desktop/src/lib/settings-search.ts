@@ -251,6 +251,20 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     ],
   },
   {
+    id: "experts",
+    labelKey: "settings.nav.experts",
+    titleKey: "settings.experts",
+    group: "agent",
+    keywordKeys: [
+      "settings.expertsDescription",
+      "expert.tabCenter",
+      "expert.tabMine",
+      "expert.tabTeams",
+      "expert.newExpert",
+      "expert.newTeam",
+    ],
+  },
+  {
     id: "assistant",
     labelKey: "settings.nav.assistant",
     titleKey: "settings.assistantTitle",
@@ -263,20 +277,6 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.assistant.connect",
       "settings.assistant.scope",
       "settings.assistant.allowlist",
-    ],
-  },
-  {
-    id: "experts",
-    labelKey: "settings.nav.experts",
-    titleKey: "settings.experts",
-    group: "agent",
-    keywordKeys: [
-      "settings.expertsDescription",
-      "expert.tabCenter",
-      "expert.tabMine",
-      "expert.tabTeams",
-      "expert.newExpert",
-      "expert.newTeam",
     ],
   },
   {
