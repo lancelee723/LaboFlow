@@ -50,6 +50,7 @@ import {
   submitStage,
 } from "./lib/ppt-state.js";
 import { PPT_SCRIPTS, planScript } from "./lib/ppt-script.js";
+import { buildEstimate } from "./lib/ppt-budget.js";
 
 let toolsRegistered = false;
 let jobManager = null;
@@ -456,9 +457,20 @@ function registerStageTools() {
       const projectDir = String(args?.projectDir ?? "").trim();
       const stage = String(args?.stage ?? "").trim();
       if (!projectDir) return { error: "projectDir is required" };
-      const verdict = submitStage(projectDir, stage, args?.recommendations);
+      const settings = await pi.plugin.getSettings().catch(() => ({}));
+      const estimate = buildEstimate({
+        recommendations: args?.recommendations,
+        engine: "L2",
+        budgetPages: settings?.budgetPages,
+      });
+      const verdict = submitStage(projectDir, stage, args?.recommendations, undefined, estimate);
       if (verdict.error) return { error: verdict.error };
       pendingConfirm = { projectDir, stage, submittedAt: verdict.state.stages[stage]?.submittedAt ?? null };
+      const budgetNote = estimate.pages === null
+        ? ""
+        : estimate.budget.exceeds
+          ? `\n⚠️ 预估 ${estimate.pages} 页，超出预算（${estimate.budget.budget} 页，${Math.round(estimate.budget.ratio * 100)}%）。预估 token ≈ ${estimate.estimate.tokensTotal.toLocaleString()}；用户在确认卡上确认即视为显式放行。`
+          : `\n预估 ${estimate.pages} 页 ≈ ${estimate.estimate.tokensTotal.toLocaleString()} tokens（预算 ${estimate.budget.budget} 页内）。`;
       // The docked workbench polls for this pending decision and renders it at
       // the bottom of the panel; no floating popup anymore. Keep a native
       // notification so the user knows a decision is waiting even when the

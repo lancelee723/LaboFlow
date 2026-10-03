@@ -51,6 +51,9 @@
   button.primary:not(:disabled) { background: #2da44e; border-color: #2da44e; color: #ffffff; }
   button.primary:not(:disabled):hover { background: #2c974b; }
   button:disabled { opacity: .45; cursor: default; }
+  .estimate { padding: 5px 10px; border-radius: 8px; font-size: 12px;
+    background: color-mix(in srgb, currentColor 7%, transparent); }
+  .estimate.overrun { background: #ffebe9; border: 1px solid #d1242f; color: #d1242f; }
   #error-box {
     border: 1px solid #d1242f; border-radius: 8px; padding: 8px 10px; margin: 8px 0;
     color: #d1242f; font-size: 12px; white-space: pre-wrap; word-break: break-word;
@@ -91,7 +94,7 @@ const bridge = window.pluginBridge;
 // 8 locales matching packages/i18n (en is the source of truth).
 const T = {
   "zh-CN": {
-    bridgeError: "确认卡与插件通信失败（可能暂时繁忙）。请关闭本窗口后从命令面板重新打开「确认卡」。", retryHint: "提交失败（通信繁忙或超时）。请重试一次；若仍失败，可让助手改用 chat 确认。", title: "PPT 设计确认", loading: "加载中…",
+    estOk: "预估 {pages} 页 ≈ {tokens} tokens（预算 {budget} 页内）", estOverrun: "预估 {pages} 页，超出预算 {budget} 页 —— 确认即视为显式放行（预估 {tokens} tokens）", estPlain: "预估 {pages} 页 ≈ {tokens} tokens", estOk: "預估 {pages} 頁 ≈ {tokens} tokens（預算 {budget} 頁內）", estOverrun: "預估 {pages} 頁，超出預算 {budget} 頁 —— 確認即視為顯式放行（預估 {tokens} tokens）", estPlain: "預估 {pages} 頁 ≈ {tokens} tokens", estOk: "Estimate {pages} pages ≈ {tokens} tokens (within the {budget}-page budget)", estOverrun: "Estimate {pages} pages exceeds the {budget}-page budget — confirming is the explicit waiver ({tokens} tokens)", estPlain: "Estimate {pages} pages ≈ {tokens} tokens", estOk: "Schätzung {pages} Seiten ≈ {tokens} Tokens (innerhalb des {budget}-Seiten-Budgets)", estOverrun: "Schätzung {pages} Seiten überschreitet das {budget}-Seiten-Budget — Bestätigen ist die ausdrückliche Freigabe ({tokens} Tokens)", estPlain: "Schätzung {pages} Seiten ≈ {tokens} Tokens", estOk: "Estimación {pages} páginas ≈ {tokens} tokens (dentro del presupuesto de {budget})", estOverrun: "Estimación {pages} páginas excede el presupuesto de {budget} — confirmar es la autorización explícita ({tokens} tokens)", estPlain: "Estimación {pages} páginas ≈ {tokens} tokens", estOk: "Estimation {pages} pages ≈ {tokens} tokens (dans le budget de {budget} pages)", estOverrun: "Estimation {pages} pages dépasse le budget de {budget} — confirmer vaut levée explicite ({tokens} tokens)", estPlain: "Estimation {pages} pages ≈ {tokens} tokens", estOk: "예상 {pages} 페이지 ≈ {tokens} 토큰({budget} 페이지 예산 내)", estOverrun: "예상 {pages} 페이지, {budget} 페이지 예산 초과 — 확인하면 명시적 허용됩니다({tokens} 토큰)", estPlain: "예상 {pages} 페이지 ≈ {tokens} 토큰", estOk: "Tahmin {pages} sayfa ≈ {tokens} token ({budget} sayfa bütçesi içinde)", estOverrun: "Tahmin {pages} sayfa, {budget} sayfalık bütçeyi aşıyor — onaylamak açık feragattir ({tokens} token)", estPlain: "Tahmin {pages} sayfa ≈ {tokens} token", bridgeError: "确认卡与插件通信失败（可能暂时繁忙）。请关闭本窗口后从命令面板重新打开「确认卡」。", retryHint: "提交失败（通信繁忙或超时）。请重试一次；若仍失败，可让助手改用 chat 确认。", title: "PPT 设计确认", loading: "加载中…",
     nopending: "当前没有待确认的 PPT 设计方案。",
     nopendingHint: "当助手提交 Stage-1/Stage-2 设计方案时，确认卡会自动打开；也可在命令面板搜索「确认卡」。",
     stage1: "Stage-1 · 沟通契约与模板选择", stage2: "Stage-2 · 最终设计方向（三选一）",
@@ -253,11 +256,31 @@ function kvLines(obj) {
 }
 const kvBlock = (obj) => kvLines(obj);
 
+function estimateLine(stageState) {
+  const est = stageState?.estimate;
+  if (!est || est.pages === null || !est.estimate) return "";
+  const tokens = Number(est.estimate.tokensTotal ?? 0).toLocaleString();
+  if (est.budget?.exceeds) {
+    return `<div class="estimate overrun">⚠ ${esc(t.estOverrun
+      .replace("{pages}", est.pages)
+      .replace("{budget}", est.budget.budget)
+      .replace("{tokens}", tokens))}</div>`;
+  }
+  if (est.budget?.budget) {
+    return `<div class="estimate">${esc(t.estOk
+      .replace("{pages}", est.pages)
+      .replace("{budget}", est.budget.budget)
+      .replace("{tokens}", tokens))}</div>`;
+  }
+  return `<div class="estimate">${esc(t.estPlain.replace("{pages}", est.pages).replace("{tokens}", tokens))}</div>`;
+}
+
 function render() {
   const stage = pending.stage;
   const rec = data.recommendations?.[stage];
   const parts = [`<div class="muted">${esc(pending.projectDir)}</div>`];
   parts.push(`<h2>${stage === "stage1" ? t.stage1 : t.stage2}</h2>`);
+  parts.push(estimateLine(data.state?.stages?.[stage]));
   if (!rec) {
     parts.push(`<p class="muted">${esc(t.missingRec)}</p>`);
   } else if (stage === "stage1") {
