@@ -150,6 +150,17 @@ function mirrorEnv(pipMirror) {
   return pipMirror ? { PIP_INDEX_URL: pipMirror, UV_INDEX_URL: pipMirror } : {};
 }
 
+/**
+ * Offline installs (FR: air-gapped orgs): when deps.wheelhouseDir is set the
+ * installer runs with --no-index --find-links and the mirror is ignored —
+ * a local wheel dir is strictly more authoritative than any index.
+ */
+function installArgs(base, deps) {
+  const dir = deps?.wheelhouseDir ? String(deps.wheelhouseDir).trim() : "";
+  if (dir) return [...base, "--no-index", "--find-links", dir];
+  return base;
+}
+
 /** Run one vendored script with the isolated venv interpreter. */
 export async function runVendoredScript(deps, scriptRelPath, args, options = {}) {
   const root = resolveRuntimeRoot(deps);
@@ -335,14 +346,16 @@ export async function ensureRuntime(deps, onLog) {
   }
 
   log("installing requirements (this can take a few minutes)…");
+  const uvBase = installArgs(["pip", "install", "--python", pythonPath, "-r", requirements], deps);
+  const pipBase = installArgs(["-m", "pip", "install", "--disable-pip-version-check", "-r", requirements], deps);
   const uvInstall = () =>
-    runner("uv", ["pip", "install", "--python", pythonPath, "-r", requirements], {
+    runner("uv", uvBase, {
       timeoutMs: 15 * 60 * 1000,
       env,
       signal,
     }).catch((error) => ({ code: 1, stdout: "", stderr: String(error) }));
   const pipInstall = () =>
-    runner(pythonPath, ["-m", "pip", "install", "--disable-pip-version-check", "-r", requirements], {
+    runner(pythonPath, pipBase, {
       timeoutMs: 15 * 60 * 1000,
       env,
       signal,

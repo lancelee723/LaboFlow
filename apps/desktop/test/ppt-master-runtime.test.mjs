@@ -252,6 +252,30 @@ test("ensureRuntime refuses an unsupported system python without spawning instal
   assert.ok(!spawned.some((call) => call.includes("pip")), "no installs with an unsupported python");
 });
 
+test("offline wheelhouse switches installs to --no-index --find-links", async () => {
+  const dataDir = tmpHome("ppt-runtime-wheel-");
+  plantVenv(dataDir);
+  const spawned = [];
+  const status = await ensureRuntime(
+    {
+      pluginDir: REAL_PLUGIN_DIR,
+      dataDir,
+      wheelhouseDir: "/opt/laboflow/wheelhouse",
+      runner: async (file, args) => {
+        spawned.push([file, ...args].join(" "));
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    },
+    () => {},
+  );
+  assert.equal(status.stage, "ready");
+  assert.ok(
+    spawned.some((call) => call.includes("--no-index") && call.includes("/opt/laboflow/wheelhouse")),
+    "wheelhouse path must reach the installer",
+  );
+  assert.ok(!spawned.some((call) => call.includes("-m pip install") && !call.includes("--find-links")), "pip path also pinned to the wheelhouse");
+});
+
 test("forbidden-distribution blacklist catches AGPL/GPL packages in pip freeze", () => {
   const frozen = [
     "attrs==25.3.0",
