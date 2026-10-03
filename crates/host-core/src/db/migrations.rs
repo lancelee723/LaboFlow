@@ -878,3 +878,39 @@ pub(crate) fn migrate_v19_to_v20(conn: &Connection, path: &Path) -> Result<()> {
     })?;
     Ok(())
 }
+
+/// v21 persists IM channel accounts (credential-free records; the secrets
+/// themselves stay in the sealed secrets table). Power-loss safe: a plain
+/// CREATE TABLE IF NOT EXISTS, no data rewrite.
+pub(crate) fn migrate_v20_to_v21_tx(tx: &rusqlite::Transaction<'_>) -> Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS channel_accounts (
+  id          TEXT PRIMARY KEY,
+  provider    TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  secret_ref  TEXT,
+  scope       TEXT NOT NULL DEFAULT 'both',
+  allowlist   TEXT NOT NULL DEFAULT '[]',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_channel_accounts_provider
+  ON channel_accounts(provider);",
+    )?;
+    tx.pragma_update(None, "user_version", 21i64)?;
+    Ok(())
+}
+
+pub(crate) fn migrate_v20_to_v21(conn: &Connection, path: &Path) -> Result<()> {
+    let backup = create_migration_backup(conn, path, 20)?;
+    let tx = conn.unchecked_transaction()?;
+    migrate_v20_to_v21_tx(&tx)?;
+    tx.commit().with_context(|| {
+        format!(
+            "commit schema v20 to v21 migration; backup {} remains",
+            backup.display()
+        )
+    })?;
+    Ok(())
+}

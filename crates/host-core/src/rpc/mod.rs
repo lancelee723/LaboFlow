@@ -15,6 +15,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 
 use crate::agent_capabilities::CapabilityLevel;
 use crate::artifacts;
+use crate::channel_accounts;
 use crate::audit;
 use crate::notifications;
 use crate::permissions::{PermissionDecision, PermissionEvaluationParams, PermissionManager};
@@ -3188,6 +3189,48 @@ async fn handle_request(
             )
             .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
             Ok(history)
+        }
+
+        // IM channel account records (FR-IM-01/02 persistence; credentials
+        // live in the sealed secrets table, never here).
+        "channelAccounts.list" => {
+            let st = state.lock().await;
+            let accounts = channel_accounts::list(&st.db)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "accounts": accounts }))
+        }
+        "channelAccounts.upsert" => {
+            let record = channel_accounts::record_from_params(&params)
+                .map_err(|e| rpc_err(1002, e.to_string(), "INVALID_ARGUMENT"))?;
+            let st = state.lock().await;
+            channel_accounts::upsert(&st.db, &record)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "ok": true }))
+        }
+        "channelAccounts.delete" => {
+            let id = params
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| rpc_err(1002, "id required", "INVALID_ARGUMENT"))?;
+            let st = state.lock().await;
+            channel_accounts::delete(&st.db, id)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "ok": true }))
+        }
+        "channelAccounts.replaceAll" => {
+            let accounts = params
+                .get("accounts")
+                .and_then(Value::as_array)
+                .ok_or_else(|| rpc_err(1002, "accounts array required", "INVALID_ARGUMENT"))?;
+            let records: Vec<channel_accounts::ChannelAccountRecord> = accounts
+                .iter()
+                .map(channel_accounts::record_from_params)
+                .collect::<Result<_>>()
+                .map_err(|e| rpc_err(1002, e.to_string(), "INVALID_ARGUMENT"))?;
+            let st = state.lock().await;
+            channel_accounts::replace_all(&st.db, &records)
+                .map_err(|e| rpc_err(1000, e.to_string(), "INTERNAL"))?;
+            Ok(json!({ "ok": true }))
         }
 
         "artifacts.list" => {

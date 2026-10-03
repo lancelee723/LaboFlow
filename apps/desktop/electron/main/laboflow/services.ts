@@ -15,6 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import {
+  ChannelAccount,
   err,
   ok,
   IPC,
@@ -316,6 +317,39 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     getLogger: () => logger,
     getDriver: () => headlessAgentDriver,
     credentialStore: channelCredentialStore,
+    // FR-IM-01/02 persistence: credential-free account records live in the
+    // host DB (migration v21); secrets stay in the sealed secrets table.
+    loadAccounts: async () => {
+      const h = host();
+      if (!h) return [];
+      const result = await h.call<{ accounts?: Array<Record<string, unknown>> }>(
+        "channelAccounts.list",
+      );
+      return (result.accounts ?? []).map((record) => ({
+        id: String(record.id),
+        provider: record.provider as ChannelAccount["provider"],
+        name: String(record.name ?? ""),
+        secretRef: typeof record.secretRef === "string" ? record.secretRef : undefined,
+        scope: record.scope as ChannelAccount["scope"],
+        allowlist: Array.isArray(record.allowlist) ? record.allowlist.map(String) : [],
+        enabled: record.enabled !== false,
+      })) as ChannelAccount[];
+    },
+    saveAccounts: async (accounts) => {
+      const h = host();
+      if (!h) return;
+      await h.call("channelAccounts.replaceAll", {
+        accounts: accounts.map((account) => ({
+          id: account.id,
+          provider: account.provider,
+          name: account.name,
+          secretRef: account.secretRef ?? null,
+          scope: account.scope,
+          allowlist: account.allowlist,
+          enabled: account.enabled,
+        })),
+      });
+    },
     adapters: {
       feishu: createFeishuAdapterFactory(),
       wecom: createWecomAdapterFactory(),
@@ -587,6 +621,20 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     }
     return response.json().catch(() => ({}));
   }
+  // Restore persisted channel accounts (FR-IM-01/02) once the host is up.
+  void (async () => {
+    try {
+      let h: ReturnType<typeof host> = null;
+      for (let attempt = 0; attempt < 15 && !h; attempt++) {
+        h = host();
+        if (!h) await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (h) await channelHost.registry.init();
+    } catch (error) {
+      logger.app("channels", "warn", "channel accounts restore failed", { data: String(error) });
+    }
+  })();
+
   // Module 03/T53.3: local webhook server. Secret lives in the sealed
   // secrets table (generated on first boot); the task runner shares the
   // headless driver with channels and scheduled runs.
