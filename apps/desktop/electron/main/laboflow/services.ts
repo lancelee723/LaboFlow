@@ -660,7 +660,21 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       if (result.status !== "completed") {
         throw new Error(result.errorCode ?? "headless run failed");
       }
-      return { reply: result.finalText, files: [] };
+      // FR-MC-03: files the turn produced ride back to the caller.
+      let files: string[] = [];
+      try {
+        const listed = await h.call<{ artifacts?: Array<{ path: string; op: string }> }>(
+          "artifacts.list",
+          { sessionId: handle.sessionId, limit: 20 },
+        );
+        files = (listed.artifacts ?? [])
+          .filter((a) => a.op === "export" || a.op === "write")
+          .map((a) => a.path)
+          .slice(0, 10);
+      } catch {
+        // artifacts unavailable: still return the reply without files
+      }
+      return { reply: result.finalText, files };
     },
     listSchedules: async () => {
       const h = host();
@@ -773,6 +787,28 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     });
 
     // T53.5: assistant-mode page session (persistent, unified history).
+    laboflowHandleWithEvent(
+      IPC.invoke.spaceSaveFromPath,
+      async (event, input: { path?: unknown; spaceId?: unknown; parentId?: unknown; name?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        const filePath = String(input?.path ?? "").trim();
+        const spaceId = String(input?.spaceId ?? "").trim();
+        if (!filePath || !spaceId) {
+          throw Object.assign(new Error("invalid save input"), { errorCode: "INVALID_ARGUMENT" });
+        }
+        if (!spaceClient) throw new Error("space client unavailable");
+        const { readFile } = await import("node:fs/promises");
+        const { basename } = await import("node:path");
+        const content = await readFile(filePath);
+        const name = String(input?.name ?? "").trim() || basename(filePath);
+        return spaceClient.uploadFile(spaceId, {
+          parentId: (input?.parentId ?? null) as string | null,
+          name,
+          contentBase64: content.toString("base64"),
+        });
+      },
+    );
+
     laboflowHandleWithEvent(IPC.invoke.assistantSessionGet, async (event) => {
       deps.assertMainWindowSender(event);
       const h = host();
