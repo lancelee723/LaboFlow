@@ -382,6 +382,8 @@
 
 **验证终态（全绿）**：desktop 3563 用例 0 fail；host-core 697/697；server 209/209；typecheck/build:js 干净。
 
+**实机验收第二轮（2026-10-03，可见运行+纯 GUI 真实输入，见 [acceptance/20261003-095620-round2/ACCEPTANCE-ROUND2.md](acceptance/20261003-095620-round2/ACCEPTANCE-ROUND2.md)）**：M1 专家 6/6、M2 通道卡 5/5（修复 Webhook 启动静默放弃+i18n 错位后）、M3 助理页核心过（**重启持久性实机验证：历史跨多次重启保留**）、M4 团队空间源 3/3、M5 PPT L1 全链 3/3（真实落盘 PPTX 61KB 含备注）。再抓 3 缺陷并修复复验：webhook 启动静默放弃（改有界轮询）、webhook 卡九语言键插错命名空间（迁回 settings.assistant）、useAppShellRuntime 白名单缺 assistant。
+
 **实机验收第一轮（2026-10-03，已完成，见 [acceptance/20261003-031918/ACCEPTANCE-ROUND1.md](acceptance/20261003-031918/ACCEPTANCE-ROUND1.md)）**：AC-01 ✓ 9/9（真实 LLM persona 回复+任务标记）；AC-04 Tier-1 ✓ 3/3（粘贴解析/空值语义/分诊断）；AC-03 核心 ✓ 3/3（通道 chips/直派真实回复/统一历史）；**AC-06 ✗ 未走通**（Stage-1 会话内确认送达后 agent 回合停滞，README 已知模型约束，PPT 管线本批零回归面，换档补验）；AC-02/05 环境阻塞（本机无 PG/WeKnora）。**实机抓到并修复 1 个真缺陷**：六个新 fork handler 的 event 形参误用（laboflowHandle vs WithEvent），助理会话创建实机必炸——已修复并复验。另有死代码清理 7 项（refactor 提交），其中 settleUnattendedAsk 未接线为真 bug。
 
 **仍开放（T6.4.18 + 明确延后项）**：

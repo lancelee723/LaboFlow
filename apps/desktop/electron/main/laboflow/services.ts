@@ -623,8 +623,18 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
   });
   void (async () => {
     try {
-      const h = host();
-      if (!h) return;
+      // The host comes up shortly after the service factory runs; poll for it
+      // instead of giving up silently (the card would otherwise read 已停止
+      // forever after a slow boot).
+      let h: ReturnType<typeof host> = null;
+      for (let attempt = 0; attempt < 15 && !h; attempt++) {
+        h = host();
+        if (!h) await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (!h) {
+        logger.app("assistant", "warn", "webhook boot gave up: host unavailable");
+        return;
+      }
       const secretRef = "assistant.webhook.secret";
       const existing = await h.call<{ value?: string | null }>("secrets.getForRuntime", { secretRef });
       let secret = existing?.value ?? "";
@@ -707,7 +717,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     // Module 02: team-space tree/docs/comments/revisions/events IPC.
     spaceHost?.registerIpc(laboflowHandle);
 
-    laboflowHandle(IPC.invoke.spaceClip, async (event, input: { url?: unknown }) => {
+    laboflowHandleWithEvent(IPC.invoke.spaceClip, async (event, input: { url?: unknown }) => {
       deps.assertMainWindowSender(event);
       const url = typeof input?.url === "string" ? input.url : "";
       const { clipWebPage } = await import("../web-clipper");
@@ -715,13 +725,13 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     });
 
     // T53.5: assistant-mode page session (persistent, unified history).
-    laboflowHandle(IPC.invoke.assistantSessionGet, async (event) => {
+    laboflowHandleWithEvent(IPC.invoke.assistantSessionGet, async (event) => {
       deps.assertMainWindowSender(event);
       const h = host();
       if (!h) throw new Error("host unavailable");
       return ensureAssistantSessionCached(h);
     });
-    laboflowHandle(
+    laboflowHandleWithEvent(
       IPC.invoke.assistantHistory,
       async (event, input: { sessionId?: unknown }) => {
         deps.assertMainWindowSender(event);
@@ -732,7 +742,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         return assistantHistory(h, sessionId);
       },
     );
-    laboflowHandle(
+    laboflowHandleWithEvent(
       IPC.invoke.assistantSend,
       async (event, input: { sessionId?: unknown; text?: unknown }) => {
         deps.assertMainWindowSender(event);
@@ -764,11 +774,11 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       },
     );
     // Module 03/T53.3: webhook settings (read masked status / reconfigure).
-    laboflowHandle(IPC.invoke.assistantWebhookGet, async (event) => {
+    laboflowHandleWithEvent(IPC.invoke.assistantWebhookGet, async (event) => {
       deps.assertMainWindowSender(event);
       return webhookServer.describe();
     });
-    laboflowHandle(
+    laboflowHandleWithEvent(
       IPC.invoke.assistantWebhookSet,
       async (event, input: { port?: unknown; lanOpen?: unknown }) => {
         deps.assertMainWindowSender(event);
