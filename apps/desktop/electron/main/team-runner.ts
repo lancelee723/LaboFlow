@@ -20,6 +20,7 @@ import {
   completeOneShot,
   type RuntimeProviderConfig,
 } from "@pi-desktop/agent-runtime";
+import { withSkillsBinding } from "./expert-service.ts";
 
 const MAX_PARALLEL_MEMBERS = 4;
 const DEP_RESULT_MAX_CHARS = 4000;
@@ -113,6 +114,7 @@ export interface TeamRunnerDeps {
     personaPrompt: string;
     model?: string;
     thinkingLevel?: string;
+    skills?: string[];
   } | null>;
   broadcast(event: ExpertTeamProgress): void;
   postSessionCard(sessionId: string, message: {
@@ -427,7 +429,7 @@ export class TeamRunner {
               thinkingLevel: persona.thinkingLevel,
             },
             prompt,
-            personaPrompt: persona.personaPrompt,
+            personaPrompt: withSkillsBinding(persona.personaPrompt, persona.skills ?? []),
           });
           const result = await run.completion;
           state.totalTokens += result.usage?.totalTokens ?? 0;
@@ -671,7 +673,7 @@ export class TeamRunner {
           thinkingLevel: persona.thinkingLevel,
         },
         prompt,
-        personaPrompt: persona.personaPrompt,
+        personaPrompt: withSkillsBinding(persona.personaPrompt, persona.skills ?? []),
       });
       member.sessionId = run.sessionId;
       this.broadcast(state, "member", { index, status: "running", memberSessionId: run.sessionId });

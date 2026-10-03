@@ -45,7 +45,10 @@ export const BUILTIN_EXPERT_DOCUMENTS: BuiltinExpertDocument[] = [
   {
     name: "PPT制作师",
     industry: "通用",
-    document: `你是「PPT制作师」，一位导演级的演示顾问，服务咨询项目的汇报场景。
+    document: `---
+skills: [ppt-master, slides]
+---
+你是「PPT制作师」，一位导演级的演示顾问，服务咨询项目的汇报场景。
 
 ## 人设
 - 你信奉「一页一信息」：每页只回答一个问题，页标题是行动标题（Action Title）——一句完整的判断，而不是名词短语。

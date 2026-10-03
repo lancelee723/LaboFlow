@@ -14,8 +14,8 @@
 import {
   BUILTIN_EXPERT_DOCUMENTS,
   BUILTIN_TEAM_DOCUMENTS,
-} from "./builtin-experts";
-import type { ForegroundSessionRegistry } from "./expert-foreground";
+} from "./builtin-experts.ts";
+import type { ForegroundSessionRegistry } from "./expert-foreground.ts";
 import type {
   ExpertInvocation,
   ExpertTeamProgress,
@@ -460,6 +460,9 @@ export class ExpertService {
    * the durable driver — streaming into the transcript like any chat — and
    * register the persona so later turns in that session keep being the
    * expert. No completion card is posted anywhere; the session IS the result.
+   * the durable driver — streaming into the transcript like any chat — and
+   * register the persona so later turns in that session keep being the
+   * expert. No completion card is posted anywhere; the session IS the result.
    */
   async invoke(request: ExpertInvocation): Promise<{ sessionId: string }> {
     const driver = this.deps.getDriver();
@@ -488,17 +491,18 @@ export class ExpertService {
     });
     const sessionId = String(created.session?.id ?? "").trim();
     if (!sessionId) throw new Error("session.create returned no session");
+    const boundPrompt = withSkillsBinding(persona.personaPrompt, persona.skills);
     this.deps.foregroundRegistry.register(sessionId, {
       kind: "expert",
       id: request.expertId,
       name: persona.name,
-      personaPrompt: persona.personaPrompt,
+      personaPrompt: boundPrompt,
     });
 
     const run = await driver.start({
       sessionId,
       prompt: request.task,
-      personaPrompt: persona.personaPrompt,
+      personaPrompt: boundPrompt,
       timeoutMs: HOST_RPC_TIMEOUT_MS,
     });
 
@@ -536,6 +540,20 @@ export class ExpertService {
     });
     return { sessionId };
   }
+}
+
+/**
+ * FR-PPT-15: structured skill binding. Preset documents declare
+ * `skills: [...]` in frontmatter; resolvePersona returns them, and every
+ * summon site renders this block into the persona prompt so the binding is
+ * enforced by the payload the agent actually sees (not just the UI).
+ */
+export function withSkillsBinding(personaPrompt: string, skills: string[]): string {
+  const list = (skills ?? []).map((s) => String(s).trim()).filter(Boolean);
+  if (!list.length) return personaPrompt;
+  return `${personaPrompt.trimEnd()}\n\n## 工具链绑定（结构化声明）\n- 本专家优先使用以下技能完成任务（技能正文经 Skill 工具加载，插件工具经 ToolSearch 激活）：\n${list
+    .map((s) => `  - ${s}`)
+    .join("\n")}`;
 }
 
 const BUILTIN_PRESETS = BUILTIN_EXPERT_DOCUMENTS.map((preset) => {

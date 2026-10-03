@@ -155,3 +155,61 @@ test("exportDeckToBuffer produces a valid editable PPTX (zip structure + content
     .join("\n");
   assert.ok(notesXml.includes("开场问好"), "speaker notes missing");
 });
+
+// ── FR-PPT-08/13: named themes, canvas presets, native chart opt-in ──────────
+import { THEMES, CANVASES } from "../resources/plugins/laboflow.slides/lib/slides.js";
+
+test("FR-PPT-08: five named themes exist and all export a valid deck", async () => {
+  for (const themeId of Object.keys(THEMES)) {
+    const { buffer } = await exportDeckToBuffer(
+      { deckTitle: "主题验证", pages: [{ layout: "title", title: "主题验证" }] },
+      { themeId },
+    );
+    assert.ok(buffer.length > 10_000, `${themeId} deck too small`);
+    const accent = THEMES[themeId].accent;
+    const { default: AdmZip } = await import("adm-zip");
+    const zip = new AdmZip(Buffer.from(buffer));
+    const slideXml = zip.readAsText("ppt/slides/slide1.xml");
+    assert.ok(slideXml.includes(accent), `${themeId} accent ${accent} must color the deck`);
+  }
+});
+
+test("FR-PPT-13: canvas presets change the slide geometry", async () => {
+  for (const [canvas, dims] of Object.entries(CANVASES)) {
+    const { buffer } = await exportDeckToBuffer(
+      { deckTitle: "画幅验证", pages: [{ layout: "bullets", title: "画幅验证", bullets: ["a"] }] },
+      { canvas },
+    );
+    const { default: AdmZip } = await import("adm-zip");
+    const zip = new AdmZip(Buffer.from(buffer));
+    const presentation = zip.readAsText("ppt/presentation.xml");
+    const cx = Math.round(dims.width * 914400);
+    assert.ok(presentation.includes(`cx="${cx}"`), `${canvas} slide size cx=${cx} expected`);
+  }
+});
+
+test("FR-PPT-13: nativeCharts renders a real chart part instead of KPI tiles", async () => {
+  const deck = {
+    deckTitle: "图表开关验证",
+    pages: [
+      {
+        layout: "data",
+        title: "两项关键指标",
+        data: { metrics: [{ label: "规模", value: "1200" }, { label: "增速", value: "12" }] },
+      },
+    ],
+  };
+  const withChart = await exportDeckToBuffer(deck, { nativeCharts: true });
+  const { default: AdmZip } = await import("adm-zip");
+  const zipChart = new AdmZip(Buffer.from(withChart.buffer));
+  assert.ok(
+    zipChart.getEntries().some((e) => e.entryName.startsWith("ppt/charts/chart")),
+    "native chart part expected",
+  );
+  const withoutChart = await exportDeckToBuffer(deck, {});
+  const zipTiles = new AdmZip(Buffer.from(withoutChart.buffer));
+  assert.ok(
+    !zipTiles.getEntries().some((e) => e.entryName.startsWith("ppt/charts/chart")),
+    "default keeps KPI tiles (no chart part)",
+  );
+});

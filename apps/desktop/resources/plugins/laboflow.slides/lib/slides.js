@@ -12,6 +12,22 @@ import { createRequire } from "node:module";
 // (vendor/pptxgen.bundle.js + license) so packaging stays plugin-local.
 const require = createRequire(import.meta.url);
 
+/** FR-PPT-08: predefined deck themes (accent + heading tint). en keys are canonical. */
+export const THEMES = {
+  "consulting-blue": { accent: "1F4E79", subtitle: "D7E3F1", band: "F3F6FA", border: "D9E2EC" },
+  midnight: { accent: "1E293B", subtitle: "C7D2FE", band: "EEF2FF", border: "DBE2F0" },
+  forest: { accent: "166534", subtitle: "DCFCE7", band: "F0FDF4", border: "D3E8D9" },
+  crimson: { accent: "9F1239", subtitle: "FFE4E6", band: "FFF1F2", border: "F3D6DB" },
+  slate: { accent: "334155", subtitle: "E2E8F0", band: "F8FAFC", border: "E2E8F0" },
+};
+
+/** FR-PPT-13: canvas presets (inches). */
+export const CANVASES = {
+  "16:9": { width: 13.333, height: 7.5 },
+  "16:10": { width: 12.8, height: 8 },
+  "4:3": { width: 10, height: 7.5 },
+};
+
 export const LAYOUTS = [
   "title",
   "bullets",
@@ -125,14 +141,22 @@ function buildPptxBuffer(deck, theme = {}) {
   // vendor/node_modules (the plugin owns its dependency copy).
   const PptxGenJS = require("../vendor/pptxgen.cjs.js");
   const pptx = new PptxGenJS();
-  pptx.defineLayout({ name: "WIDE", width: 13.33, height: 7.5 });
+  // FR-PPT-13: canvas preset (default 16:9 wide).
+  const canvas = CANVASES[theme.canvas] ?? CANVASES["16:9"];
+  pptx.defineLayout({ name: "WIDE", width: canvas.width, height: canvas.height });
   pptx.layout = "WIDE";
+  const wide = canvas.width >= 12;
   pptx.author = "LaboFlow Slides";
   pptx.title = deck.deckTitle;
 
+  // FR-PPT-08: themeId picks a palette; an explicit accent still wins.
+  const palette = THEMES[theme.themeId] ?? THEMES["consulting-blue"];
   const accent = /^#?[0-9a-fA-F]{6}$/.test(String(theme.accent ?? ""))
     ? `#${String(theme.accent).replace("#", "")}`
-    : "#1F4E79";
+    : `#${palette.accent}`;
+  const subtitleTint = `#${palette.subtitle}`;
+  const bandFill = `#${palette.band}`;
+  const border = `#${palette.border}`;
   const ink = "1F2937";
   const muted = "6B7280";
   const fontFace = String(theme.font ?? "").trim() || "PingFang SC";
@@ -198,7 +222,7 @@ function buildPptxBuffer(deck, theme = {}) {
             w: 11.3,
             h: 0.8,
             fontSize: 16,
-            color: "D7E3F1",
+            color: subtitleTint,
             fontFace,
           });
         }
@@ -207,6 +231,33 @@ function buildPptxBuffer(deck, theme = {}) {
       case "data": {
         addTitleBar(slide, page.title, page.subtitle);
         const metrics = page.data?.metrics ?? [];
+        // FR-PPT-13: opt-in native chart instead of KPI tiles when the
+        // metric values can be plotted.
+        if (theme.nativeCharts && metrics.length >= 2) {
+          const numeric = metrics.filter((m) => /[0-9]/.test(String(m.value)));
+          if (numeric.length >= 2) {
+            slide.addChart(
+              "bar",
+              [
+                {
+                  name: deck.deckTitle,
+                  labels: numeric.map((m) => m.label),
+                  values: numeric.map((m) => Number(String(m.value).replace(/[^0-9.\-]/g, "")) || 0),
+                },
+              ],
+              {
+                x: 0.8,
+                y: 2.0,
+                w: (wide ? 11.7 : canvas.width - 1.6),
+                h: 4.6,
+                chartColors: [accent],
+                showValue: true,
+                fontFace,
+              },
+            );
+            break;
+          }
+        }
         const columnCount = Math.min(metrics.length || 1, 4);
         const cardWidth = 12.1 / columnCount - 0.25;
         metrics.slice(0, 4).forEach((metric, index) => {
@@ -216,8 +267,8 @@ function buildPptxBuffer(deck, theme = {}) {
             y: 2.3,
             w: cardWidth,
             h: 2.4,
-            fill: { color: "F3F6FA" },
-            line: { color: "D9E2EC", width: 0.75 },
+            fill: { color: bandFill },
+            line: { color: border, width: 0.75 },
             rectRadius: 0.08,
           });
           slide.addText(metric.value || "—", {
@@ -335,7 +386,7 @@ function buildPptxBuffer(deck, theme = {}) {
           w: 12.1,
           colW: Array.from({ length: columnCount }, () => 12.1 / columnCount),
           fontSize: 12,
-          border: { type: "solid", color: "D9E2EC", pt: 0.75 },
+          border: { type: "solid", color: border, pt: 0.75 },
           color: ink,
           fontFace,
           rowH: 0.55,
@@ -394,7 +445,7 @@ function buildPptxBuffer(deck, theme = {}) {
             w: 11.3,
             h: 0.6,
             fontSize: 14,
-            color: "D7E3F1",
+            color: subtitleTint,
             align: "center",
             fontFace,
           });

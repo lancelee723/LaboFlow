@@ -139,9 +139,11 @@ test("expert invoke foregrounds: session.create, driver on the new session, no b
   assert.match(invoke, /projectPath/);
   assert.match(invoke, /mode: "agent"/);
   assert.match(invoke, /title: `\$\{persona\.name\} · \$\{request\.task\.slice\(0, 24\)\}`/);
-  // First turn runs on the created session with the persona.
+  // First turn runs on the created session with the persona — through the
+  // FR-PPT-15 structured skill binding, never the raw persona alone.
   assert.match(invoke, /driver\.start\(\{\s*sessionId,/);
-  assert.match(invoke, /personaPrompt: persona\.personaPrompt/);
+  assert.match(invoke, /const boundPrompt = withSkillsBinding\(persona\.personaPrompt, persona\.skills\)/);
+  assert.match(invoke, /personaPrompt: boundPrompt/);
   assert.doesNotMatch(invoke, /newSession:/);
   // Foreground polish: no completion card is posted anywhere.
   assert.doesNotMatch(invoke, /postSessionCard/);
@@ -172,4 +174,14 @@ test("@mention dispatch navigates to the new expert session", () => {
   assert.match(dispatch, /dispatchedSessionId = result\.sessionId/);
   assert.match(dispatch, /await get\(\)\.refreshSessions\(\)/);
   assert.match(dispatch, /await get\(\)\.selectSession\(dispatchedSessionId\)/);
+});
+
+test("FR-PPT-15: withSkillsBinding renders the structured binding block", async () => {
+  const { withSkillsBinding } = await import("../electron/main/expert-service.ts");
+  const bare = withSkillsBinding("你是专家。", []);
+  assert.equal(bare, "你是专家。", "no skills → no binding block");
+  const bound = withSkillsBinding("你是专家。", ["ppt-master", "slides"]);
+  assert.match(bound, /## 工具链绑定（结构化声明）/);
+  assert.match(bound, /ppt-master/);
+  assert.match(bound, /slides/);
 });

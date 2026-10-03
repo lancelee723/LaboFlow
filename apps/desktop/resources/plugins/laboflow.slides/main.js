@@ -214,6 +214,9 @@ function registerL1Tools() {
           properties: {
             accent: { type: "string" },
             font: { type: "string" },
+            themeId: { type: "string", enum: ["consulting-blue", "midnight", "forest", "crimson", "slate"], description: "FR-PPT-08: named palette; an explicit accent wins" },
+            canvas: { type: "string", enum: ["16:9", "16:10", "4:3"], description: "FR-PPT-13: canvas preset (default 16:9)" },
+            nativeCharts: { type: "boolean", description: "FR-PPT-13: render data pages as a native editable chart instead of KPI tiles" },
           },
         },
         pages: { type: "array", items: { type: "object", properties: { layout: { type: "string" }, title: { type: "string" } } } },
@@ -231,6 +234,10 @@ function registerL1Tools() {
         const theme = {
           accent: args?.theme?.accent ?? settings?.accentColor ?? "1F4E79",
           font: args?.theme?.font,
+          // FR-PPT-08/13: named theme, canvas preset, native-chart opt-in.
+          themeId: args?.theme?.themeId,
+          canvas: args?.theme?.canvas,
+          nativeCharts: args?.theme?.nativeCharts === true,
         };
         const { normalized, buffer } = await exportDeckToBuffer(
           { deckTitle, pages: args.pages },
