@@ -58,7 +58,8 @@ beforeAll(async () => {
   await admin.query(`CREATE DATABASE ${DB_NAME}`).catch(() => undefined);
   await admin.end();
 
-  const boot = await bootstrap({ databaseUrl: DATABASE_URL, jwtSecret: 'x'.repeat(40) });
+  const storageDir = (await import('node:fs')).mkdtempSync((await import('node:path')).join((await import('node:os')).tmpdir(), 't52-files-'));
+  const boot = await bootstrap({ databaseUrl: DATABASE_URL, jwtSecret: 'x'.repeat(40), storageDir });
   app = boot.app;
   deps = boot.deps;
   baseUrl = `http://127.0.0.1:${boot.port}`;
@@ -504,4 +505,107 @@ describe('T52.3 事件推流：since 游标 + 200 条上限', () => {
     expect(capped.events.length).toBe(200);
     expect(capped.lastSeq).toBe(start + 204);
   });
+
+// ---------------------------------------------------------------- T52.5 文件上传
+describe('FR-TC-06 org_settings 协作范围闸口', () => {
+  it('默认组织内锁定：团队 B 经邀请加入被拒 403；放开后可加入', async () => {
+    if (!pgUp) return;
+    // carol（团队B）没有被加入空间A：先造一个团队B可见的邀请（manager 造）→ 兑换被闸
+    const invite = await api('POST', `/spaces/${spaceId}/invites`, { perm: 'viewer', expiresInDays: 1 }, taToken);
+    expect(invite.status).toBe(200);
+    const token = (invite.json as { token: string }).token;
+    const blocked = await api('POST', '/invites/redeem', { token }, carolToken);
+    expect(blocked.status).toBe(403);
+
+    // 管理员放开外部协作 → 兑换成功
+    const put = await api('PUT', '/org/settings', { allowExternalCollab: true }, rootToken);
+    expect(put.status).toBe(200);
+    const ok = await api('POST', '/invites/redeem', { token }, carolToken);
+    expect(ok.status).toBe(200);
+    // 还原锁定
+    await api('PUT', '/org/settings', { allowExternalCollab: false }, rootToken);
+    const second = await api('POST', `/spaces/${spaceId}/invites`, { perm: 'viewer', expiresInDays: 1 }, taToken);
+    const token2 = (second.json as { token: string }).token;
+    const blocked2 = await api('POST', '/invites/redeem', { token2 }, daveToken);
+    expect(blocked2.status).toBe(403);
+  });
+
+  it('非成员读设置 200（全员可读）；成员写设置 403', async () => {
+    if (!pgUp) return;
+    const read = await api('GET', '/org/settings', undefined, bobToken);
+    expect(read.status).toBe(200);
+    const write = await api('PUT', '/org/settings', { allowExternalCollab: true }, bobToken);
+    expect(write.status).toBe(403);
+  });
+});
+
+describe('FR-TC-21 空间内全文检索：标题+正文，仅可见节点', () => {
+  it('建 MD 写正文 → 按内容与标题命中；viewer 的 none 覆盖节点不出现', async () => {
+    if (!pgUp) return;
+    const node = await api('POST', `/spaces/${spaceId}/nodes`, { type: 'md', name: '检索目标纪要' }, aliceToken);
+    expect(node.status).toBe(200);
+    const nodeId = (node.json as { id: string }).id;
+    const save = await api('PUT', `/spaces/${spaceId}/nodes/${nodeId}/doc`, {
+      content: '客户A的市场进入策略含价格锚点分析', baseVersion: 0,
+    }, aliceToken);
+    expect(save.status).toBe(200);
+
+    const byContent = await api('GET', `/spaces/${spaceId}/search?q=${encodeURIComponent('价格锚点')}`, undefined, taToken);
+    expect(byContent.status).toBe(200);
+    const hits = byContent.json as unknown as Array<{ id: string; matchedIn: string }>;
+    expect(hits.some((h) => h.id === nodeId && h.matchedIn === 'content')).toBe(true);
+
+    const byTitle = await api('GET', `/spaces/${spaceId}/search?q=${encodeURIComponent('检索目标')}`, undefined, taToken);
+    expect((byTitle.json as unknown as Array<{ id: string; matchedIn: string }>).some((h) => h.id === nodeId && h.matchedIn === 'title')).toBe(true);
+
+    // 特殊字符不炸（LIKE 通配符转义）
+    const literal = await api('GET', `/spaces/${spaceId}/search?q=${encodeURIComponent('100% _ok')}`, undefined, taToken);
+    expect(literal.status).toBe(200);
+  });
+});
+
+describe('T52.5 空间文件上传：版本链/权限/校验', () => {
+  it('上传建 file 节点 → 下载往返一致；同节点重传产生版本链', async () => {
+    if (!pgUp) return;
+    const content = Buffer.from('验收文件内容-第一版');
+    const up = await api('POST', `/spaces/${spaceId}/files`, {
+      name: '报告.pdf', contentBase64: content.toString('base64'),
+    }, aliceToken);
+    expect(up.status).toBe(200);
+    const nodeId = (up.json as { nodeId: string }).nodeId;
+    expect((up.json as { versionNo: number }).versionNo).toBe(1);
+
+    const up2 = await api('POST', `/spaces/${spaceId}/files`, {
+      nodeId, contentBase64: Buffer.from('第二版内容').toString('base64'),
+    }, aliceToken);
+    expect(up2.status).toBe(200);
+    expect((up2.json as { versionNo: number }).versionNo).toBe(2);
+
+    const versions = await api('GET', `/spaces/${spaceId}/files/${nodeId}/versions`, undefined, aliceToken);
+    expect(versions.status).toBe(200);
+    expect((versions.json as unknown as unknown[]).length).toBe(2);
+
+    const dl = await api('GET', `/spaces/${spaceId}/files/${nodeId}/download`, undefined, aliceToken);
+    expect(dl.status).toBe(200);
+    expect(Buffer.from((dl.json as { contentBase64: string }).contentBase64, 'base64').toString()).toBe('第二版内容');
+    const dl1 = await api('GET', `/spaces/${spaceId}/files/${nodeId}/download?version=1`, undefined, aliceToken);
+    expect(Buffer.from((dl1.json as { contentBase64: string }).contentBase64, 'base64').toString()).toBe('验收文件内容-第一版');
+    const sha = (dl.json as { sha256: string }).sha256;
+    expect(sha).toBe(createHash('sha256').update('第二版内容').digest('hex'));
+  });
+
+  it('viewer 不能上传（403）；空内容 422；版本不存在 404', async () => {
+    if (!pgUp) return;
+    const created = await api('POST', `/spaces/${spaceId}/files`, {
+      name: 'bob.bin', contentBase64: Buffer.from('x').toString('base64'),
+    }, bobToken);
+    expect(created.status).toBe(403);
+    const empty = await api('POST', `/spaces/${spaceId}/files`, {
+      name: 'empty.bin', contentBase64: '',
+    }, aliceToken);
+    expect(empty.status).toBe(422);
+    const missing = await api('GET', `/spaces/${spaceId}/files/00000000-0000-4000-8000-000000000000/download`, undefined, aliceToken);
+    expect([403, 404]).toContain(missing.status);
+  });
+});
 });

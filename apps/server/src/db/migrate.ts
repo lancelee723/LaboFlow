@@ -346,6 +346,69 @@ const MIGRATIONS: Array<{ version: number; name: string; statements: string[] }>
       `CREATE INDEX IF NOT EXISTS idx_wechat_mp_pending_bot ON wechat_mp_pending(bot_id, created_at);`,
     ],
   },
+  {
+    version: 7,
+    name: 'space-files',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS space_file_versions (
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        uploaded_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (node_id, version)
+      );`,
+    ],
+  },
+  {
+    version: 8,
+    name: 'space-notifications',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS space_notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL,
+        space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+        node_id UUID NOT NULL REFERENCES space_nodes(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}',
+        read_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_space_notifications_user ON space_notifications(user_id, created_at);`,
+    ],
+  },
+  {
+    version: 9,
+    name: 'org-settings',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS org_settings (
+        id TEXT PRIMARY KEY,
+        allow_external_collab BOOLEAN NOT NULL DEFAULT false,
+        updated_by UUID,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+    ],
+  },
+  {
+    version: 10,
+    name: 'org-slide-templates',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS org_slide_templates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id TEXT NOT NULL DEFAULT 'default',
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        contract JSONB NOT NULL DEFAULT '{}',
+        usage_note TEXT NOT NULL DEFAULT '',
+        storage_key TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        published_by UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );`,
+    ],
+  },
 ];
 
 export async function migrate(db: NodePgDatabase<Record<string, never>>): Promise<number> {

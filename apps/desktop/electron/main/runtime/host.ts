@@ -7,6 +7,7 @@ import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
+import { interceptUnattendedAsk } from "../assistant/unattended-policy";
 
 export type HostRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -93,6 +94,31 @@ export function createHostRuntime({
         risk: Risk;
         reason: string;
       };
+      // FR-MC-17: unattended sessions (scheduled/webhook/channels) may auto-
+      // resolve ask-class calls per their policy before the UI ever sees it.
+      if (
+        interceptUnattendedAsk(
+          {
+            requestId: permission.requestId,
+            sessionId: permission.sessionId,
+            toolName: permission.toolName,
+            argsPreview: permission.argsPreview,
+          },
+          {
+            resolve: (requestId, decision) =>
+              h.call("permissions.resolve", { requestId, decision }),
+            notify: (payload) => {
+              sendToRenderer(IPC.event.toast, { message: payload.message });
+            },
+            log: (level, message) =>
+              logger.app("permission", level as "info" | "warn" | "error", "unattended policy", {
+                data: message,
+              }),
+          },
+        )
+      ) {
+        return;
+      }
       // A delegate's call is already in `activeToolCalls` by the time the host
       // asks: the sidecar forwards `tool_start` before it executes the tool.
       // Without this the dialog would attribute a delegate's write to the main

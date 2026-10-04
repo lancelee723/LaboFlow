@@ -1,9 +1,12 @@
-import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, inArray, lt, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createHash, randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   comments, inviteLinks, revisionSuggestions, spaceDocVersions, spaceDocs,
-  spaceEvents, spaceMembers, spaceNodeOverrides, spaceNodes, spaces, users,
+  spaceEvents, spaceFileVersions, spaceMembers, spaceNodeOverrides, spaceNodes,
+  spaceNotifications, orgSettings, spaces, users,
 } from '../db/schema.js';
 import {
   canSpace, effectivePerm, isNodePerm, isSpacePerm,
@@ -23,6 +26,8 @@ import {
 
 /** MD/CSV 文档版本链滚动窗口（SPEC §2：20 版滚动可配）。 */
 export const SPACE_VERSIONS_KEEP = 20;
+/** file 上限沿用交付物约束（PRD FR-TC-02②：单文件 ≤200MB）。 */
+export const MAX_SPACE_FILE_SIZE = 200 * 1024 * 1024;
 
 export interface SpaceActor {
   userId: string;
@@ -53,6 +58,8 @@ export class SpaceService {
   constructor(
     private readonly db: NodePgDatabase<Record<string, never>>,
     private readonly audit: AuditFn,
+    /** 卷存储根（file 节点内容）；缺省时 file 上传/下载不可用。 */
+    private readonly storageDir?: string,
   ) {}
 
   // ============================ 事件（ONE mechanism，WS hub 复用） ============================
@@ -331,6 +338,26 @@ export class SpaceService {
     const { space, perm: spacePerm } = await this.requireSpace(spaceId, actor.userId);
     const nodes = await this.db.select().from(spaceNodes).where(eq(spaceNodes.spaceId, space.id));
     const { visible, permOf } = await this.visibility(space, spacePerm, actor);
+    // FR-TC-03 badges: per-node open comment / pending revision counts
+    const commentCounts = new Map<string, number>();
+    const revisionCounts = new Map<string, number>();
+    const nodeIds = [...visible.keys()];
+    if (nodeIds.length) {
+      for (const row of await this.db
+        .select({ nodeId: comments.nodeId, count: sql<number>`count(*)::int` })
+        .from(comments)
+        .where(and(inArray(comments.nodeId, nodeIds), eq(comments.status, 'open')))
+        .groupBy(comments.nodeId)) {
+        commentCounts.set(row.nodeId, Number(row.count));
+      }
+      for (const row of await this.db
+        .select({ nodeId: revisionSuggestions.nodeId, count: sql<number>`count(*)::int` })
+        .from(revisionSuggestions)
+        .where(and(inArray(revisionSuggestions.nodeId, nodeIds), eq(revisionSuggestions.status, 'pending')))
+        .groupBy(revisionSuggestions.nodeId)) {
+        revisionCounts.set(row.nodeId, Number(row.count));
+      }
+    }
     // 父先于子输出，客户端可直接建树
     const ordered: NodeRow[] = [];
     const seen = new Set<string>();
@@ -346,7 +373,11 @@ export class SpaceService {
       ordered.push(n);
     };
     for (const n of nodes) if (visible.has(n.id)) push(n, new Set());
-    return ordered.map((n) => this.nodeDto(n, permOf(n.id)));
+    return ordered.map((n) => ({
+      ...this.nodeDto(n, permOf(n.id)),
+      commentCount: commentCounts.get(n.id) ?? 0,
+      pendingRevisions: revisionCounts.get(n.id) ?? 0,
+    }));
   }
 
   async updateNode(
@@ -434,6 +465,37 @@ export class SpaceService {
   }
 
   // ============================ 文档（MD/CSV 版本链） ============================
+
+  /** 空间内全文检索（FR-TC-21）：标题 + MD/CSV 最新版内容，ILIKE 起步
+   * （NFR-TC2 规模约束内够用）；只返回调用者可见节点。 */
+  async search(
+    spaceId: string, actor: SpaceActor, rawQuery: string, limit = 50,
+  ): Promise<Array<Record<string, unknown>>> {
+    const { space, perm: spacePerm } = await this.requireSpace(spaceId, actor.userId);
+    const query = rawQuery.trim();
+    if (!query) return [];
+    const nodes = await this.db.select().from(spaceNodes).where(eq(spaceNodes.spaceId, space.id));
+    const { visible, permOf } = await this.visibility(space, spacePerm, actor);
+    const needle = `%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const contentHits = await this.db
+      .select({ nodeId: spaceDocVersions.nodeId })
+      .from(spaceDocVersions)
+      .innerJoin(spaceDocs, and(eq(spaceDocs.nodeId, spaceDocVersions.nodeId), eq(spaceDocs.currentVersion, spaceDocVersions.version)))
+      .where(ilike(spaceDocVersions.content, needle));
+    const contentHitIds = new Set(contentHits.map((row) => row.nodeId));
+    const out: Array<Record<string, unknown>> = [];
+    for (const node of nodes) {
+      if (!visible.has(node.id) || node.deletedAt) continue;
+      const inTitle = node.name.toLowerCase().includes(query.toLowerCase());
+      const inContent = contentHitIds.has(node.id);
+      if (!inTitle && !inContent) continue;
+      out.push({ ...this.nodeDto(node, permOf(node.id)), matchedIn: inTitle ? 'title' : 'content' });
+      if (out.length >= Math.max(1, Math.min(limit, 100))) break;
+    }
+    // 标题命中排前，其余按树序
+    out.sort((a, b) => Number(b.matchedIn === 'title') - Number(a.matchedIn === 'title'));
+    return out;
+  }
 
   async getDoc(spaceId: string, actor: SpaceActor, nodeId: string, version?: number): Promise<Record<string, unknown>> {
     const { node } = await this.requireNode(spaceId, actor, nodeId, 'view');
@@ -628,7 +690,71 @@ export class SpaceService {
       })
       .returning();
     await this.emit(spaceId, 'revision.created', { nodeId, suggestionId: r!.id, producedBy }, actor.userId);
+    // FR-TC-10: an AI-produced suggestion batch pings the node's open comment
+    // authors (never the requester) so they review what touched their comments.
+    if (producedBy === 'agent') {
+      const openComments = await this.db
+        .selectDistinct({ authorId: comments.authorId })
+        .from(comments)
+        .where(and(eq(comments.nodeId, nodeId), eq(comments.status, 'open')));
+      const recipients = new Set(
+        openComments.map((row) => row.authorId).filter((id): id is string => Boolean(id) && id !== actor.userId),
+      );
+      for (const userId of recipients) {
+        await this.db.insert(spaceNotifications).values({
+          userId, spaceId, nodeId,
+          kind: 'revision.review-requested',
+          payload: { suggestionId: r!.id, count: recipients.size },
+        });
+      }
+    }
     return this.revisionDto(r!);
+  }
+
+  // ============================ 组织设置（FR-TC-06） ============================
+
+  async getOrgSettings(): Promise<{ allowExternalCollab: boolean }> {
+    const [row] = await this.db.select().from(orgSettings).where(eq(orgSettings.id, 'default')).limit(1);
+    return { allowExternalCollab: row?.allowExternalCollab ?? false };
+  }
+
+  async setOrgSettings(
+    actor: { userId: string; role?: string; teamId: string | null },
+    input: { allowExternalCollab: boolean },
+  ): Promise<{ allowExternalCollab: boolean }> {
+    await this.db
+      .insert(orgSettings)
+      .values({ id: 'default', allowExternalCollab: input.allowExternalCollab === true, updatedBy: actor.userId })
+      .onConflictDoUpdate({
+        target: orgSettings.id,
+        set: { allowExternalCollab: input.allowExternalCollab === true, updatedBy: actor.userId, updatedAt: new Date() },
+      });
+    await this.audit(actor.userId, 'org.settings', 'default', { allowExternalCollab: input.allowExternalCollab === true });
+    return { allowExternalCollab: input.allowExternalCollab === true };
+  }
+
+  /** 我的未读空间通知（轮询消费；frontier = createdAt ISO 游标）。 */
+  async listNotifications(userId: string, sinceIso?: string): Promise<Array<Record<string, unknown>>> {
+    const rows = await this.db
+      .select()
+      .from(spaceNotifications)
+      .where(and(eq(spaceNotifications.userId, userId), gt(spaceNotifications.createdAt, sinceIso ? new Date(sinceIso) : new Date(0))))
+      .orderBy(asc(spaceNotifications.createdAt))
+      .limit(100);
+    return rows.map((row) => ({
+      id: row.id, spaceId: row.spaceId, nodeId: row.nodeId,
+      kind: row.kind, payload: row.payload, readAt: row.readAt,
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async markNotificationsRead(userId: string, ids: string[]): Promise<{ ok: true }> {
+    if (!ids.length) return { ok: true };
+    await this.db
+      .update(spaceNotifications)
+      .set({ readAt: new Date() })
+      .where(and(eq(spaceNotifications.userId, userId), inArray(spaceNotifications.id, ids)));
+    return { ok: true };
   }
 
   /**
@@ -791,6 +917,15 @@ export class SpaceService {
     const [space] = await this.db.select().from(spaces).where(eq(spaces.id, invite.spaceId)).limit(1);
     if (!space) throw new SpaceError(404, 'ENOENT', '空间不存在');
     this.assertWritable(space);
+    // FR-TC-06 协作范围闸口：org_settings.allowExternalCollab=false 时，
+    // 非本团队账号无法经邀请链接加入（组织边界=默认安全边界）。
+    const [settings] = await this.db.select().from(orgSettings).where(eq(orgSettings.id, 'default')).limit(1);
+    if (settings && !settings.allowExternalCollab && actor.teamId !== space.teamId) {
+      await this.audit(actor.userId, 'invite.redeem.blocked', invite.id, {
+        spaceId: invite.spaceId, reason: 'external-collab-disabled',
+      });
+      throw new SpaceError(403, 'EEXTERNAL', '该组织仅允许组织内协作，无法经链接加入');
+    }
     await this.db
       .insert(spaceMembers)
       .values({ spaceId: invite.spaceId, userId: actor.userId, perm: invite.perm as SpacePerm, invitedBy: invite.createdBy })
@@ -834,5 +969,103 @@ export class SpaceService {
       .where(and(eq(spaceNodeOverrides.nodeId, nodeId), eq(spaceNodeOverrides.subjectId, subjectId)));
     await this.emit(spaceId, 'node.updated', { nodeId, override: { subjectId, perm: null } }, actor.userId);
     return { ok: true };
+  }
+
+  /** yjs hub 的连接鉴权（T52.13）：view 档即可打开 html 文档；none 伪装 404。 */
+  async assertHtmlDocAccess(spaceId: string, userId: string, nodeId: string): Promise<void> {
+    await this.requireNode(spaceId, { userId, teamId: null }, nodeId, 'view');
+  }
+
+  // ============================ 文件上传（T52.5：file 走卷存储） ============================
+
+  /** 上传为新 file 节点，或对既有 file 节点追加版本。20 版滚动窗口与交付物一致。 */
+  async uploadFile(
+    spaceId: string, actor: SpaceActor,
+    input: { nodeId?: string; parentId?: string | null; name?: string; contentBase64: string },
+  ): Promise<Record<string, unknown>> {
+    if (!this.storageDir) throw new SpaceError(503, 'ENOSTORAGE', '服务端未配置文件卷存储');
+    const content = Buffer.from(String(input.contentBase64 ?? ''), 'base64');
+    if (!content.length) throw new SpaceError(422, 'EEMPTY', '上传内容为空');
+    if (content.length > MAX_SPACE_FILE_SIZE) {
+      throw new SpaceError(413, 'ETOOLARGE', `文件超过上限（${Math.round(MAX_SPACE_FILE_SIZE / 1024 / 1024)}MB）`);
+    }
+    let nodeId: string;
+    let nodeName: string;
+    if (input.nodeId) {
+      const { space, node } = await this.requireNode(spaceId, actor, input.nodeId, 'edit');
+      this.assertWritable(space);
+      if (node.type !== 'file') throw new SpaceError(422, 'ETYPE', '只能对 file 节点追加版本');
+      nodeId = node.id;
+      nodeName = node.name;
+    } else {
+      const name = String(input.name ?? '').trim();
+      if (!name) throw new SpaceError(422, 'ENAME', '新文件需要 name');
+      const created = await this.createNode(spaceId, actor, {
+        parentId: input.parentId ?? null, type: 'file', name,
+      });
+      nodeId = String(created.id);
+      nodeName = name;
+    }
+    const sha = createHash('sha256').update(content).digest('hex');
+    const [row] = await this.db
+      .select({ current: sql<number>`COALESCE(MAX(${spaceFileVersions.version}), 0)` })
+      .from(spaceFileVersions)
+      .where(eq(spaceFileVersions.nodeId, nodeId));
+    const versionNo = Number(row?.current ?? 0) + 1;
+    const key = path.join(this.storageDir, 'spaces', nodeId, `v${versionNo}`);
+    fs.mkdirSync(path.dirname(key), { recursive: true });
+    fs.writeFileSync(key, content);
+    await this.db.insert(spaceFileVersions).values({
+      nodeId, version: versionNo, size: content.length, sha256: sha, storageKey: key, uploadedBy: actor.userId,
+    });
+    await this.db
+      .update(spaceNodes)
+      .set({ updatedBy: actor.userId, updatedAt: new Date() })
+      .where(eq(spaceNodes.id, nodeId));
+    // 20 版滚动：淘汰最旧（与 deliverables / spaceDocVersions 同一窗口语义）
+    const stale = await this.db
+      .select()
+      .from(spaceFileVersions)
+      .where(and(eq(spaceFileVersions.nodeId, nodeId), lt(spaceFileVersions.version, versionNo - SPACE_VERSIONS_KEEP + 1)));
+    for (const oldRow of stale) {
+      fs.rmSync(oldRow.storageKey, { force: true });
+      await this.db.delete(spaceFileVersions)
+        .where(and(eq(spaceFileVersions.nodeId, oldRow.nodeId), eq(spaceFileVersions.version, oldRow.version)));
+    }
+    await this.audit(actor.userId, 'file.upload', nodeId, { spaceId, name: nodeName, version: versionNo, size: content.length });
+    await this.emit(spaceId, 'node.updated', { nodeId, name: nodeName, fileVersion: versionNo }, actor.userId);
+    return { nodeId, name: nodeName, versionNo, size: content.length, sha256: sha };
+  }
+
+  async listFileVersions(
+    spaceId: string, actor: SpaceActor, nodeId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    await this.requireNode(spaceId, actor, nodeId, 'view');
+    const rows = await this.db
+      .select({ version: spaceFileVersions.version, size: spaceFileVersions.size, sha256: spaceFileVersions.sha256, createdAt: spaceFileVersions.createdAt })
+      .from(spaceFileVersions)
+      .where(eq(spaceFileVersions.nodeId, nodeId))
+      .orderBy(desc(spaceFileVersions.version));
+    return rows;
+  }
+
+  async downloadFile(
+    spaceId: string, actor: SpaceActor, nodeId: string, version?: number,
+  ): Promise<{ name: string; contentBase64: string; sha256: string; versionNo: number } | null> {
+    if (!this.storageDir) throw new SpaceError(503, 'ENOSTORAGE', '服务端未配置文件卷存储');
+    const { node } = await this.requireNode(spaceId, actor, nodeId, 'view');
+    const rows = version
+      ? await this.db.select().from(spaceFileVersions)
+          .where(and(eq(spaceFileVersions.nodeId, nodeId), eq(spaceFileVersions.version, version))).limit(1)
+      : await this.db.select().from(spaceFileVersions)
+          .where(eq(spaceFileVersions.nodeId, nodeId)).orderBy(desc(spaceFileVersions.version)).limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      name: node.name,
+      contentBase64: fs.readFileSync(row.storageKey).toString('base64'),
+      sha256: row.sha256,
+      versionNo: row.version,
+    };
   }
 }

@@ -13,6 +13,7 @@ export type SettingsTabId =
   | "agent"
   | "skills"
   | "mcp"
+  | "assistant"
   | "subagents"
   | "experts"
   | "import"
@@ -261,6 +262,21 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "expert.tabTeams",
       "expert.newExpert",
       "expert.newTeam",
+    ],
+  },
+  {
+    id: "assistant",
+    labelKey: "settings.nav.assistant",
+    titleKey: "settings.assistantTitle",
+    group: "agent",
+    keywordKeys: [
+      "settings.assistant.description",
+      "settings.assistant.feishuTitle",
+      "settings.assistant.wecomTitle",
+      "settings.assistant.wechatTitle",
+      "settings.assistant.connect",
+      "settings.assistant.scope",
+      "settings.assistant.allowlist",
     ],
   },
   {

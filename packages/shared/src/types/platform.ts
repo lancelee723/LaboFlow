@@ -130,6 +130,8 @@ export type ScheduledTask = {
   schedule?: ScheduledTaskSchedule | null;
   /** LaboFlow module 03 (R5-1): 5-field cron expression (cadence "cron"). */
   cronExpr?: string | null;
+  /** FR-MC-15 output destination: empty = session only. */
+  outputDestination?: string | null;
   nextRunAt?: string;
   workspacePath?: string;
   /** Explicit task-owned execution settings. Missing fields preserve legacy behavior. */

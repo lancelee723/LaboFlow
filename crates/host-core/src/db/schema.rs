@@ -124,6 +124,20 @@ CREATE TABLE turn_queue (
   created_at       INTEGER NOT NULL
 );
 CREATE INDEX idx_turn_queue_session ON turn_queue(session_id, position);
+
+CREATE TABLE IF NOT EXISTS channel_accounts (
+  id          TEXT PRIMARY KEY,
+  provider    TEXT NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  secret_ref  TEXT,
+  scope       TEXT NOT NULL DEFAULT 'both',
+  allowlist   TEXT NOT NULL DEFAULT '[]',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_channel_accounts_provider
+  ON channel_accounts(provider);
 CREATE UNIQUE INDEX idx_turn_queue_idempotency
   ON turn_queue(session_id, principal, idempotency_key)
   WHERE idempotency_key IS NOT NULL;

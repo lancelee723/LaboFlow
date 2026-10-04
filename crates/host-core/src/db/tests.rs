@@ -122,6 +122,23 @@ fn v18_database_migrates_session_thinking_omit() {
     assert!(sql.contains("'omit'"), "{sql}");
 }
 
+#[test]
+fn v20_database_migrates_to_v21_with_channel_accounts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pi.sqlite");
+    {
+        let db = Database::open(&path).unwrap();
+        db.conn().pragma_update(None, "user_version", 20).unwrap();
+    }
+    let db = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db.conn()), SCHEMA_VERSION);
+    assert!(table_exists(db.conn(), "channel_accounts"));
+    assert!(migration_backup_path(&path, 20).exists());
+    // 幂等：fresh open 已在 v21，重复 open 不报错
+    let db2 = Database::open(&path).unwrap();
+    assert_eq!(schema_version(db2.conn()), SCHEMA_VERSION);
+}
+
 fn schema_version(conn: &Connection) -> i64 {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap()

@@ -232,7 +232,7 @@
           "en": "PPT workbench",
           "zh-CN": "PPT 工作台"
         },
-        "icon": "sparkles",
+        "icon": "presentation",
         "entry": "renderer/workbench.html",
         "order": 12
       }
@@ -257,13 +257,6 @@
         "description": "Where .pptx files are written inside the workspace"
       },
       {
-        "key": "offlineWheelhouse",
-        "type": "string",
-        "default": "",
-        "title": "Offline wheelhouse directory",
-        "description": "Local wheel dir for air-gapped installs (--no-index --find-links); overrides the mirror when set"
-      },
-      {
         "key": "pipMirror",
         "type": "select",
         "default": "default",
@@ -283,6 +276,13 @@
         ],
         "title": "Python package mirror",
         "description": "Index for PPT-Master runtime installs (pip/uv)"
+      },
+      {
+        "key": "budgetTokens",
+        "type": "number",
+        "default": 600000,
+        "title": "Deck token budget",
+        "description": "FR-PPT-16: estimated generation tokens per deck; stage-2 submission refuses when the estimate exceeds it"
       }
     ]
   },

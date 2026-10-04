@@ -135,6 +135,63 @@ export function createSpaceClient(deps: SpaceClientDeps) {
         seq?: number;
       }>;
     },
+    uploadFile(
+      spaceId: string,
+      input: { nodeId?: string; parentId?: string | null; name?: string; contentBase64: string },
+    ): Promise<{ nodeId: string; name: string; versionNo: number; size: number; sha256: string }> {
+      return deps.postJson(`/spaces/${id(spaceId)}/files`, input) as Promise<{
+        nodeId: string;
+        name: string;
+        versionNo: number;
+        size: number;
+        sha256: string;
+      }>;
+    },
+    listMembers(spaceId: string): Promise<Array<{ userId: string; username: string; displayName: string | null; perm: string }>> {
+      return deps.getJson(`/spaces/${id(spaceId)}/members`) as Promise<
+        Array<{ userId: string; username: string; displayName: string | null; perm: string }>
+      >;
+    },
+    addMember(spaceId: string, input: { userId: string; perm: string }): Promise<{ ok: true }> {
+      return deps.postJson(`/spaces/${id(spaceId)}/members`, input) as Promise<{ ok: true }>;
+    },
+    updateMember(spaceId: string, userId: string, input: { perm: string }): Promise<{ ok: true }> {
+      return deps.patchJson(`/spaces/${id(spaceId)}/members/${id(userId)}`, input) as Promise<{ ok: true }>;
+    },
+    removeMember(spaceId: string, userId: string): Promise<{ ok: true }> {
+      return deps.deleteJson(`/spaces/${id(spaceId)}/members/${id(userId)}`) as Promise<{ ok: true }>;
+    },
+    createInvite(
+      spaceId: string,
+      input: { perm?: string; expiresInDays?: number; maxUses?: number | null },
+    ): Promise<Record<string, unknown>> {
+      return deps.postJson(`/spaces/${id(spaceId)}/invites`, input) as Promise<Record<string, unknown>>;
+    },
+    search(spaceId: string, query: string, limit?: number): Promise<Array<Record<string, unknown>>> {
+      const params = new URLSearchParams({ q: query });
+      if (limit !== undefined) params.set("limit", String(limit));
+      return deps.getJson(`/spaces/${id(spaceId)}/search?${params.toString()}`) as Promise<
+        Array<Record<string, unknown>>
+      >;
+    },
+    listFileVersions(spaceId: string, nodeId: string): Promise<Array<Record<string, unknown>>> {
+      return deps.getJson(`/spaces/${id(spaceId)}/files/${id(nodeId)}/versions`) as Promise<
+        Array<Record<string, unknown>>
+      >;
+    },
+    downloadFile(
+      spaceId: string,
+      nodeId: string,
+      version?: number,
+    ): Promise<{ name: string; contentBase64: string; sha256: string; versionNo: number } | null> {
+      const query = version === undefined ? "" : `?version=${version}`;
+      return deps.getJson(`/spaces/${id(spaceId)}/files/${id(nodeId)}/download${query}`) as Promise<{
+        name: string;
+        contentBase64: string;
+        sha256: string;
+        versionNo: number;
+      } | null>;
+    },
     listComments(spaceId: string, nodeId: string): Promise<SpaceComment[]> {
       return deps.getJson(`/spaces/${id(spaceId)}/nodes/${id(nodeId)}/comments`) as Promise<SpaceComment[]>;
     },
@@ -229,6 +286,15 @@ export interface SpaceIpcHostDeps {
   pollMs?: number;
   /** Optional warn sink (main logger). */
   warn?(context: string, message: string): void;
+  /**
+   * FR-TC-10 production: the LLM-backed review-by-comments pipeline lives in
+   * the main process (it needs the session model); when supplied it replaces
+   * the legacy passthrough that assumed a server route.
+   */
+  reviewByComments?(
+    spaceId: string,
+    nodeId: string,
+  ): Promise<RevisionSuggestion[]>;
 }
 
 export interface SpaceIpcHost {
@@ -375,6 +441,53 @@ export function createSpaceIpcHost(deps: SpaceIpcHostDeps): SpaceIpcHost {
         wrap(() => client.restoreNode(String(input?.spaceId ?? ""), String(input?.nodeId ?? ""))),
       );
       handle(
+        IPC.invoke.spaceFileUpload,
+        async (input: {
+          spaceId?: string;
+          nodeId?: string;
+          parentId?: string | null;
+          name?: string;
+          contentBase64?: string;
+        }) =>
+          wrap(() =>
+            client.uploadFile(String(input?.spaceId ?? ""), {
+              ...(typeof input?.nodeId === "string" && input.nodeId ? { nodeId: input.nodeId } : {}),
+              parentId: input?.parentId ?? null,
+              name: input?.name,
+              contentBase64: String(input?.contentBase64 ?? ""),
+            }),
+          ),
+      );
+      handle(
+        IPC.invoke.spaceSearch,
+        async (input: { spaceId?: string; query?: string; limit?: number }) =>
+          wrap(() =>
+            client.search(
+              String(input?.spaceId ?? ""),
+              String(input?.query ?? ""),
+              typeof input?.limit === "number" ? input.limit : undefined,
+            ),
+          ),
+      );
+      handle(
+        IPC.invoke.spaceFileVersions,
+        async (input: { spaceId?: string; nodeId?: string }) =>
+          wrap(() =>
+            client.listFileVersions(String(input?.spaceId ?? ""), String(input?.nodeId ?? "")),
+          ),
+      );
+      handle(
+        IPC.invoke.spaceFileDownload,
+        async (input: { spaceId?: string; nodeId?: string; version?: number }) =>
+          wrap(() =>
+            client.downloadFile(
+              String(input?.spaceId ?? ""),
+              String(input?.nodeId ?? ""),
+              typeof input?.version === "number" ? input.version : undefined,
+            ),
+          ),
+      );
+      handle(
         IPC.invoke.spaceDocGet,
         async (input: { spaceId?: string; nodeId?: string; version?: number }) =>
           wrap(() =>
@@ -485,7 +598,12 @@ export function createSpaceIpcHost(deps: SpaceIpcHostDeps): SpaceIpcHost {
       handle(
         IPC.invoke.spaceRevisionsReviewByComments,
         async (input: { spaceId?: string; nodeId?: string }) =>
-          wrap(() => client.reviewByComments(String(input?.spaceId ?? ""), String(input?.nodeId ?? ""))),
+          wrap(() => {
+            const spaceId = String(input?.spaceId ?? "");
+            const nodeId = String(input?.nodeId ?? "");
+            if (deps.reviewByComments) return deps.reviewByComments(spaceId, nodeId);
+            return client.reviewByComments(spaceId, nodeId);
+          }),
       );
       handle(IPC.invoke.spaceEventsPull, async (input: { spaceId?: string; since?: number }) =>
         wrap(() => client.pullEvents(String(input?.spaceId ?? ""), Number(input?.since ?? -1))),

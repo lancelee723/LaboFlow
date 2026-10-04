@@ -1223,6 +1223,15 @@ pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
     Ok(out)
 }
 
+/// Cheap existence probe for RPC inputs that attach rows to a session
+/// (e.g. artifact registration from main-process producers).
+pub fn exists(db: &Database, session_id: &str) -> Result<bool> {
+    let mut stmt = db
+        .conn()
+        .prepare_cached("SELECT 1 FROM sessions WHERE id = ?1")?;
+    Ok(stmt.query_row(params![session_id], |_| Ok(())).is_ok())
+}
+
 /// Backwards-compatible session constructor.  New callers that need an
 /// explicit thinking level should use [`create_session_with_thinking`].
 pub fn create_session(

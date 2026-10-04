@@ -47,6 +47,7 @@ import {
 import { McpOAuthManager } from "../mcp-oauth";
 import { PluginPanelHost } from "../plugin-panel-host";
 import { PluginViewHost } from "../plugin-view-host";
+import { maybeRegisterSlidesArtifact } from "../laboflow/slides-artifacts";
 import { BrowserPane } from "../browser-view";
 import { BrowserHost, BROWSER_PLUGIN_ID } from "../browser-host";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
@@ -230,6 +231,10 @@ export function createPluginServices({
     openPath: async (fullPath) => {
       const error = await shell.openPath(stripWinLongPrefix(fullPath));
       if (error) throw new Error(error);
+    },
+    onPluginToolArtifact: (input) => {
+      // FR-PPT-06: exported decks become session artifacts (best-effort).
+      void maybeRegisterSlidesArtifact(getHost(), input).catch(() => undefined);
     },
     revealPath: async (fullPath) => {
       shell.showItemInFolder(stripWinLongPrefix(fullPath));

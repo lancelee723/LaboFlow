@@ -13,6 +13,7 @@ import { useAppStore } from "../../stores/app-store";
 import "./scheduled-editor.css";
 
 export type ScheduledDraft = Pick<ScheduledTask, "title" | "prompt" | "cadence" | "schedule"> & {
+  outputDestination?: string | null;
   cronExpr?: string | null;
   workspacePath?: string;
   permissionMode?: GlobalPermissionMode;
@@ -28,6 +29,7 @@ export function ScheduledEditor({
   busy,
   save,
   cancel,
+  prefill,
 }: {
   task?: ScheduledTask;
   projects: readonly ProjectRecord[];
@@ -35,19 +37,32 @@ export function ScheduledEditor({
   busy: boolean;
   save: (draft: ScheduledDraft) => Promise<void>;
   cancel: () => void;
+  /** FR-MC-14 template prefill (new-task mode only). */
+  prefill?: { title: string; prompt: string; cadence: string; schedule?: unknown };
 }) {
   const { t } = useTranslation();
   const settings = useAppStore((state) => state.settings);
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [prompt, setPrompt] = useState(task?.prompt ?? "");
-  const [cadence, setCadence] = useState<ScheduledTask["cadence"]>(task?.cadence ?? "manual");
-  const [hour, setHour] = useState(String(task?.schedule?.hour ?? 9).padStart(2, "0"));
-  const [minute, setMinute] = useState(String(task?.schedule?.minute ?? 0).padStart(2, "0"));
+  const [title, setTitle] = useState(task?.title ?? prefill?.title ?? "");
+  const [prompt, setPrompt] = useState(task?.prompt ?? prefill?.prompt ?? "");
+  const [cadence, setCadence] = useState<ScheduledTask["cadence"]>(
+    task?.cadence ?? ((prefill?.cadence as ScheduledTask["cadence"]) ?? "manual"),
+  );
+  const [hour, setHour] = useState(
+    String(task?.schedule?.hour ?? (prefill?.schedule as { hour?: number } | undefined)?.hour ?? 9).padStart(2, "0"),
+  );
+  const [minute, setMinute] = useState(
+    String(task?.schedule?.minute ?? (prefill?.schedule as { minute?: number } | undefined)?.minute ?? 0).padStart(2, "0"),
+  );
   const [weekdays, setWeekdays] = useState<number[]>(
-    task?.schedule?.weekdays ?? [task?.schedule?.weekday ?? 0],
+    task?.schedule?.weekdays ?? [
+      (prefill?.schedule as { weekday?: number } | undefined)?.weekday ??
+        task?.schedule?.weekday ??
+        0,
+    ],
   );
   // LaboFlow module 03 (R5-1): 5-field cron mode alongside the calendar UI.
   const [cronExpr, setCronExpr] = useState(task?.cronExpr ?? "");
+  const [outputDestination, setOutputDestination] = useState(task?.outputDestination ?? "");
   const cronLocal = useMemo(() => {
     const expr = cronExpr.trim();
     if (!expr) return { ok: true as const, error: "" };
@@ -121,9 +136,10 @@ export function ScheduledEditor({
         }
         void save({
           title: title.trim(),
-          prompt: prompt.trim(),
+          prompt: prompt.trim() + (outputDestination ? `\n\n[输出目的地: ${outputDestination}]` : ""),
           cadence,
           cronExpr: cadence === "cron" ? cronExpr.trim() : null,
+          outputDestination: outputDestination || null,
           schedule:
             cadence === "manual" || cadence === "cron"
               ? null
@@ -250,6 +266,18 @@ export function ScheduledEditor({
       )}
       {cadence === "hourly" && <p className="dest-row-meta">{t("scheduled.hourlyHint")}</p>}
       <p className="dest-row-meta">{t("scheduled.localTimeHint")}</p>
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="opacity-70">{t("scheduled.outputDestination")}</span>
+        <select
+          className="rounded-md border px-2 py-1.5 text-sm"
+          value={outputDestination}
+          onChange={(e) => setOutputDestination(e.target.value)}
+        >
+          <option value="">{t("scheduled.outputSession")}</option>
+          <option value="deliverables">{t("scheduled.outputDeliverables")}</option>
+          <option value="team-space">{t("scheduled.outputTeamSpace")}</option>
+        </select>
+      </label>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" disabled={busy || !valid}>
           {t("scheduled.save")}

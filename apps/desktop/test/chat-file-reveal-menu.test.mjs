@@ -19,6 +19,7 @@ import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import * as sharedModule from "@pi-desktop/shared";
 import { readTranscriptSource } from "./helpers/source-contracts.mjs";
 
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), "utf8");
@@ -93,6 +94,7 @@ const translate = () => ({
 });
 
 const previewTarget = loadModule("../src/hooks/use-preview-target.ts", {
+  "@pi-desktop/shared": sharedModule,
   react: React,
   "react-i18next": { useTranslation: translate },
   "../stores/app-store": { useAppStore: (selector) => selector(state) },
@@ -251,6 +253,7 @@ test("the menu a reference opens carries the reveal and both copies", () => {
     calls.menus.map((menu) => menu.items.map((item) => [item.id, item.label])),
     [
       [
+        ["save-to-space", "space.saveToSpaceMenu:"],
         ["reveal-in-folder", "chat.revealFileInFolder:"],
         ["copy-full-path", "chat.copyFullPath:"],
         ["copy-relative-path", "chat.copyRelativePath:"],

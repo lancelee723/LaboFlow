@@ -1,5 +1,6 @@
-import { type CSSProperties, lazy, type ReactNode, Suspense } from "react";
+import { type CSSProperties, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
 import { ChatSurface } from "../../components/ChatSurface";
+import { useAppStore } from "../../stores/app-store";
 import { ConversationTopbar } from "../../components/ConversationTopbar";
 import { ExtensionPromptHost } from "../../components/ExtensionPromptDialog";
 import { PluginRendererHost } from "../../plugins/renderer-host/PluginRendererHost";
@@ -23,9 +24,15 @@ import { PortalVisibilityProvider } from "../../lib/portal-visibility";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
 
+import { SaveToSpaceDialog } from "../../components/space/SaveToSpaceDialog";
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
     default: module.SettingsPage,
+  })),
+);
+const AssistantPage = lazy(() =>
+  import("../../pages/AssistantPage").then((module) => ({
+    default: module.AssistantPage,
   })),
 );
 const ScheduledPage = lazy(() =>
@@ -82,7 +89,18 @@ export function AppShell() {
     sidebarToggleShortcut,
     workPanelToggleTooltip,
   } = useAppShellRuntime();
+  const showToast = useAppStore((state) => state.showToast);
   useCopyTex();
+  const [saveToSpacePath, setSaveToSpacePath] = useState<string | null>(null);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<{ path: string }>).detail;
+      if (detail?.path) setSaveToSpacePath(detail.path);
+    };
+    window.addEventListener("laboflow:save-to-space", open);
+    return () => window.removeEventListener("laboflow:save-to-space", open);
+  }, []);
+
 
   // A boot that never reaches the shell gets a surface it can act on instead of
   // a window that only knows how to wait (issue #831). Rendered as a direct child
@@ -240,7 +258,11 @@ export function AppShell() {
                 )}
 
                 <Suspense fallback={<RoutePending />}>
-                  {page === "scheduled" ? (
+                  {page === "assistant" ? (
+                    <Suspense fallback={null}>
+                      <AssistantPage />
+                    </Suspense>
+                  ) : page === "scheduled" ? (
                     <div className="route-surface route-page">
                       <ScheduledPage />
                     </div>
@@ -303,7 +325,16 @@ export function AppShell() {
   }
 
   return (
-    <div
+    <>
+      {saveToSpacePath ? (
+        <SaveToSpaceDialog
+          filePath={saveToSpacePath}
+          fileName={saveToSpacePath.split("/").pop() ?? "file"}
+          onClose={() => setSaveToSpacePath(null)}
+          showToast={(message, opts) => showToast(message, opts ?? {})}
+        />
+      ) : null}
+      <div
       ref={appShellRef}
       className={cx(
         "app-shell",
@@ -328,6 +359,8 @@ export function AppShell() {
       <ProjectCreateDialog />
       {splash}
       {startupRecovery}
+      {saveToSpacePath ? null : null}
     </div>
+    </>
   );
 }

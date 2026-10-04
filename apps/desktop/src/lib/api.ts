@@ -1840,6 +1840,44 @@ export const api = {
     );
   },
 
+  // --- Module 04: IM channels (registry-owned; credentials never returned) ---
+  channelsList: () =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView[]>(
+      IPC.invoke.channelsList,
+    ),
+  channelsSave: (
+    input: import("@pi-desktop/shared").ChannelAccountSaveInput,
+  ) =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView>(
+      IPC.invoke.channelsSave,
+      input,
+    ),
+  channelsDelete: (accountId: string) =>
+    invoke<void>(IPC.invoke.channelsDelete, accountId),
+  channelsConnect: (accountId: string) =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView>(
+      IPC.invoke.channelsConnect,
+      accountId,
+    ),
+  channelsDisconnect: (accountId: string) =>
+    invoke<import("@pi-desktop/shared").ChannelAccountView>(
+      IPC.invoke.channelsDisconnect,
+      accountId,
+    ),
+  channelsTest: (accountId: string) =>
+    invoke<import("@pi-desktop/shared").ChannelTestResult>(
+      IPC.invoke.channelsTest,
+      accountId,
+    ),
+  onChannelState: (
+    listener: (event: import("@pi-desktop/shared").ChannelStateEvent) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.channelState, (payload) =>
+      listener((payload ?? {}) as import("@pi-desktop/shared").ChannelStateEvent),
+    );
+  },
+
   // --- Module 02: Team Spaces (T52.4-11; SPEC §3.5) -------------------------
   listSpaces: () =>
     invoke<import("@pi-desktop/shared").SpaceDto[]>(IPC.invoke.spaceList),
@@ -1849,6 +1887,125 @@ export const api = {
     invoke<import("@pi-desktop/shared").SpaceNode[]>(IPC.invoke.spaceTree, {
       spaceId,
     }),
+  spaceSaveFromPath: (input: {
+    path: string;
+    spaceId: string;
+    parentId?: string | null;
+    name?: string;
+  }) =>
+    invoke<{ nodeId: string; name: string; versionNo: number; size: number; sha256: string }>(
+      IPC.invoke.spaceSaveFromPath,
+      input,
+    ),
+  spaceFileUpload: (input: {
+    spaceId: string;
+    nodeId?: string;
+    parentId?: string | null;
+    name?: string;
+    contentBase64: string;
+  }) =>
+    invoke<{ nodeId: string; name: string; versionNo: number; size: number; sha256: string }>(
+      IPC.invoke.spaceFileUpload,
+      input,
+    ),
+  spaceMembersList: (input: { spaceId: string }) =>
+    invoke<Array<{ userId: string; username: string; displayName: string | null; perm: string; createdAt: string }>>(
+      IPC.invoke.spaceMembersList,
+      input,
+    ),
+  spaceMembersAdd: (input: { spaceId: string; userId: string; perm: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceMembersAdd, input),
+  spaceMembersUpdate: (input: { spaceId: string; userId: string; perm: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceMembersUpdate, input),
+  spaceMembersRemove: (input: { spaceId: string; userId: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceMembersRemove, input),
+  spaceInviteCreate: (
+    input: { spaceId: string; perm?: string; expiresInDays?: number; maxUses?: number | null },
+  ) => invoke<{ id: string; token: string; perm: string; expiresAt: string | null }>(IPC.invoke.spaceInviteCreate, input),
+  spaceInviteRedeem: (input: { token: string }) =>
+    invoke<{ spaceId: string; perm: string }>(IPC.invoke.spaceInviteRedeem, input),
+  spaceNotificationsPull: (input: { since?: string }) =>
+    invoke<Array<{ id: string; spaceId: string; nodeId: string; kind: string; payload: Record<string, unknown>; readAt: string | null; createdAt: string }>>(
+      IPC.invoke.spaceNotificationsPull,
+      input,
+    ),
+  spaceNotificationsRead: (input: { ids: string[] }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceNotificationsRead, input),
+  assistantSessionGet: () => invoke<{ sessionId: string; created: boolean }>(IPC.invoke.assistantSessionGet),
+  assistantHistory: (input: { sessionId: string }) =>
+    invoke<Array<{ role?: string; content?: string; createdAt?: string }>>(IPC.invoke.assistantHistory, input),
+  assistantSend: (input: { sessionId: string; text: string }) =>
+    invoke<{ started: true }>(IPC.invoke.assistantSend, input),
+  onAssistantTurnDone: (
+    listener: (payload: { sessionId: string; status: string; finalText?: string; error?: string }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.assistantTurnDone, (payload) =>
+      listener(
+        (payload ?? {}) as { sessionId: string; status: string; finalText?: string; error?: string },
+      ),
+    );
+  },
+  assistantWebhookGet: () =>
+    invoke<{ running: boolean; port: number | null; lanOpen: boolean; secretSet: boolean; secretPreview: string }>(
+      IPC.invoke.assistantWebhookGet,
+    ),
+  assistantWebhookSet: (input: { port?: number; lanOpen?: boolean }) =>
+    invoke<{ running: boolean; port: number | null; lanOpen: boolean; secretSet: boolean; secretPreview: string }>(
+      IPC.invoke.assistantWebhookSet,
+      input,
+    ),
+  spaceClip: (input: { url: string }) =>
+    invoke<{
+      url: string;
+      title: string;
+      contentHtml: string;
+      textContent: string;
+      byline: string;
+      clippedAt: string;
+    }>(IPC.invoke.spaceClip, input),
+  spaceYjsAttach: (input: { spaceId: string; nodeId: string }) =>
+    invoke<{ channel: string }>(IPC.invoke.spaceYjsAttach, input),
+  spaceYjsDetach: (input: { channel: string }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceYjsDetach, input),
+  spaceYjsSend: (input: { channel: string; data: ArrayBuffer }) =>
+    invoke<{ ok: true }>(IPC.invoke.spaceYjsSend, input),
+  onSpaceYjsFrame: (
+    listener: (frame: {
+      channel: string;
+      data?: ArrayBuffer;
+      closed?: { code: number; reason: string };
+    }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.spaceYjsFrame, (payload) =>
+      listener((payload ?? {}) as {
+        channel: string;
+        data?: ArrayBuffer;
+        closed?: { code: number; reason: string };
+      }),
+    );
+  },
+  spaceSearch: (input: { spaceId: string; query: string; limit?: number }) =>
+    invoke<Array<Record<string, unknown>>>(IPC.invoke.spaceSearch, input),
+  spaceFileVersions: (input: { spaceId: string; nodeId: string }) =>
+    invoke<Array<Record<string, unknown>>>(IPC.invoke.spaceFileVersions, input),
+  spaceFileDownload: (input: { spaceId: string; nodeId: string; version?: number }) =>
+    invoke<{
+      name: string;
+      contentBase64: string;
+      sha256: string;
+      versionNo: number;
+    } | null>(IPC.invoke.spaceFileDownload, input),
+  composerAttachSpaceDoc: (input: {
+    sessionId: string;
+    spaceId: string;
+    nodeId: string;
+  }) =>
+    invoke<{ files: Array<{ path: string; name: string; kind: string }> }>(
+      IPC.invoke.composerAttachSpaceDoc,
+      input,
+    ),
   spaceNodeCreate: (input: {
     spaceId: string;
     parentId: string | null;

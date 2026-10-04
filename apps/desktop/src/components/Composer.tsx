@@ -527,6 +527,44 @@ export function Composer({
     }
   };
 
+  /** Team-space source (FR-TC-17): snapshot a server-side space document into
+   * this session as a scratch file and splice its chip at the caret. */
+  const attachSpaceDocContext = async (
+    spaceId: string,
+    spaceName: string,
+    node: { id: string; name: string },
+  ) => {
+    try {
+      const ownerSessionId = referenceSessionId || (await materializeDraftSession());
+      if (!ownerSessionId) throw new Error("session unavailable");
+      const saved = await api.composerAttachSpaceDoc({
+        sessionId: ownerSessionId,
+        spaceId,
+        nodeId: node.id,
+      });
+      const files = (saved as { files?: Array<{ path: string; name: string }> })
+        .files ?? [];
+      const text = valueRef.current;
+      const caret = text.length;
+      const tokens = files.map(() => nextChipToken());
+      const inserted = tokens.join("");
+      const nextText = `${text}${inserted}`;
+      const references = files.map((file, i) =>
+        createFileReference(file.path, file.name, ownerSessionId, {
+          kind: "file",
+          token: tokens[i],
+        }),
+      );
+      applyEditorDraft(nextText, references, caret + inserted.length);
+      showToast(i18n.t("chat.spaceDocAttached", {
+        defaultValue: "Attached {{name}}",
+        name: node.name || spaceName,
+      }), { variant: "success" });
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), { variant: "error" });
+    }
+  };
+
   const completions = useComposerCompletions({
     value,
     cursor,
@@ -663,6 +701,7 @@ export function Composer({
             pasting={pasting}
             pickAndAttach={pickAndAttach}
             onAttachSession={attachSessionContext}
+            onAttachSpaceDoc={attachSpaceDocContext}
             insertComposerText={insertComposerText}
             configureActiveSession={configureActiveSession}
             showToast={showToast}

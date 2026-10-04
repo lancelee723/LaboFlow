@@ -14,6 +14,7 @@ import { Badge, Button, cx } from "../components/ui";
 import {
   IconArchive,
   IconArchiveRestore,
+  IconGlobe,
   IconNewProject,
   IconPlus,
   IconRefresh,
@@ -21,18 +22,20 @@ import {
   IconUser,
   IconUsers,
 } from "../components/icons";
-import { SpaceTree } from "../components/space/SpaceTree";
+import { NodeTypeIcon, SpaceTree } from "../components/space/SpaceTree";
 import { MdDocEditor } from "../components/space/MdDocEditor";
 import { CsvEditor } from "../components/space/CsvEditor";
 import { HtmlCollabEditor } from "../components/space/HtmlCollabEditor";
 import { CommentSidebar, groupThreads } from "../components/space/CommentSidebar";
 import { RevisionPanel } from "../components/space/RevisionPanel";
+import { SpaceSharePanel } from "../components/space/SpaceSharePanel";
 
 type PromptDialog =
   | { kind: "new-space"; value: string }
   | { kind: "new-node"; parentId: string | null; types: SpaceNodeType[]; value: string; nodeType: SpaceNodeType }
   | { kind: "rename"; node: SpaceNode; value: string }
-  | { kind: "confirm-delete"; node: SpaceNode };
+  | { kind: "confirm-delete"; node: SpaceNode }
+  | { kind: "clip"; value: string };
 
 /**
  * Team Spaces page (T52.4-10 client slice, FR-TC-01/03/08/09/10/20 v1):
@@ -122,6 +125,144 @@ export function SpacePage() {
       fail(error);
     }
   }, [activeSpaceId, fail]);
+
+  /** T52.5 upload: read chosen files, land them as file nodes under the
+   * selected folder (or the current node's parent), then select the last one. */
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const uploadChosen = async (files: FileList | null) => {
+    if (!files?.length || !activeSpaceId || uploading) return;
+    const parentId = selectedNode
+      ? selectedNode.type === "folder"
+        ? selectedNode.id
+        : selectedNode.parentId
+      : null;
+    setUploading(true);
+    try {
+      let lastNodeId = "";
+      for (const file of Array.from(files)) {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        const result = await api.spaceFileUpload({
+          spaceId: activeSpaceId,
+          parentId,
+          name: file.name,
+          contentBase64: btoa(binary),
+        });
+        lastNodeId = result.nodeId;
+      }
+      await loadTree();
+      if (lastNodeId) {
+        setSelectedId(lastNodeId);
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          if (parentId) next.add(parentId);
+          return next;
+        });
+      }
+      showToast(t("space.uploadDone", { count: files.length }), { variant: "success" });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
+
+  // FR-TC-21: space-scoped full-text search (debounced, visibility-filtered
+  // server-side). Results replace the tree while a query is active.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<Record<string, unknown>>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query || !activeSpaceId) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      let cancelled = false;
+      api
+        .spaceSearch({ spaceId: activeSpaceId, query })
+        .then((hits) => {
+          if (!cancelled) setSearchResults(hits ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearchLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, activeSpaceId]);
+
+  /** T52.5 clip: main fetches + Readability-parses; we create an html node
+   * and hand the article HTML to the editor as its initial seed. */
+  const [clipSeed, setClipSeed] = useState<{ nodeId: string; html: string } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  useEffect(() => {
+    if (!activeSpaceId) return;
+    let stop = false;
+    let cursor: string | undefined;
+    const poll = async () => {
+      try {
+        const rows = await api.spaceNotificationsPull({ since: cursor });
+        if (stop) return;
+        if (rows.length) {
+          cursor = rows[rows.length - 1]!.createdAt;
+          setUnreadNotifications((count) => count + rows.length);
+          const first = rows[0] as { kind?: string };
+          if (first.kind === "revision.review-requested") {
+            showToast(t("space.revisions.reviewRequested"), { variant: "info" });
+          }
+          void api.spaceNotificationsRead({ ids: rows.map((row) => row.id) }).catch(() => undefined);
+        }
+      } catch {
+        // org unreachable: silent — the offline banner already shows
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 8000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [activeSpaceId, showToast, t]);
+  const runClip = async (url: string) => {
+    if (!activeSpaceId) return;
+    try {
+      const article = await api.spaceClip({ url });
+      const parentId = selectedNode
+        ? selectedNode.type === "folder"
+          ? selectedNode.id
+          : selectedNode.parentId
+        : null;
+      const node = await api.spaceNodeCreate({
+        spaceId: activeSpaceId,
+        parentId,
+        type: "html",
+        name: article.title || article.url,
+      });
+      await loadTree();
+      setSelectedId(node.id);
+      setClipSeed({ nodeId: node.id, html: article.contentHtml });
+      showToast(t("space.clipDone", { title: article.title }), { variant: "success" });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    }
+  };
 
   const loadComments = useCallback(async () => {
     if (!activeSpaceId || !selectedId) {
@@ -241,6 +382,10 @@ export function SpacePage() {
         if (!name) throw new Error(t("space.nameRequired"));
         await api.spaceNodeRename({ spaceId: activeSpaceId, nodeId: dialog.node.id, name });
         await loadTree();
+      } else if (dialog.kind === "clip") {
+        if (!activeSpaceId) return;
+        if (!dialog.value.trim()) throw new Error(t("space.clipUrlRequired"));
+        await runClip(dialog.value.trim());
       } else if (dialog.kind === "confirm-delete") {
         if (!activeSpaceId) return;
         await api.spaceNodeDelete({ spaceId: activeSpaceId, nodeId: dialog.node.id });
@@ -355,6 +500,7 @@ export function SpacePage() {
     if (current.kind === "rename") return t("space.rename");
     if (current.kind === "confirm-delete")
       return t("space.deleteConfirm", { name: current.node.name });
+    if (current.kind === "clip") return t("space.clip");
     return current.parentId ? t("space.newChild") : t("space.newDoc");
   };
 
@@ -434,23 +580,45 @@ export function SpacePage() {
             </span>
             <span className="flex items-center gap-0.5">
               {!recycleMode && activeSpaceId && !activeSpace?.archivedAt && activeSpace?.myPerm !== "viewer" ? (
-                <button
-                  type="button"
-                  className="rounded-sm p-1 opacity-70 hover:opacity-100"
-                  title={t("space.newDoc")}
-                  aria-label={t("space.newDoc")}
-                  onClick={() =>
-                    setDialog({
-                      kind: "new-node",
-                      parentId: null,
-                      types: ["folder", "md", "csv", "html"],
-                      value: "",
-                      nodeType: "md",
-                    })
-                  }
-                >
-                  <IconPlus size={13} />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="rounded-sm p-1 opacity-70 hover:opacity-100"
+                    title={t("space.newDoc")}
+                    aria-label={t("space.newDoc")}
+                    onClick={() =>
+                      setDialog({
+                        kind: "new-node",
+                        parentId: null,
+                        types: ["folder", "md", "csv", "html"],
+                        value: "",
+                        nodeType: "md",
+                      })
+                    }
+                  >
+                    <IconPlus size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-sm p-1 opacity-70 hover:opacity-100"
+                    title={t("space.share.title")}
+                    aria-label={t("space.share.title")}
+                    data-testid="space-share-button"
+                    onClick={() => setShareOpen((value) => !value)}
+                  >
+                    <IconUsers size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-sm p-1 opacity-70 hover:opacity-100"
+                    title={t("space.clip")}
+                    aria-label={t("space.clip")}
+                    data-testid="space-clip-button"
+                    onClick={() => setDialog({ kind: "clip", value: "" })}
+                  >
+                    <IconGlobe size={13} />
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"
@@ -498,6 +666,30 @@ export function SpacePage() {
                 ))}
               </ul>
             )
+          ) : searchQuery.trim() ? (
+            <ul className="min-h-0 flex-1 overflow-auto text-sm" data-testid="space-search-results">
+              {searchResults.map((hit) => (
+                <li key={String(hit.id)}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left hover:bg-black/5"
+                    onClick={() => {
+                      setSelectedId(String(hit.id));
+                      setSearchQuery("");
+                    }}
+                  >
+                    <NodeTypeIcon type={String(hit.type) as SpaceNode["type"]} />
+                    <span className="truncate">{String(hit.name)}</span>
+                    <span className="ml-auto text-[10px] opacity-50">
+                      {t(hit.matchedIn === "title" ? "space.searchTitle" : "space.searchContent")}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {!searchResults.length && !searchLoading ? (
+                <li className="px-2 py-1 text-xs opacity-60">{t("space.searchEmpty")}</li>
+              ) : null}
+            </ul>
           ) : (
             <SpaceTree
               nodes={nodes}
@@ -530,14 +722,35 @@ export function SpacePage() {
             />
           )}
 
-          <span className="mt-auto text-center text-xs opacity-40" title={t("space.uploadNextBatch")}>
+          {activeSpaceId && !recycleMode ? (
+            <input
+              type="search"
+              className="w-full rounded-md border px-2 py-1 text-xs"
+              style={{ borderColor: "var(--ds-border)" }}
+              placeholder={t("space.searchPlaceholder")}
+              value={searchQuery}
+              data-testid="space-search-input"
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          ) : null}
+
+          <span className="mt-auto text-center text-xs opacity-40">
+            <input
+              ref={uploadInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              data-testid="space-upload-input"
+              onChange={(event) => void uploadChosen(event.target.files)}
+            />
             <button
               type="button"
-              className="w-full rounded-sm border border-dashed px-2 py-1.5 opacity-70"
-              disabled
-              title={t("space.uploadNextBatch")}
+              className="w-full rounded-sm border border-dashed px-2 py-1.5 opacity-70 enabled:hover:opacity-100"
+              disabled={!activeSpaceId || Boolean(activeSpace?.archivedAt) || uploading}
+              title={t("space.upload")}
+              onClick={() => uploadInputRef.current?.click()}
             >
-              {t("space.upload")}
+              {uploading ? t("space.uploading") : t("space.upload")}
             </button>
           </span>
         </aside>
@@ -595,7 +808,11 @@ export function SpacePage() {
               onDocLoaded={setDoc}
             />
           ) : selectedNode.type === "html" ? (
-            <HtmlCollabEditor node={selectedNode} />
+            <HtmlCollabEditor
+                node={selectedNode}
+                spaceId={activeSpaceId ?? ""}
+                initialHtml={clipSeed && clipSeed.nodeId === selectedNode.id ? clipSeed.html : undefined}
+              />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center" style={{ borderColor: "var(--ds-border-strong)" }}>
               <span className="text-sm">{selectedNode.name}</span>
@@ -677,6 +894,17 @@ export function SpacePage() {
       </div>
 
       {/* ---------------- prompt / confirm dialog ---------------- */}
+      {shareOpen && activeSpaceId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShareOpen(false)}>
+          <div
+            className="w-96 max-w-full rounded-lg border bg-[color:var(--ds-bg-elevated-opaque)] p-4"
+            style={{ borderColor: "var(--ds-border-default)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <SpaceSharePanel spaceId={activeSpaceId} myPerm={activeSpace?.myPerm ?? "viewer"} onClose={() => setShareOpen(false)} />
+          </div>
+        </div>
+      ) : null}
       {dialog ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -709,7 +937,13 @@ export function SpacePage() {
                 className="field-input text-sm"
                 autoFocus
                 value={dialog.value}
-                placeholder={dialog.kind === "new-space" ? t("space.spaceName") : t("space.nodeName")}
+                placeholder={
+                  dialog.kind === "new-space"
+                    ? t("space.spaceName")
+                    : dialog.kind === "clip"
+                      ? t("space.clipUrlPlaceholder")
+                      : t("space.nodeName")
+                }
                 onChange={(event) =>
                   setDialog({ ...dialog, value: event.target.value } as PromptDialog)
                 }
@@ -732,7 +966,11 @@ export function SpacePage() {
                 disabled={busy || (dialog.kind !== "confirm-delete" && !dialog.value.trim())}
                 onClick={() => void submitDialog()}
               >
-                {dialog.kind === "confirm-delete" ? t("space.delete") : t("space.create")}
+                {dialog.kind === "confirm-delete"
+                  ? t("space.delete")
+                  : dialog.kind === "clip"
+                    ? t("space.clipGo")
+                    : t("space.create")}
               </Button>
             </div>
           </div>

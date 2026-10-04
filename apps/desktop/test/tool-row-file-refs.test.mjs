@@ -4,6 +4,7 @@ import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import * as sharedModule from "@pi-desktop/shared";
 
 /*
  * The opener a tool row's summary and a tool result's file/match list call.
@@ -61,6 +62,7 @@ let resolveFails = false;
 
 const workPanelTabs = loadModule("../src/lib/work-panel-tabs.ts", {});
 const { useOpenPreviewTarget } = loadModule("../src/hooks/use-preview-target.ts", {
+  "@pi-desktop/shared": sharedModule,
   react: React,
   "react-i18next": { useTranslation: () => ({ t: (key, values) => `${key}:${values?.name ?? ""}` }) },
   "../stores/app-store": { useAppStore: (selector) => selector(state) },

@@ -398,6 +398,7 @@ export class ChannelRegistry {
       const handle = await driver.start({
         newSession: { title: `IM·${message.senderRef}` },
         prompt: message.text,
+        unattendedPolicy: "degraded",
       });
       const result = await handle.completion;
       const finalText =

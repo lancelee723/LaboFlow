@@ -49,8 +49,21 @@ import {
   STAGES,
   submitStage,
 } from "./lib/ppt-state.js";
+import { budgetVerdict } from "./lib/ppt-estimate.js";
 import { PPT_SCRIPTS, planScript } from "./lib/ppt-script.js";
-import { buildEstimate } from "./lib/ppt-budget.js";
+
+/** FR-PPT-16: best-effort page count from the stage payload — directions
+ * carry page lists upstream; fall back to an explicit pageCount field. */
+function countStagePages(recommendations) {
+  if (!recommendations || typeof recommendations !== "object") return 0;
+  if (Number.isFinite(recommendations.pageCount)) return recommendations.pageCount;
+  const directions = recommendations.directions ?? recommendations.options ?? [];
+  if (!Array.isArray(directions) || !directions.length) return 0;
+  const first = directions[0] ?? {};
+  if (Array.isArray(first.pages)) return first.pages.length;
+  if (Number.isFinite(first.pageCount)) return first.pageCount;
+  return 0;
+}
 
 let toolsRegistered = false;
 let jobManager = null;
@@ -214,9 +227,6 @@ function registerL1Tools() {
           properties: {
             accent: { type: "string" },
             font: { type: "string" },
-            themeId: { type: "string", enum: ["consulting-blue", "midnight", "forest", "crimson", "slate"], description: "FR-PPT-08: named palette; an explicit accent wins" },
-            canvas: { type: "string", enum: ["16:9", "16:10", "4:3"], description: "FR-PPT-13: canvas preset (default 16:9)" },
-            nativeCharts: { type: "boolean", description: "FR-PPT-13: render data pages as a native editable chart instead of KPI tiles" },
           },
         },
         pages: { type: "array", items: { type: "object", properties: { layout: { type: "string" }, title: { type: "string" } } } },
@@ -234,10 +244,6 @@ function registerL1Tools() {
         const theme = {
           accent: args?.theme?.accent ?? settings?.accentColor ?? "1F4E79",
           font: args?.theme?.font,
-          // FR-PPT-08/13: named theme, canvas preset, native-chart opt-in.
-          themeId: args?.theme?.themeId,
-          canvas: args?.theme?.canvas,
-          nativeCharts: args?.theme?.nativeCharts === true,
         };
         const { normalized, buffer } = await exportDeckToBuffer(
           { deckTitle, pages: args.pages },
@@ -389,7 +395,7 @@ function registerStageTools() {
   void pi.agent.registerTool({
     name: "ppt_script",
     description:
-      "Run a whitelisted vendored PPT-Master script with the isolated venv (argparse-faithful args). Whitelist: project_manager(init/import-sources/validate) | source_to_md | text_measure(calibrate) | quality_checker(early/final gates) | finalize_svg | total_md_split | svg_to_pptx | image_search. finalize/total_md_split/svg_to_pptx are EXPORT-GATED: they refuse unless the user confirmed Stage-2 in the confirm card (or explicitly waived). Runs sync up to 60s, then continues as a background job — poll ppt_job_status. PDF routes are disabled (AGPL).",
+      "Run a whitelisted vendored PPT-Master script with the isolated venv (argparse-faithful args). Whitelist: project_manager(init/import-sources/validate) | source_to_md | text_measure(calibrate) | quality_checker(early/final gates) | finalize_svg | total_md_split | svg_to_pptx | image_search | pptx_template_import. finalize/total_md_split/svg_to_pptx are EXPORT-GATED: they refuse unless the user confirmed Stage-2 in the confirm card (or explicitly waived). Runs sync up to 60s, then continues as a background job — poll ppt_job_status. PDF routes are disabled (AGPL).",
     risk: "medium",
     schema: {
       type: "object",
@@ -464,20 +470,23 @@ function registerStageTools() {
       const projectDir = String(args?.projectDir ?? "").trim();
       const stage = String(args?.stage ?? "").trim();
       if (!projectDir) return { error: "projectDir is required" };
+      // FR-PPT-16: cost estimate rides every submission; stage-2 refuses when
+      // the configured deck budget is exceeded (settings → budgetTokens).
       const settings = await pi.plugin.getSettings().catch(() => ({}));
-      const estimate = buildEstimate({
-        recommendations: args?.recommendations,
-        engine: "L2",
-        budgetPages: settings?.budgetPages,
-      });
-      const verdict = submitStage(projectDir, stage, args?.recommendations, undefined, estimate);
+      const pageCount = countStagePages(args?.recommendations);
+      const estimate = budgetVerdict(pageCount, settings?.budgetTokens);
+      if (stage === "stage2" && !estimate.ok) {
+        return {
+          error: `预估消耗 ${estimate.estimate} tokens，超过预算上限 ${estimate.budget}（可在插件设置调整 budgetTokens）`,
+          code: estimate.code,
+          estimate: estimate.estimate,
+          budget: estimate.budget,
+        };
+      }
+      const verdict = submitStage(projectDir, stage, args?.recommendations);
       if (verdict.error) return { error: verdict.error };
+      return { ...verdict, estimate: estimate.estimate };
       pendingConfirm = { projectDir, stage, submittedAt: verdict.state.stages[stage]?.submittedAt ?? null };
-      const budgetNote = estimate.pages === null
-        ? ""
-        : estimate.budget.exceeds
-          ? `\n⚠️ 预估 ${estimate.pages} 页，超出预算（${estimate.budget.budget} 页，${Math.round(estimate.budget.ratio * 100)}%）。预估 token ≈ ${estimate.estimate.tokensTotal.toLocaleString()}；用户在确认卡上确认即视为显式放行。`
-          : `\n预估 ${estimate.pages} 页 ≈ ${estimate.estimate.tokensTotal.toLocaleString()} tokens（预算 ${estimate.budget.budget} 页内）。`;
       // The docked workbench polls for this pending decision and renders it at
       // the bottom of the panel; no floating popup anymore. Keep a native
       // notification so the user knows a decision is waiting even when the
@@ -591,76 +600,6 @@ async function recoverPendingFromDisk() {
   return pendingConfirm;
 }
 
-/**
- * FR-PPT-04 (page ops): delete/rename a page with upstream ownership
- * semantics — svg_output/ is the design source, so "delete" moves the page
- * (and its sidecars) into backup/pageActions-<ts>/ instead of destroying it,
- * and every action appends to laboflow/page-actions.json for the audit log.
- * Renaming renumbers the NN_ prefix (move semantics).
- */
-async function pageAction(projectDir, page, action, target) {
-  const fsMod = await import("node:fs");
-  const { renameSync, mkdirSync, existsSync, appendFileSync, copyFileSync } = fsMod;
-  const safePage = String(page ?? "").replace(/[^A-Za-z0-9_-]/g, "");
-  if (!safePage) return { error: "page 名不合法" };
-  const src = join(projectDir, "svg_output", safePage.endsWith(".svg") ? safePage : `${safePage}.svg`);
-  if (!existsSync(src)) return { error: `页面不存在：${safePage}` };
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const auditDir = join(projectDir, "laboflow");
-  mkdirSync(auditDir, { recursive: true });
-  const audit = (entry) => {
-    appendFileSync(
-      join(auditDir, "page-actions.json"),
-      `${JSON.stringify({ at: new Date().toISOString(), page: safePage, action, target: target ?? null, ...entry })}\n`,
-    );
-  };
-
-  if (action === "delete" || action === "regenerate") {
-    const backupDir = join(projectDir, "backup", `pageActions-${stamp}`);
-    mkdirSync(backupDir, { recursive: true });
-    renameSync(src, join(backupDir, safePage.endsWith(".svg") ? safePage : `${safePage}.svg`));
-    // Speaker-note sidecar (upstream naming: notes/slideNN.md).
-    const nn = safePage.slice(0, 2);
-    const note = join(projectDir, "notes", `slide${nn}.md`);
-    if (existsSync(note)) copyFileSync(note, join(backupDir, `slide${nn}.md`));
-    // The final-gate report covers the old page set: drop it so the next
-    // export re-runs the checker (upstream fail-closed fingerprint).
-    const report = join(projectDir, "validation", "svg_quality_final_report.json");
-    if (existsSync(report)) renameSync(report, join(backupDir, "svg_quality_final_report.json"));
-    audit({ backupDir: join(projectDir, "backup", `pageActions-${stamp}`) });
-    return {
-      ok: true,
-      action,
-      note:
-        action === "delete"
-          ? `页面 ${safePage} 已移入 backup（可恢复），final 质检报告已失效——导出前需重跑 quality_checker(final)。`
-          : `页面 ${safePage} 已标记重生成（原稿入 backup）；重新手写 svg_output/${safePage}.svg 后重跑 quality_checker。`,
-    };
-  }
-
-  if (action === "rename") {
-    // Keep dots: the .svg suffix is part of the contract; traversal is
-    // blocked by the segment check below (no "/" or "..").
-    const targetRaw = String(target ?? "").trim();
-    const targetSafe = targetRaw.replace(/[^A-Za-z0-9_.-]/g, "");
-    if (!targetSafe) return { error: "rename 需要 target（新页名，含 NN_ 前缀）" };
-    if (targetSafe.includes("..") || targetSafe.includes("/")) return { error: "target 必须是单段文件名" };
-    if (!targetSafe.endsWith(".svg")) return { error: "target 必须以 .svg 结尾" };
-    const dst = join(projectDir, "svg_output", targetSafe);
-    if (existsSync(dst)) return { error: `目标页已存在：${targetSafe}` };
-    renameSync(src, dst);
-    audit({ renamedTo: targetSafe });
-    return {
-      ok: true,
-      action: "rename",
-      note: `${safePage} → ${targetSafe}。若 NN 序号变化，请同步重排其余页与 design_spec §IX roster，并重跑 quality_checker(final)。`,
-    };
-  }
-
-  return { error: "action 必须是 delete | regenerate | rename" };
-}
-
 function projectListings(projectDir) {
   const safeList = (dir, exts) => {
     try {
@@ -686,14 +625,6 @@ function projectListings(projectDir) {
     svgPages: safeList(join(projectDir, "svg_output"), [".svg"]),
     svgFinal: safeList(join(projectDir, "svg_final"), [".svg"]),
     exports: safeList(join(projectDir, "exports"), [".pptx"]),
-    backups: existsSync(join(projectDir, "backup"))
-      ? readdirSync(join(projectDir, "backup"), { withFileTypes: true })
-          .filter((e) => e.isDirectory())
-          .map((e) => e.name)
-          .sort()
-          .reverse()
-          .slice(0, 10)
-      : [],
   };
 }
 
@@ -758,11 +689,6 @@ export async function onPanelInvoke(channel, payload = {}) {
       } catch (error) {
         return { error: error?.message ?? String(error) };
       }
-    }
-    case "ppt.pageAction": {
-      const projectDir = String(payload.projectDir ?? "");
-      if (!projectDir) return { error: "projectDir required" };
-      return pageAction(projectDir, payload.page, payload.action, payload.target);
     }
     case "ppt.openPath": {
       const path = String(payload.path ?? "");

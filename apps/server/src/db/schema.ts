@@ -302,6 +302,61 @@ export const spaceDocVersions = pgTable(
   (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
 );
 
+/** FR-PPT-14 组织模板包：管理台发布 → bootstrap slideTemplates[] 下发。 */
+export const orgSlideTemplates = pgTable(
+  'org_slide_templates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orgId: text('org_id').notNull().default('default'),
+    name: text('name').notNull(),
+    version: integer('version').notNull().default(1),
+    contract: jsonb('contract').notNull().default({}), // Brand/Style/Layout 蒸馏契约
+    usageNote: text('usage_note').notNull().default(''),
+    storageKey: text('storage_key').notNull(), // 卷上的模板包 zip/目录
+    enabled: boolean('enabled').notNull().default(true),
+    publishedBy: uuid('published_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+/** 组织级设置（FR-TC-06：协作范围闸口）。单组织部署：id 固定 'default'。 */
+export const orgSettings = pgTable('org_settings', {
+  id: text('id').primaryKey(), // 'default'
+  allowExternalCollab: boolean('allow_external_collab').notNull().default(false),
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** 空间内通知（FR-TC-10：按评论修订完成后通知评论者复核）。 */
+export const spaceNotifications = pgTable(
+  'space_notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    spaceId: uuid('space_id').notNull(),
+    nodeId: uuid('node_id').notNull(),
+    kind: text('kind').notNull(), // revision.review-requested
+    payload: jsonb('payload').notNull().default({}),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+/** file 节点的二进制版本：内容落卷（storageKey），元数据在 PG（T52.5 上传）。 */
+export const spaceFileVersions = pgTable(
+  'space_file_versions',
+  {
+    nodeId: uuid('node_id').notNull(),
+    version: integer('version').notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    storageKey: text('storage_key').notNull(),
+    uploadedBy: uuid('uploaded_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.nodeId, t.version] })],
+);
+
 export const comments = pgTable('comments', {
   id: uuid('id').defaultRandom().primaryKey(),
   nodeId: uuid('node_id').notNull(),

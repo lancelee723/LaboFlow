@@ -22,6 +22,7 @@ import { KbServerService, KbError, type KbPatchInput } from './kb/kb.service.js'
 import { SecretBox } from './kb/secret-box.js';
 import { ExpertPackService, ExpertPackError } from './experts/expert-packs.service.js';
 import { SpaceService, SpaceError } from './spaces/spaces.service.js';
+import { YjsHub } from './spaces/yjs-hub.js';
 import { WechatMpService, WechatMpError, type WechatMpUpsertInput } from './wechat/wechat-mp.service.js';
 import type { WechatFetchLike } from './wechat/wechat-mp.client.js';
 import { SERVER_VERSION } from './index.js';
@@ -42,6 +43,8 @@ export interface ServerDeps {
   kb: KbServerService;
   expertPacks: ExpertPackService;
   spaces: SpaceService;
+  yjsHub: YjsHub;
+  storageDir: string;
   wechatMp: WechatMpService;
 }
 
@@ -411,6 +414,11 @@ class CoreController {
     // Module 01 组织专家库下发（FR-E-18）：enabled 的专家/专家团定义包
     // [{kind, name, payload, version}]；客户端落为只读副本（source=org）。
     const expertPacks = await this.deps.expertPacks.deliveryFor();
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const slideTemplates = await this.deps.db.select({
+      id: orgSlideTemplates.id, name: orgSlideTemplates.name, version: orgSlideTemplates.version,
+      contract: orgSlideTemplates.contract, usageNote: orgSlideTemplates.usageNote,
+    }).from(orgSlideTemplates).where(eq(orgSlideTemplates.enabled, true));
     return {
       org: { name: 'LaboFlow Org', teamId: actor.teamId, teamName },
       me: { userId: actor.userId, username: user.username, displayName: user.displayName, role: actor.role },
@@ -420,6 +428,7 @@ class CoreController {
       policyFloor,
       orgSkills: skills,
       kbServers,
+      slideTemplates,
       expertPacks,
     };
   }
@@ -497,6 +506,61 @@ class CoreController {
       if (err instanceof KbError) throw new HttpException(err.message, err.status);
       throw err;
     }
+  }
+
+  // ----- FR-PPT-14 组织模板包：发布/列表/bootstrap 下发 -----
+  @Post('org/slide-templates')
+  @HttpCode(200)
+  async publishSlideTemplate(@Req() req: FastifyRequest, @Body() body: { name?: string; contract?: unknown; usageNote?: string; contentBase64?: string }) {
+    const actor = requireActor(req);
+    if (actor.role !== 'sys_admin' && actor.role !== 'team_admin') throw new HttpException('仅管理员可发布模板包', 403);
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const content = Buffer.from(String(body.contentBase64 ?? ''), 'base64');
+    if (!content.length) throw new HttpException('模板包内容为空', 422);
+    const [row] = await this.deps.db.insert(orgSlideTemplates).values({
+      name: String(body.name ?? 'template'),
+      contract: (body.contract ?? {}) as object,
+      usageNote: String(body.usageNote ?? ''),
+      storageKey: 'pending',
+      publishedBy: actor.userId,
+    }).returning();
+    const key = path.join(this.deps.storageDir, 'slide-templates', row!.id, 'v1');
+    fs.mkdirSync(path.dirname(key), { recursive: true });
+    fs.writeFileSync(key, content);
+    await this.deps.db.update(orgSlideTemplates).set({ storageKey: key }).where(eq(orgSlideTemplates.id, row!.id));
+    return { id: row!.id, name: row!.name, version: row!.version };
+  }
+
+  @Get('org/slide-templates')
+  async listSlideTemplates() {
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const rows = await this.deps.db.select({
+      id: orgSlideTemplates.id, name: orgSlideTemplates.name, version: orgSlideTemplates.version,
+      contract: orgSlideTemplates.contract, usageNote: orgSlideTemplates.usageNote, enabled: orgSlideTemplates.enabled,
+    }).from(orgSlideTemplates);
+    return rows;
+  }
+
+  @Delete('org/slide-templates/:id')
+  async deleteSlideTemplate(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const actor = requireActor(req);
+    if (actor.role !== 'sys_admin' && actor.role !== 'team_admin') throw new HttpException('仅管理员可删除模板包', 403);
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    await this.deps.db.update(orgSlideTemplates).set({ enabled: false }).where(eq(orgSlideTemplates.id, id));
+    return { ok: true };
+  }
+
+  /** 模板包内容下发（成员端拉取，24h 语义之外的直读）。 */
+  @Get('org/slide-templates/:id/content')
+  async slideTemplateContent(@Req() req: FastifyRequest, @Param('id') id: string) {
+    requireActor(req);
+    const { orgSlideTemplates } = await import('./db/schema.js');
+    const [row] = await this.deps.db.select().from(orgSlideTemplates).where(eq(orgSlideTemplates.id, id)).limit(1);
+    if (!row || !row.enabled) throw new HttpException('模板包不存在', 404);
+    const fs = await import('node:fs');
+    return { name: row.name, contract: row.contract, contentBase64: fs.readFileSync(row.storageKey).toString('base64') };
   }
 
   // ----- Module 01 组织专家库 (T51.8, FR-E-18/19)：发布/版本/bootstrap 下发 -----
@@ -635,6 +699,67 @@ class CoreController {
     return this.space(this.deps.spaces.tree(id, { userId: actor.userId, teamId: actor.teamId }));
   }
 
+  /** 空间内全文检索（FR-TC-21）：标题 + MD/CSV 正文，仅可见节点。 */
+  @Get('spaces/:id/search')
+  async searchSpace(@Req() req: FastifyRequest & { query: Record<string, string> }, @Param('id') id: string) {
+    const actor = requireActor(req);
+    const q = String((req.query as { q?: string }).q ?? '');
+    const limit = Number((req.query as { limit?: string }).limit ?? '');
+    return this.space(this.deps.spaces.search(id, { userId: actor.userId, teamId: actor.teamId }, q, Number.isFinite(limit) ? limit : undefined));
+  }
+
+  /** 文件上传（T52.5）：body.file 透传 base64（≤200MB，同交付物约束）。
+   *  multipart 由外层网关处理时走 @FastifyMulticast；这里只收 JSON。 */
+  @Post('spaces/:id/files')
+  @HttpCode(200)
+  async uploadSpaceFile(
+    @Req() req: FastifyRequest & { raw: { bodyLimit?: number } },
+    @Param('id') id: string,
+    @Body() body: { nodeId?: string; parentId?: string | null; name?: string; contentBase64?: string },
+  ) {
+    const actor = requireActor(req);
+    try {
+      return await this.deps.spaces.uploadFile(id, { userId: actor.userId, teamId: actor.teamId }, {
+        nodeId: body.nodeId,
+        parentId: body.parentId ?? null,
+        name: body.name,
+        contentBase64: String(body.contentBase64 ?? ''),
+      });
+    } catch (err) {
+      if (err instanceof SpaceError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  @Get('spaces/:id/files/:nid/versions')
+  async spaceFileVersions(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string) {
+    const actor = requireActor(req);
+    try {
+      return await this.deps.spaces.listFileVersions(id, { userId: actor.userId, teamId: actor.teamId }, nid);
+    } catch (err) {
+      if (err instanceof SpaceError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
+  @Get('spaces/:id/files/:nid/download')
+  async downloadSpaceFile(
+    @Req() req: FastifyRequest & { query: Record<string, string> },
+    @Param('id') id: string,
+    @Param('nid') nid: string,
+  ) {
+    const actor = requireActor(req);
+    const version = (req.query as { version?: string }).version ? Number((req.query as { version?: string }).version) : undefined;
+    try {
+      const r = await this.deps.spaces.downloadFile(id, { userId: actor.userId, teamId: actor.teamId }, nid, version);
+      if (!r) throw new HttpException('版本不存在', 404);
+      return r;
+    } catch (err) {
+      if (err instanceof SpaceError) throw new HttpException(err.message, err.status);
+      throw err;
+    }
+  }
+
   @Patch('spaces/:id/nodes/:nid')
   async updateSpaceNode(@Req() req: FastifyRequest, @Param('id') id: string, @Param('nid') nid: string, @Body() body: { name?: string; parentId?: string | null; sortKey?: number }) {
     const actor = requireActor(req);
@@ -718,6 +843,39 @@ class CoreController {
     return this.space(this.deps.spaces.resolveComment(id, { userId: actor.userId, teamId: actor.teamId }, nid, cid, {
       status: body.status ?? 'resolved',
     }));
+  }
+
+  // ----- 组织设置（FR-TC-06 协作范围闸口；读取全员，写入仅管理员） -----
+  @Get('org/settings')
+  async getOrgSettings() {
+    return this.deps.spaces.getOrgSettings();
+  }
+
+  @Put('org/settings')
+  async updateOrgSettings(@Req() req: FastifyRequest, @Body() body: { allowExternalCollab?: boolean }) {
+    const actor = requireActor(req);
+    if (actor.role !== 'sys_admin' && actor.role !== 'team_admin') {
+      throw new HttpException('仅管理员可修改组织设置', 403);
+    }
+    return this.deps.spaces.setOrgSettings(
+      { userId: actor.userId, role: actor.role, teamId: actor.teamId },
+      { allowExternalCollab: body.allowExternalCollab === true },
+    );
+  }
+
+  /** 空间通知（FR-TC-10）：我的未读/已读流转，轮询消费。 */
+  @Get('spaces/notifications')
+  async mySpaceNotifications(@Req() req: FastifyRequest & { query: Record<string, string> }) {
+    const actor = requireActor(req);
+    const since = (req.query as { since?: string }).since;
+    return this.deps.spaces.listNotifications(actor.userId, since || undefined);
+  }
+
+  @Post('spaces/notifications/read')
+  @HttpCode(200)
+  async markSpaceNotificationsRead(@Req() req: FastifyRequest, @Body() body: { ids?: string[] }) {
+    const actor = requireActor(req);
+    return this.deps.spaces.markNotificationsRead(actor.userId, Array.isArray(body.ids) ? body.ids.map(String) : []);
   }
 
   @Get('spaces/:id/nodes/:nid/revisions')
@@ -1126,7 +1284,12 @@ export async function bootstrap(options: {
       options.jwtSecret,
     )),
     expertPacks: new ExpertPackService(db),
-    spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail)),
+    spaces: new SpaceService(db, (actorId, action, target, detail) => auth.audit(actorId, action, target, detail), options.storageDir),
+    storageDir: options.storageDir ?? './storage',
+    yjsHub: new YjsHub(db, {
+      assertHtmlDocAccess: (spaceId, nodeId, userId) =>
+        deps.spaces.assertHtmlDocAccess(spaceId, userId, nodeId),
+    }, (message) => console.warn(`[yjs-hub] ${message}`)),
     wechatMp: new WechatMpService(db, SecretBox.forServer(
       options.serverEncryptionKey ?? process.env.SERVER_ENCRYPTION_KEY,
       options.jwtSecret,
@@ -1188,6 +1351,22 @@ export async function bootstrap(options: {
       conn.on('close', () => off());
     })();
   });
+  // T52.13: HTML CRDT sync endpoint — same y-protocols wire format as the
+  // standard y-websocket client; JWT + html-node visibility checked per conn.
+  fastify.get('/spaces/:id/yjs/:nodeId', { websocket: true }, (conn: { close: (code: number, reason: string) => void; send: (s: Buffer | string) => void; on: (ev: string, cb: (raw?: Buffer) => void) => void }, req: { params?: Record<string, string>; query?: Record<string, string> }) => {
+    const params = req.params ?? {};
+    const query = req.query ?? {};
+    void (async () => {
+      try {
+        const payload = await deps.auth.verifyToken(query.token ?? '');
+        if (payload.typ !== 'access') throw new Error('bad token');
+        await deps.yjsHub.connect(params.id as string, params.nodeId as string, payload.sub, conn);
+      } catch {
+        conn.close(4001, 'unauthorized');
+      }
+    })();
+  });
+
   const port = options.port ?? 0; // 0 = ephemeral (tests)
   await app.listen(port, '127.0.0.1');
   const address = await app.getUrl();

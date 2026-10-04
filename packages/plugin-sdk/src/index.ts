@@ -627,6 +627,7 @@ export const PLUGIN_VIEW_ICONS = [
   "list-checks",
   "palette",
   "plug",
+  "presentation",
   "pull-request",
   "search",
   "server",

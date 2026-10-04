@@ -15,6 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import {
+  ChannelAccount,
   err,
   ok,
   IPC,
@@ -27,6 +28,7 @@ import type { RuntimeProviderConfig } from "@pi-desktop/agent-runtime";
 import type { AgentEventEnvelope } from "@pi-desktop/shared";
 import { ClawhubClient } from "../clawhub";
 import { createHeadlessAgentDriver, beginDurableTurnAndPrompt } from "../headless-agent-driver";
+import { createWebhookServer } from "../assistant/im-server";
 import { ForegroundSessionRegistry } from "../expert-foreground";
 import { ExpertService } from "../expert-service";
 import { TeamRunner } from "../team-runner";
@@ -34,7 +36,10 @@ import { KbService } from "../kb-service";
 import { OrgService } from "../org-service";
 import { OrgWorkspaceHub } from "../org-workspaces";
 import { createChannelRegistryHost } from "../channels/registry";
+import { completeOneShot } from "@pi-desktop/agent-runtime";
+import type { RevisionSuggestion } from "@pi-desktop/shared";
 import { createSpaceClient, createSpaceIpcHost } from "../space-client";
+import { createYjsBridge } from "./yjs-bridge";
 import { createChannelCredentialStore } from "../channels/credential-store";
 import { createFeishuAdapterFactory } from "../channels/feishu";
 import { createWecomAdapterFactory } from "../channels/wecom";
@@ -159,6 +164,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     broadcast: (event) => sendToRenderer(IPC.event.expertTeamRun, event),
     postSessionCard,
     foregroundRegistry: expertForegroundRegistry,
+    isOrgActive: () => Boolean(orgService.getBootstrap()),
   });
 
   async function getOneShotProvider(): Promise<{
@@ -191,6 +197,78 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     }
   }
 
+  let assistantSessionId: string | null = null;
+  async function ensureAssistantSessionCached(h: NonNullable<ReturnType<typeof host>>) {
+    if (assistantSessionId) {
+      try {
+        const detail = await h.call<{ session?: { id?: string } }>("session.get", {
+          id: assistantSessionId,
+        });
+        if (detail.session?.id) return { sessionId: assistantSessionId, created: false };
+      } catch {
+        // stale id → fall through and re-locate
+      }
+      assistantSessionId = null;
+    }
+    const { ensureAssistantSession } = await import("../assistant/im-assistant");
+    const ensured = await ensureAssistantSession(h);
+    assistantSessionId = ensured.sessionId;
+    return ensured;
+  }
+
+  /** FR-TC-10: LLM-backed review-by-comments production (main-side seam). */
+  async function reviewByComments(spaceId: string, nodeId: string): Promise<RevisionSuggestion[]> {
+    if (!spaceClient) throw new Error("space client unavailable");
+    const { buildReviewUserPrompt, parseReviewSuggestions, REVIEW_SYSTEM_PROMPT } =
+      await import("./revision-review");
+    const comments = (await spaceClient.listComments(spaceId, nodeId)).filter(
+      (comment) => comment.status === "open",
+    );
+    if (!comments.length) return [];
+    const doc = await spaceClient.getDoc(spaceId, nodeId);
+    const oneShot = await getOneShotProvider();
+    if (!oneShot) {
+      throw Object.assign(new Error("model not configured"), {
+        errorCode: "MODEL_NOT_CONFIGURED",
+      });
+    }
+    const result = await completeOneShot(
+      oneShot.provider,
+      {
+        systemPrompt: REVIEW_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user" as const,
+            content: buildReviewUserPrompt(
+              doc.content ?? "",
+              comments.map((comment) => ({
+                id: comment.id,
+                authorId: comment.authorId,
+                body: comment.body,
+                status: comment.status,
+                anchor: (comment as { anchor?: { textPrefix?: string } }).anchor ?? null,
+              })),
+            ),
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      oneShot.thinkingLevel,
+      { sessionId: `space-review:${nodeId}` },
+    );
+    const drafts = parseReviewSuggestions(result.text ?? "");
+    const created: RevisionSuggestion[] = [];
+    for (const draft of drafts) {
+      created.push(
+        await spaceClient.createRevision(spaceId, nodeId, {
+          ...draft,
+          producedBy: "agent" as const,
+        }),
+      );
+    }
+    return created;
+  }
+
   const kbService = new KbService({
     getHost,
     getLogger: () => logger,
@@ -200,6 +278,8 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
   // that pass the allowlist dispatch through the headless driver and the
   // result is sent back over the channel adapter.
   let spaceHost: ReturnType<typeof createSpaceIpcHost> | undefined;
+  let spaceClient: ReturnType<typeof createSpaceClient> | undefined;
+  let yjsBridgeDisposal: (() => void) | undefined;
   /** Org-session accessors for channel adapters that need them (wechat_mp). */
   const orgChannelContext: {
     tokenProvider?: () => Promise<string>;
@@ -237,6 +317,39 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     getLogger: () => logger,
     getDriver: () => headlessAgentDriver,
     credentialStore: channelCredentialStore,
+    // FR-IM-01/02 persistence: credential-free account records live in the
+    // host DB (migration v21); secrets stay in the sealed secrets table.
+    loadAccounts: async () => {
+      const h = host();
+      if (!h) return [];
+      const result = await h.call<{ accounts?: Array<Record<string, unknown>> }>(
+        "channelAccounts.list",
+      );
+      return (result.accounts ?? []).map((record) => ({
+        id: String(record.id),
+        provider: record.provider as ChannelAccount["provider"],
+        name: String(record.name ?? ""),
+        secretRef: typeof record.secretRef === "string" ? record.secretRef : undefined,
+        scope: record.scope as ChannelAccount["scope"],
+        allowlist: Array.isArray(record.allowlist) ? record.allowlist.map(String) : [],
+        enabled: record.enabled !== false,
+      })) as ChannelAccount[];
+    },
+    saveAccounts: async (accounts) => {
+      const h = host();
+      if (!h) return;
+      await h.call("channelAccounts.replaceAll", {
+        accounts: accounts.map((account) => ({
+          id: account.id,
+          provider: account.provider,
+          name: account.name,
+          secretRef: account.secretRef ?? null,
+          scope: account.scope,
+          allowlist: account.allowlist,
+          enabled: account.enabled,
+        })),
+      });
+    },
     adapters: {
       feishu: createFeishuAdapterFactory(),
       wecom: createWecomAdapterFactory(),
@@ -403,6 +516,53 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     expertService.setOrgPacks(bootstrap?.expertPacks ?? []);
   }
 
+  /** FR-PPT-14: org slide-template packs land under the user template dir. */
+  async function applyOrgSlideTemplates(): Promise<void> {
+    const bootstrap = orgService.getBootstrap() as {
+      slideTemplates?: Array<{
+        id: string;
+        name: string;
+        version: number;
+        contract: Record<string, unknown>;
+        usageNote?: string;
+      }>;
+    } | null;
+    const items = bootstrap?.slideTemplates ?? [];
+    if (!items.length) return;
+    const root = join(homedir(), ".laboflow", "slide-templates");
+    const fs = await import("node:fs");
+    const indexPath = join(root, "index.json");
+    const index = fs.existsSync(indexPath)
+      ? (JSON.parse(fs.readFileSync(indexPath, "utf8")) as Record<string, unknown>)
+      : {};
+    const registry = (index.templates as Array<Record<string, unknown>>) ?? [];
+    for (const item of items) {
+      const dir = join(root, item.id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        join(dir, "template.json"),
+        JSON.stringify({ name: item.name, version: item.version, contract: item.contract, usageNote: item.usageNote, source: "org" }, null, 2),
+      );
+      const existing = registry.find((entry) => entry.id === item.id);
+      const meta = { id: item.id, name: item.name, version: item.version, source: "org" };
+      if (existing) Object.assign(existing, meta);
+      else registry.push(meta);
+      try {
+        const content = (await orgService.getOrgJson(
+          `/org/slide-templates/${encodeURIComponent(item.id)}/content`,
+        )) as { contentBase64?: string };
+        if (content?.contentBase64) {
+          fs.writeFileSync(join(dir, "pack.base64"), content.contentBase64);
+        }
+      } catch (error) {
+        logger.app("slides", "warn", "org template pack fetch failed", { data: `${item.id}: ${String(error)}` });
+      }
+    }
+    index.updatedAt = new Date().toISOString();
+    index.templates = registry;
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+  }
+
   /** Org-provided knowledge-base entries land in the MCP registry (T55.6). */
   async function applyOrgKbDelivery(): Promise<void> {
     const bootstrap = orgService.getBootstrap() as {
@@ -461,14 +621,105 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     }
     return response.json().catch(() => ({}));
   }
+  // Restore persisted channel accounts (FR-IM-01/02) once the host is up.
+  void (async () => {
+    try {
+      let h: ReturnType<typeof host> = null;
+      for (let attempt = 0; attempt < 15 && !h; attempt++) {
+        h = host();
+        if (!h) await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (h) await channelHost.registry.init();
+    } catch (error) {
+      logger.app("channels", "warn", "channel accounts restore failed", { data: String(error) });
+    }
+  })();
+
+  // Module 03/T53.3: local webhook server. Secret lives in the sealed
+  // secrets table (generated on first boot); the task runner shares the
+  // headless driver with channels and scheduled runs.
+  const webhookServer = createWebhookServer({
+    config: {
+      secret: "pending",
+      port: 3800,
+      lanOpen: false,
+      syncBudgetMs: 30_000,
+    },
+    runner: async ({ message }) => {
+      const h = host();
+      if (!h) throw new Error("host unavailable");
+      const { ensureAssistantSession } = await import("../assistant/im-assistant");
+      const { sessionId } = await ensureAssistantSession(h);
+      const handle = await headlessAgentDriver.start({
+        sessionId,
+        prompt: message,
+        unattendedPolicy: "degraded",
+        timeoutMs: 15 * 60_000,
+      });
+      const result = await handle.completion;
+      if (result.status !== "completed") {
+        throw new Error(result.errorCode ?? "headless run failed");
+      }
+      // FR-MC-03: files the turn produced ride back to the caller.
+      let files: string[] = [];
+      try {
+        const listed = await h.call<{ artifacts?: Array<{ path: string; op: string }> }>(
+          "artifacts.list",
+          { sessionId: handle.sessionId, limit: 20 },
+        );
+        files = (listed.artifacts ?? [])
+          .filter((a) => a.op === "export" || a.op === "write")
+          .map((a) => a.path)
+          .slice(0, 10);
+      } catch {
+        // artifacts unavailable: still return the reply without files
+      }
+      return { reply: result.finalText, files };
+    },
+    listSchedules: async () => {
+      const h = host();
+      if (!h) return [];
+      return h.call("scheduled.list", {});
+    },
+    log: (level, message) => logger.app("assistant", level, "webhook", { data: message }),
+  });
+  void (async () => {
+    try {
+      // The host comes up shortly after the service factory runs; poll for it
+      // instead of giving up silently (the card would otherwise read 已停止
+      // forever after a slow boot).
+      let h: ReturnType<typeof host> = null;
+      for (let attempt = 0; attempt < 15 && !h; attempt++) {
+        h = host();
+        if (!h) await new Promise((r) => setTimeout(r, 2000));
+      }
+      if (!h) {
+        logger.app("assistant", "warn", "webhook boot gave up: host unavailable");
+        return;
+      }
+      const secretRef = "assistant.webhook.secret";
+      const existing = await h.call<{ value?: string | null }>("secrets.getForRuntime", { secretRef });
+      let secret = existing?.value ?? "";
+      if (!secret) {
+        secret = `wf_${randomUUID().replace(/-/g, "")}`;
+        await h.call("secrets.set", { secretRef, value: secret });
+      }
+      webhookServer.reconfigure({ secret });
+      await webhookServer.start();
+    } catch (error) {
+      logger.app("assistant", "warn", "webhook start failed", { data: String(error) });
+    }
+  })();
+
   spaceHost = createSpaceIpcHost({
-    client: createSpaceClient({
+    client: (spaceClient = createSpaceClient({
       getJson: (path) => orgService.getOrgJson(path),
       postJson: (path, body) => orgService.postOrgJson(path, body),
       patchJson: (path, body) => spaceOrgRequest("PATCH", path, body),
       putJson: (path, body) => spaceOrgRequest("PUT", path, body),
       deleteJson: (path) => spaceOrgRequest("DELETE", path),
-    }),
+    })),
+    reviewByComments: (spaceId, nodeId) => reviewByComments(spaceId, nodeId),
     emit: (frame) => sendToRenderer(IPC.event.spaceEvent, frame),
     warn: (context, message) =>
       logger.app("session", "warn", "space events poll", {
@@ -478,6 +729,9 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
 
   function applyOrgDeliveryOnConnect(): void {
     applyOrgExpertPacks();
+    void applyOrgSlideTemplates().catch((error) =>
+      logger.app("slides", "warn", "org slide templates delivery failed", { data: String(error) }),
+    );
     void applyOrgKbDelivery().catch((error) =>
       logger.app("kb", "warn", "org kb delivery failed", { data: String(error) }),
     );
@@ -525,6 +779,112 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     // Module 02: team-space tree/docs/comments/revisions/events IPC.
     spaceHost?.registerIpc(laboflowHandle);
 
+    laboflowHandleWithEvent(IPC.invoke.spaceClip, async (event, input: { url?: unknown }) => {
+      deps.assertMainWindowSender(event);
+      const url = typeof input?.url === "string" ? input.url : "";
+      const { clipWebPage } = await import("../web-clipper");
+      return clipWebPage(url);
+    });
+
+    // T53.5: assistant-mode page session (persistent, unified history).
+    laboflowHandleWithEvent(
+      IPC.invoke.spaceSaveFromPath,
+      async (event, input: { path?: unknown; spaceId?: unknown; parentId?: unknown; name?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        const filePath = String(input?.path ?? "").trim();
+        const spaceId = String(input?.spaceId ?? "").trim();
+        if (!filePath || !spaceId) {
+          throw Object.assign(new Error("invalid save input"), { errorCode: "INVALID_ARGUMENT" });
+        }
+        if (!spaceClient) throw new Error("space client unavailable");
+        const { readFile } = await import("node:fs/promises");
+        const { basename } = await import("node:path");
+        const content = await readFile(filePath);
+        const name = String(input?.name ?? "").trim() || basename(filePath);
+        return spaceClient.uploadFile(spaceId, {
+          parentId: (input?.parentId ?? null) as string | null,
+          name,
+          contentBase64: content.toString("base64"),
+        });
+      },
+    );
+
+    laboflowHandleWithEvent(IPC.invoke.assistantSessionGet, async (event) => {
+      deps.assertMainWindowSender(event);
+      const h = host();
+      if (!h) throw new Error("host unavailable");
+      return ensureAssistantSessionCached(h);
+    });
+    laboflowHandleWithEvent(
+      IPC.invoke.assistantHistory,
+      async (event, input: { sessionId?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        const h = host();
+        if (!h) throw new Error("host unavailable");
+        const sessionId = String(input?.sessionId ?? "");
+        const { assistantHistory } = await import("../assistant/im-assistant");
+        return assistantHistory(h, sessionId);
+      },
+    );
+    laboflowHandleWithEvent(
+      IPC.invoke.assistantSend,
+      async (event, input: { sessionId?: unknown; text?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        const sessionId = String(input?.sessionId ?? "");
+        const text = String(input?.text ?? "").trim();
+        if (!sessionId || !text) {
+          throw Object.assign(new Error("invalid assistant send"), {
+            errorCode: "INVALID_ARGUMENT",
+          });
+        }
+        void (async () => {
+          try {
+            const { dispatchAssistantTurn } = await import("../assistant/im-assistant");
+            const result = await dispatchAssistantTurn(headlessAgentDriver, sessionId, text);
+            sendToRenderer(IPC.event.assistantTurnDone, {
+              sessionId,
+              finalText: result.finalText,
+              status: result.status,
+            });
+          } catch (error) {
+            sendToRenderer(IPC.event.assistantTurnDone, {
+              sessionId,
+              status: "error",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+        return { started: true };
+      },
+    );
+    // Module 03/T53.3: webhook settings (read masked status / reconfigure).
+    laboflowHandleWithEvent(IPC.invoke.assistantWebhookGet, async (event) => {
+      deps.assertMainWindowSender(event);
+      return webhookServer.describe();
+    });
+    laboflowHandleWithEvent(
+      IPC.invoke.assistantWebhookSet,
+      async (event, input: { port?: unknown; lanOpen?: unknown }) => {
+        deps.assertMainWindowSender(event);
+        return webhookServer.reconfigure({
+          ...(Number.isFinite(Number(input?.port)) ? { port: Number(input.port) } : {}),
+          ...(typeof input?.lanOpen === "boolean" ? { lanOpen: input.lanOpen } : {}),
+        });
+      },
+    );
+
+    // Module 02/T52.13: yjs CRDT frame bridge (token stays main-side).
+    yjsBridgeDisposal = createYjsBridge({
+      orgService,
+      handle: laboflowHandle,
+      handleWithEvent: laboflowHandleWithEvent,
+      forward: (channel, payload) =>
+        sendToRenderer(IPC.event.spaceYjsFrame, { channel, ...payload }),
+      assertMainWindowSender: (event) => deps.assertMainWindowSender(event),
+      warn: (context, message) =>
+        logger.app("space", "info", "yjs bridge", { data: `${context}: ${message}` }),
+    }).dispose;
+
     laboflowHandleWithEvent(
       IPC.invoke.composerAttachSession,
       async (
@@ -564,6 +924,68 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           targetSessionId,
           source.title || "",
           source.messages ?? [],
+        );
+        return { files: [saved] };
+      },
+    );
+
+    // Team-space doc reference (FR-TC-17): snapshot a server-side space
+    // document into the session scratch dir so the composer can attach it
+    // like an imported file. The fetch rides the user's own org credentials,
+    // so the permission filter stays server-authoritative.
+    laboflowHandle(
+      IPC.invoke.composerAttachSpaceDoc,
+      async (
+        event,
+        input: {
+          sessionId?: unknown;
+          spaceId?: unknown;
+          nodeId?: unknown;
+        } = {},
+      ) => {
+        const { attachSpaceDoc } = await import("../session-attach");
+        deps.assertMainWindowSender(event);
+        if (!spaceClient) throw new Error("space client unavailable");
+        const sessionId =
+          typeof input.sessionId === "string" ? input.sessionId.trim() : "";
+        const spaceId =
+          typeof input.spaceId === "string" ? input.spaceId.trim() : "";
+        const nodeId =
+          typeof input.nodeId === "string" ? input.nodeId.trim() : "";
+        if (!sessionId || !spaceId || !nodeId) {
+          throw Object.assign(new Error("invalid space attach input"), {
+            errorCode: "INVALID_ARGUMENT",
+          });
+        }
+        const nodes = await spaceClient.tree(spaceId);
+        const node = nodes.find((entry) => entry.id === nodeId);
+        if (!node) {
+          throw Object.assign(new Error("space node not found"), {
+            errorCode: "NOT_FOUND",
+          });
+        }
+        if (node.type !== "md" && node.type !== "csv" && node.type !== "html") {
+          throw Object.assign(
+            new Error("only md/csv/html documents can be attached"),
+            { errorCode: "NOT_SUPPORTED" },
+          );
+        }
+        if (node.perm === "none") {
+          throw Object.assign(new Error("no access to this document"), {
+            errorCode: "FORBIDDEN",
+          });
+        }
+        const spaces = await spaceClient.listSpaces();
+        const spaceName =
+          spaces.find((space) => space.id === spaceId)?.name ?? spaceId;
+        const doc = await spaceClient.getDoc(spaceId, nodeId);
+        const saved = await attachSpaceDoc(
+          dataDir,
+          sessionId,
+          node.name,
+          node.type,
+          spaceName,
+          doc.content ?? "",
         );
         return { files: [saved] };
       },

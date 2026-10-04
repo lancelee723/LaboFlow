@@ -462,6 +462,34 @@ pub fn finish_run(
              WHERE id = ?4 AND status = 'running'",
         )?
         .execute(params![status, error_code, now_ms(), run_id])?;
+    if n > 0 && status == "error" {
+        // FR-MC-13: three consecutive failed runs pause the task so it stops
+        // burning tokens; the failure record stays for review.
+        let task_id: String = db
+            .conn()
+            .query_row(
+                "SELECT task_id FROM task_runs WHERE id = ?1",
+                params![run_id],
+                |row| row.get(0),
+            )?;
+        let consecutive: i64 = db.conn().query_row(
+            "WITH recent AS (
+               SELECT status FROM task_runs
+               WHERE task_id = ?1 AND status IN ('error', 'completed')
+               ORDER BY started_at DESC LIMIT 3
+             )
+             SELECT COUNT(*) FROM recent WHERE status = 'error'",
+            params![task_id],
+            |row| row.get(0),
+        )?;
+        if consecutive >= 3 {
+            db.conn()
+                .prepare_cached(
+                    "UPDATE scheduled_tasks SET enabled = 0, updated_at = ?2 WHERE id = ?1 AND enabled = 1",
+                )?
+                .execute(params![task_id, now_ms()])?;
+        }
+    }
     Ok(n > 0)
 }
 
