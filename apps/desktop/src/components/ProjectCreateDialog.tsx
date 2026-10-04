@@ -39,6 +39,8 @@ function samePath(left: string, right: string) {
     right.trim().replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
+// The create dialog mounts its content only while open: the blocking overlay
+// registers with that mounted subtree, and every reopen resets the form.
 export function ProjectCreateDialog() {
   const { t } = useTranslation();
   const open = useAppStore((state) => state.createProjectDialogOpen);
@@ -117,7 +119,7 @@ export function ProjectCreateDialog() {
       document.body.style.overflow = previousOverflow;
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, [close, open]);
+  }, [close]);
 
   // The first folder or the repository name fills the field until the user
   // types their own name; an emptied field still falls back to it on submit.
@@ -125,8 +127,6 @@ export function ProjectCreateDialog() {
     if (nameTouchedRef.current) return;
     setName(defaultName);
   }, [defaultName]);
-
-  if (!open) return null;
 
   const addFolders = async () => {
     if (busyRef.current || folderPickerInFlightRef.current) return;
