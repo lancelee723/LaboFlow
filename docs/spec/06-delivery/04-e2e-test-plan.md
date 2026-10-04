@@ -3949,6 +3949,24 @@ identify the platform validation still needed.
 - **Milestone**: M5
 - **Status**: Draft (manual)
 
+#### E2E-BROWSER-capture-resize: Capture completion preserves the latest viewport
+
+- **Preconditions**: Isolated Electron profile and a local responsive page
+  taller than the visible browser viewport. No provider account is needed.
+- **Steps**: Start a full-page screenshot, then resize the browser hole twice
+  before Chromium completes it. Repeat while alternating larger and smaller
+  sizes and through raw `Page.captureScreenshot`. Queue overlapping captures,
+  change resource tabs, fail a capture, and close a tab with a queued capture.
+- **Expected**: The completed capture does not restore a stale viewport. The
+  page's `innerWidth`/`innerHeight` match the latest requested bounds. Captures
+  on one page serialize without blocking a sibling page. Failed capture
+  releases resize handling. Closing a page cannot redirect its queued capture
+  to another page. No screenshot is repeated to repair layout.
+- **Status**: Native Electron capture/resize path automated by
+  `node scripts/e2e-browser-capture-resize.mjs` (artifacts retained). The
+  production Host/Pane/CDP service paths for failure, queueing and tab closure
+  are covered by `apps/desktop/test/browser-capture-resize.test.mjs`.
+
 #### E2E-BROWSER-session-preview-race: Session switching does not expose a stale preview
 
 - **Preconditions**: Two sessions have distinct HTML previews; their Browser
