@@ -76,7 +76,7 @@ export function validateRecommendations(stage, recommendations) {
 }
 
 /** Agent submits its recommendations for a stage → panel opens, user decides. */
-export function submitStage(projectDir, stage, recommendations, now = () => new Date().toISOString()) {
+export function submitStage(projectDir, stage, recommendations, now = () => new Date().toISOString(), estimate) {
   if (!STAGES.includes(stage)) return { error: `stage 必须是 ${STAGES.join(" | ")}` };
   const invalid = validateRecommendations(stage, recommendations);
   if (invalid) return { error: invalid };
@@ -85,6 +85,7 @@ export function submitStage(projectDir, stage, recommendations, now = () => new 
   if (stageState.status === "confirmed" || stageState.status === "waived") {
     return { error: `${stage} 已确认，无需重复提交；如需改选请新建项目或请用户在确认卡上重新提交`, state };
   }
+  if (estimate) stageState.estimate = estimate;
   const confirmDir = join(projectDir, "confirm_ui");
   mkdirSync(confirmDir, { recursive: true });
   // Upstream file protocol, verbatim names.
