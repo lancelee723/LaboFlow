@@ -76,7 +76,7 @@ export function validateRecommendations(stage, recommendations) {
 }
 
 /** Agent submits its recommendations for a stage → panel opens, user decides. */
-export function submitStage(projectDir, stage, recommendations, now = () => new Date().toISOString(), estimate = null) {
+export function submitStage(projectDir, stage, recommendations, now = () => new Date().toISOString()) {
   if (!STAGES.includes(stage)) return { error: `stage 必须是 ${STAGES.join(" | ")}` };
   const invalid = validateRecommendations(stage, recommendations);
   if (invalid) return { error: invalid };
@@ -95,7 +95,6 @@ export function submitStage(projectDir, stage, recommendations, now = () => new 
   stageState.status = "submitted";
   stageState.submittedAt = now();
   stageState.surface = "panel";
-  if (estimate) stageState.estimate = estimate; // FR-PPT-16: { pages, estimate:{tokensTotal,…}, budget:{budget,exceeds,ratio} }
   if (corrupted) state.corruptedRecovered = true;
   saveState(projectDir, state);
   return { state, recommendationsPath: join(confirmDir, `recommendations.${stage}.json`) };

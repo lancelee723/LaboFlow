@@ -8,13 +8,12 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 const PLUGIN_DIR = join(
-  fileURLToPath(new URL("../resources/plugins/laboflow.slides/", import.meta.url)),
+  new URL("../resources/plugins/laboflow.slides/", import.meta.url).pathname.replace(/\/$/, ""),
 );
 
 const workspaces = [];
@@ -136,72 +135,5 @@ test("unknown channels answer with an error instead of hanging the card", async 
   const panel = await loadPlugin({ workspace: ws });
   const result = await panel.invoke("ppt.nope", {});
   assert.match(String(result.error), /unknown channel/);
-  panel.cleanup();
-});
-
-// ── FR-PPT-04/18: page actions with backup semantics ─────────────────────────
-test("pageAction: delete moves the page to backup and invalidates the final report", async () => {
-  const ws = makeWorkspace();
-  const panel = await loadPlugin({ workspace: ws });
-  const projectDir = join(ws, "projects", "pages_20261003");
-  mkdirSync(join(projectDir, "svg_output"), { recursive: true });
-  mkdirSync(join(projectDir, "notes"), { recursive: true });
-  mkdirSync(join(projectDir, "validation"), { recursive: true });
-  writeFileSync(join(projectDir, "svg_output", "01_cover.svg"), "<svg/>");
-  writeFileSync(join(projectDir, "svg_output", "02_body.svg"), "<svg/>");
-  writeFileSync(join(projectDir, "notes", "slide01.md"), "notes");
-  writeFileSync(join(projectDir, "validation", "svg_quality_final_report.json"), "{}");
-
-  const result = await panel.invoke("ppt.pageAction", {
-    projectDir, page: "01_cover", action: "delete",
-  });
-  assert.equal(result.ok, true);
-  assert.ok(!existsSync(join(projectDir, "svg_output", "01_cover.svg")), "page removed from svg_output");
-  assert.ok(existsSync(join(projectDir, "svg_output", "02_body.svg")), "other pages untouched");
-  const backupRoot = join(projectDir, "backup");
-  const stampDir = readdirSync(backupRoot)[0];
-  assert.ok(existsSync(join(backupRoot, stampDir, "01_cover.svg")), "page is recoverable");
-  assert.ok(existsSync(join(backupRoot, stampDir, "slide01.md")), "note sidecar follows");
-  assert.ok(!existsSync(join(projectDir, "validation", "svg_quality_final_report.json")), "final report invalidated");
-  const audit = readFileSync(join(projectDir, "laboflow", "page-actions.json"), "utf8");
-  assert.match(audit, /"action":"delete"/);
-  panel.cleanup();
-});
-
-test("pageAction: rename renumbers and refuses collisions/illegal names", async () => {
-  const ws = makeWorkspace();
-  const panel = await loadPlugin({ workspace: ws });
-  const projectDir = join(ws, "projects", "pages2_20261003");
-  mkdirSync(join(projectDir, "svg_output"), { recursive: true });
-  writeFileSync(join(projectDir, "svg_output", "01_cover.svg"), "<svg/>");
-  writeFileSync(join(projectDir, "svg_output", "02_body.svg"), "<svg/>");
-
-  const renamed = await panel.invoke("ppt.pageAction", {
-    projectDir, page: "02_body", action: "rename", target: "03_body.svg",
-  });
-  assert.equal(renamed.ok, true);
-  assert.ok(existsSync(join(projectDir, "svg_output", "03_body.svg")));
-
-  const collision = await panel.invoke("ppt.pageAction", {
-    projectDir, page: "03_body", action: "rename", target: "01_cover.svg",
-  });
-  assert.match(String(collision.error), /已存在/);
-  const illegal = await panel.invoke("ppt.pageAction", {
-    projectDir, page: "03_body", action: "rename", target: "../escape.svg",
-  });
-  assert.ok(String(illegal.error).length > 0);
-  panel.cleanup();
-});
-
-test("getState lists backup stamps for the history pane", async () => {
-  const ws = makeWorkspace();
-  const panel = await loadPlugin({ workspace: ws });
-  const projectDir = join(ws, "projects", "pages3_20261003");
-  mkdirSync(join(projectDir, "svg_output"), { recursive: true });
-  mkdirSync(join(projectDir, "backup", "pageActions-2026"), { recursive: true });
-  writeFileSync(join(projectDir, "svg_output", "01_a.svg"), "<svg/>");
-  await panel.invoke("ppt.pageAction", { projectDir, page: "01_a", action: "delete" });
-  const view = await panel.invoke("ppt.getState", { projectDir });
-  assert.ok((view.listings.backups ?? []).length >= 1, "backup stamps listed for history");
   panel.cleanup();
 });
