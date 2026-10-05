@@ -20,7 +20,7 @@ import {
   completeOneShot,
   type RuntimeProviderConfig,
 } from "@pi-desktop/agent-runtime";
-import { withSkillsBinding } from "./expert-service.ts";
+import { withSkillsBinding, withToolsClause } from "./expert-service.ts";
 
 const MAX_PARALLEL_MEMBERS = 4;
 const DEP_RESULT_MAX_CHARS = 4000;
@@ -115,6 +115,7 @@ export interface TeamRunnerDeps {
     model?: string;
     thinkingLevel?: string;
     skills?: string[];
+    tools?: string[];
   } | null>;
   broadcast(event: ExpertTeamProgress): void;
   postSessionCard(sessionId: string, message: {
@@ -400,7 +401,7 @@ export class TeamRunner {
           `[管线阶段 ${index + 1}/${total}：${stage}${state.goal ? ` · 第 ${round}/${maxRoundsForStage} 轮` : ""}]`,
           state.goal ? `总体目标：${state.goal}` : "",
           round > 1
-            ? `上一轮产出：\n${clipResult(previousRoundOutput)}\n\n这是第 ${round} 轮继续。若总体目标已达成，在回复末尾单独一行输出 [LOOP:DONE] 并给理由；否则输出 [LOOP:NEXT] 与本轮完成内容。`
+            ? `上一轮产出：\n${clipResult(previousRoundOutput)}\n\n这是第 ${round} 轮继续。输出 [LOOP:DONE] 前必须先逐条自检任务中的验收标准（未达成即继续）；若全部达成，在回复末尾单独一行输出 [LOOP:DONE] 并给理由，同时列出每条标准的核对结果；否则输出 [LOOP:NEXT] 与本轮完成内容。`
             : previousSummary
               ? `上一阶段产物摘要：\n${clipResult(previousSummary)}`
               : "",
@@ -429,7 +430,11 @@ export class TeamRunner {
               thinkingLevel: persona.thinkingLevel,
             },
             prompt,
-            personaPrompt: withSkillsBinding(persona.personaPrompt, persona.skills ?? []),
+            personaPrompt: withToolsClause(
+              withSkillsBinding(persona.personaPrompt, persona.skills ?? []),
+              persona.tools ?? [],
+            ),
+            ...(persona.tools?.length ? { allowedTools: persona.tools } : {}),
           });
           const result = await run.completion;
           state.totalTokens += result.usage?.totalTokens ?? 0;
@@ -530,7 +535,7 @@ export class TeamRunner {
       messages: [
         {
           role: "user" as const,
-          content: `任务：${state.task}\n\n可用成员（只能指派这些专家）：${members.join("、")}\n拆解粒度：${state.leaderStyle === "coarse" ? "粗放（尽量合并子任务）" : "精细（按职责拆到可独立执行）"}\n\n编排规则：若任务单一、一名成员即可完成，直接拆为单成员直通计划（快速模式），不必凑齐多名成员。`,
+          content: `任务：${state.task}\n\n可用成员（只能指派这些专家）：${members.join("、")}\n拆解粒度：${state.leaderStyle === "coarse" ? "粗放（尽量合并子任务）" : "精细（按职责拆到可独立执行）"}\n\n编排规则：\n1. 若任务单一、一名成员即可完成，直接拆为单成员直通计划（快速模式），不必凑齐多名成员。\n2. 从任务中提取可检验的验收标准（2-5 条），写入对应成员 brief 的开头，格式为「[验收] …」；没有明确标准的任务按任务目标给出完成判定条件。`,
           timestamp: Date.now(),
         },
       ],
@@ -673,7 +678,11 @@ export class TeamRunner {
           thinkingLevel: persona.thinkingLevel,
         },
         prompt,
-        personaPrompt: withSkillsBinding(persona.personaPrompt, persona.skills ?? []),
+        personaPrompt: withToolsClause(
+          withSkillsBinding(persona.personaPrompt, persona.skills ?? []),
+          persona.tools ?? [],
+        ),
+        ...(persona.tools?.length ? { allowedTools: persona.tools } : {}),
       });
       member.sessionId = run.sessionId;
       this.broadcast(state, "member", { index, status: "running", memberSessionId: run.sessionId });
@@ -731,7 +740,7 @@ export class TeamRunner {
         messages: [
           {
             role: "user" as const,
-            content: `原始任务：${state.task}\n\n各成员成果：\n${memberDigest}\n\n交付要求：\n1. 以主持人身份收尾，简述各成员的开工与收尾（用 @成员名 提及）。\n2. 文末固定输出「用户下一步建议」段：给出 3-5 条用户拿到交付物后可以立即执行的后续动作。`,
+            content: `原始任务：${state.task}\n\n各成员成果：\n${memberDigest}\n\n交付要求：\n1. 以主持人身份收尾，简述各成员的开工与收尾（用 @成员名 提及）。\n2. 输出「验收核对」段：从任务与各成员 brief 的 [验收] 标准中逐条核对，每条标注 ✓/✗ 并附一句证据（来自哪个成员成果）；存在 ✗ 时如实标注，不得略过。\n3. 文末固定输出「用户下一步建议」段：给出 3-5 条用户拿到交付物后可以立即执行的后续动作（存在未达成验收项时，第一条必须是补救动作）。`,
             timestamp: Date.now(),
           },
         ],

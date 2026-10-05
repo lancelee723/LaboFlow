@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { extractJson, TeamRunner } from "../electron/main/team-runner.ts";
@@ -199,4 +200,46 @@ test("unknown stage expert fails the run with a readable error", async () => {
   assert.equal(started.length, 0);
   assert.equal(last.type, "failed");
   assert.match(String(last.payload.error), /不存在的人/);
+});
+
+test("verification gate: loop rounds require per-criterion self-check before DONE", async () => {
+  const { started, driver } = scriptDriver([
+    () => `[LOOP:NEXT] 第一轮：完成一半。`,
+    () => `[LOOP:DONE] 全部完成，理由：验收标准逐条核对通过。`,
+  ]);
+  const { runner, broadcasts } = makeRunner({
+    driver,
+    team: {
+      pipeline: "分析",
+      stageExperts: "分析=行业研究员",
+      goal: "产出可复核的研究结论",
+      maxRounds: 3,
+    },
+  });
+  await runner.invoke({ sessionId: "parent-1", teamId: "t", task: "交付研究" });
+  await settle(broadcasts);
+
+  // Round 1 carries the goal; from round 2 on, DONE requires an explicit
+  // per-criterion self-check before the verdict line.
+  assert.match(started[1].prompt, /逐条自检任务中的验收标准/);
+  assert.match(started[1].prompt, /\[LOOP:DONE\]/);
+  const integrated = broadcasts.find((event) => event.type === "integrated");
+  assert.ok(integrated, "goal pipeline settles");
+});
+
+test("verification gate: planning and integration templates require acceptance criteria", async () => {
+  // The planning and integration prompts run through the one-shot provider,
+  // which no unit test can intercept; the template clauses are asserted at
+  // source (repo convention for static prompt templates).
+  const source = await readFile(
+    new URL("../electron/main/team-runner.ts", import.meta.url),
+    "utf8",
+  );
+  // Planning: extract criteria into member briefs (quick-mode rule kept).
+  assert.match(source, /\[验收\]/);
+  assert.match(source, /快速模式/);
+  // Integration: checklist section with per-criterion evidence, remediation
+  // first in next-step suggestions when something failed.
+  assert.match(source, /验收核对/);
+  assert.match(source, /第一条必须是补救动作/);
 });
