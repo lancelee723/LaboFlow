@@ -46,7 +46,8 @@ test("foreground registry persists bindings across instances", () => {
   assert.ok(existsSync(join(dir, "expert-sessions.json")));
 
   const second = new ForegroundSessionRegistry(dir);
-  assert.equal(second.lookup("s1"), "你是数据分析专家。");
+  // lookup returns the full binding record (persona + optional tool list).
+  assert.equal(second.lookup("s1")?.personaPrompt, "你是数据分析专家。");
   assert.equal(second.lookup("missing"), undefined);
 
   second.forget("s1");
@@ -59,8 +60,15 @@ test("registry tolerates a corrupt file and starts empty", () => {
   writeFileSync(file, "{not json", "utf8");
   const registry = new ForegroundSessionRegistry(dir);
   assert.equal(registry.lookup("s1"), undefined);
-  registry.register("s1", { kind: "team", id: "t", name: "T", personaPrompt: "p" });
-  assert.equal(registry.lookup("s1"), "p");
+  registry.register("s1", {
+    kind: "team",
+    id: "t",
+    name: "T",
+    personaPrompt: "p",
+    tools: ["Read"],
+  });
+  assert.equal(registry.lookup("s1")?.personaPrompt, "p");
+  assert.deepEqual(registry.lookup("s1")?.tools, ["Read"]);
 });
 
 test("team invoke streams into a NEW session and registers the moderator persona", async () => {
@@ -142,8 +150,12 @@ test("expert invoke foregrounds: session.create, driver on the new session, no b
   // First turn runs on the created session with the persona — through the
   // FR-PPT-15 structured skill binding, never the raw persona alone.
   assert.match(invoke, /driver\.start\(\{\s*sessionId,/);
-  assert.match(invoke, /const boundPrompt = withSkillsBinding\(persona\.personaPrompt, persona\.skills\)/);
+  assert.match(invoke, /withToolsClause\(\s*withSkillsBinding\(persona\.personaPrompt, persona\.skills\)/);
   assert.match(invoke, /personaPrompt: boundPrompt/);
+  // Tool allowlist (module 01 polish): rides the registry record and the
+  // first-turn driver request.
+  assert.match(invoke, /\.\.\.\(persona\.tools\.length \? \{ tools: persona\.tools \} : \{\}\)/);
+  assert.match(invoke, /\.\.\.\(persona\.tools\.length \? \{ allowedTools: persona\.tools \} : \{\}\)/);
   assert.doesNotMatch(invoke, /newSession:/);
   // Foreground polish: no completion card is posted anywhere.
   assert.doesNotMatch(invoke, /postSessionCard/);
@@ -156,14 +168,18 @@ test("agentPrompt keeps the expert persona via the laboflow service factory", ()
   assert.match(agentIpcSource, /expertPersona = resolveExpertPersona\?\.\(req\.sessionId\)/);
   assert.match(
     agentIpcSource,
-    /\.\.\.\(expertPersona \? \{ personaPrompt: expertPersona \} : \{\}\)/,
+    /\.\.\.\(expertPersona \? \{ personaPrompt: expertPersona\.personaPrompt \} : \{\}\)/,
+  );
+  assert.match(
+    agentIpcSource,
+    /\.\.\.\(expertPersona\?\.tools\?\.length \? \{ allowedTools: expertPersona\.tools \} : \{\}\)/,
   );
   assert.match(laboflowServicesSource, /new ForegroundSessionRegistry\(dataDir\)/);
   assert.match(laboflowServicesSource, /foregroundRegistry: expertForegroundRegistry/);
   // index.ts feeds the resolver into the upstream IPC dependency surface.
   assert.match(
     indexSource,
-    /resolveExpertPersona: \(sessionId: string\) =>\s*laboflow\.services\.expertService\.foregroundPersona\(sessionId\)/,
+    /resolveExpertPersona: \(sessionId: string\) =>\s*laboflow\.services\.expertService\.foregroundRecord\(sessionId\)/,
   );
 });
 

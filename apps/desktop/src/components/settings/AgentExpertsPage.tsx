@@ -29,6 +29,14 @@ import {
   type McpDraft,
 } from "../extensions/McpEditorSheet";
 import { AgentMultiSelect } from "./AgentMultiSelect";
+import { SUBAGENT_ASSIGNABLE_TOOLS } from "@pi-desktop/shared";
+
+/** Tool allowlist options mirror the subagent assignable-tool catalog. */
+const TOOL_OPTIONS = SUBAGENT_ASSIGNABLE_TOOLS.map((tool) => ({
+  value: tool,
+  label: tool,
+  description: "",
+}));
 import { IconDownload, IconGraduationCap, IconPencil, IconPlus, IconServer, IconUser, IconUsers, IconX } from "../icons";
 
 /** Industry filter chips: the fixed catalog first, then anything else in data. */
@@ -47,6 +55,8 @@ interface ExpertFormState {
   skills: string[];
   /** Multi-select from the user's GLOBAL MCP servers (module 01 polish). */
   mcpServers: string[];
+  /** Optional hard tool allowlist (module 01 polish); empty = unrestricted. */
+  tools: string[];
   /** `providerId/modelId` from the provider list; empty = same as session. */
   model: string;
   thinkingLevel: ThinkingLevel | "";
@@ -97,6 +107,7 @@ const EMPTY_EXPERT_FORM: ExpertFormState = {
   examples: "",
   skills: [],
   mcpServers: [],
+  tools: [],
   model: "",
   thinkingLevel: "",
   body: "",
@@ -457,6 +468,7 @@ export function AgentExpertsPage() {
         examples: record.examples.join("\n"),
         skills: [...record.skills],
         mcpServers: [...record.mcpServers],
+        tools: [...(record.tools ?? [])],
         model: record.model ?? "",
         thinkingLevel: (record.thinkingLevel as ThinkingLevel | undefined) ?? "",
         body: detail.body ?? "",
@@ -486,6 +498,7 @@ export function AgentExpertsPage() {
           .filter(Boolean),
         skills: form.skills,
         mcpServers: form.mcpServers,
+        tools: form.tools,
         ...(form.model.trim() ? { model: form.model.trim() } : {}),
         ...(form.thinkingLevel ? { thinkingLevel: form.thinkingLevel } : {}),
         body: form.body,
@@ -1024,6 +1037,18 @@ export function AgentExpertsPage() {
                 onChange={(next) => setForm((current) => ({ ...current, skills: next }))}
                 placeholder={t("expert.skillsSelect")}
                 emptyLabel={t("expert.skillsEmpty")}
+              />
+            </div>
+
+            <div className="ext-field-group">
+              <div className="ext-field-label">{t("expert.fieldTools")}</div>
+              <p className="ext-field-hint">{t("expert.toolsHint")}</p>
+              <AgentMultiSelect
+                options={TOOL_OPTIONS}
+                selected={form.tools}
+                onChange={(next) => setForm((current) => ({ ...current, tools: next }))}
+                placeholder={t("expert.toolsSelect")}
+                emptyLabel={t("expert.toolsEmpty")}
               />
             </div>
 

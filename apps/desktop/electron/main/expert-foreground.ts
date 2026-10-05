@@ -17,6 +17,8 @@ export interface ForegroundSessionRecord {
   id: string;
   name: string;
   personaPrompt: string;
+  /** Hard tool allowlist for the bound expert (module 01 polish); absent = unrestricted. */
+  tools?: string[];
 }
 
 export class ForegroundSessionRegistry {
@@ -63,9 +65,9 @@ export class ForegroundSessionRegistry {
     this.persist();
   }
 
-  /** Persona prompt for later turns, or undefined for non-expert sessions. */
-  lookup(sessionId: string): string | undefined {
-    return this.load()[sessionId]?.personaPrompt;
+  /** Persona binding for later turns, or undefined for non-expert sessions. */
+  lookup(sessionId: string): ForegroundSessionRecord | undefined {
+    return this.load()[sessionId];
   }
 
   forget(sessionId: string): void {

@@ -33,6 +33,8 @@ export interface HeadlessRunRequest {
   thinkingLevel?: string;
   /** Persona overlay prepended to the harness prompt (module 01 experts). */
   personaPrompt?: string;
+  /** Hard tool allowlist for the session (module 01 polish). */
+  allowedTools?: string[];
   /** FR-MC-17: how ask-class tools resolve without a human. */
   unattendedPolicy?: "strict" | "degraded" | "lenient";
   /** Abort the run after this long without settlement. */
@@ -332,6 +334,7 @@ export function createHeadlessAgentDriver(
           ? { thinkingLevel: request.thinkingLevel }
           : {}),
         ...(request.personaPrompt ? { personaPrompt: request.personaPrompt } : {}),
+        ...(request.allowedTools?.length ? { allowedTools: request.allowedTools } : {}),
       });
       sidecar.setProjectInstructionRoot(sessionId, launch.projectPath);
 

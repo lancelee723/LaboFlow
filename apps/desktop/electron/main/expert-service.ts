@@ -15,7 +15,10 @@ import {
   BUILTIN_EXPERT_DOCUMENTS,
   BUILTIN_TEAM_DOCUMENTS,
 } from "./builtin-experts.ts";
-import type { ForegroundSessionRegistry } from "./expert-foreground.ts";
+import type {
+  ForegroundSessionRecord,
+  ForegroundSessionRegistry,
+} from "./expert-foreground.ts";
 import type {
   ExpertInvocation,
   ExpertTeamProgress,
@@ -32,6 +35,8 @@ export interface ExpertListItem {
   examples: string[];
   skills: string[];
   mcpServers: string[];
+  /** Optional hard tool allowlist; empty = unrestricted. */
+  tools?: string[];
   model?: string;
   thinkingLevel?: string;
   enabled: boolean;
@@ -62,6 +67,8 @@ export interface ExpertDriver {
     };
     prompt: string;
     personaPrompt?: string;
+    /** Hard tool allowlist for the session (module 01 polish). */
+    allowedTools?: string[];
     timeoutMs?: number;
   }): Promise<{
     sessionId: string;
@@ -109,6 +116,7 @@ interface HostExpertRecord {
   examples?: string[];
   skills?: string[];
   mcpServers?: string[];
+  tools?: string[];
   model?: string;
   thinkingLevel?: string;
   enabled: boolean;
@@ -120,6 +128,7 @@ interface PresetFrontMatter {
   examples?: string[];
   skills?: string[];
   mcpServers?: string[];
+  tools?: string[];
   model?: string;
   thinkingLevel?: string;
 }
@@ -140,7 +149,10 @@ function parsePresetDocument(
         description = value;
       } else if (key === "industry") {
         front.industry = value;
-      } else if (key === "tags" || key === "examples" || key === "skills" || key === "mcpservers") {
+      } else if (
+        key === "tags" || key === "examples" || key === "skills" ||
+        key === "mcpservers" || key === "tools"
+      ) {
         const list = value
           .replace(/^\[|\]$/g, "")
           .split(key === "examples" ? "|" : ",")
@@ -149,6 +161,7 @@ function parsePresetDocument(
         if (key === "tags") front.tags = list;
         else if (key === "examples") front.examples = list;
         else if (key === "skills") front.skills = list;
+        else if (key === "tools") front.tools = list;
         else front.mcpServers = list;
       } else if (key === "model") {
         front.model = value;
@@ -177,8 +190,8 @@ export class ExpertService {
     this.deps = deps;
   }
 
-  /** Persona prompt for a foreground expert/team session (agentPrompt hook). */
-  foregroundPersona(sessionId: string): string | undefined {
+  /** Persona binding for a foreground expert/team session (agentPrompt hook). */
+  foregroundRecord(sessionId: string): ForegroundSessionRecord | undefined {
     return this.deps.foregroundRegistry.lookup(sessionId);
   }
 
@@ -215,6 +228,7 @@ export class ExpertService {
       examples: preset.examples,
       skills: preset.skills,
       mcpServers: preset.mcpServers,
+      tools: preset.tools,
       model: preset.model,
       thinkingLevel: preset.thinkingLevel,
       enabled: true,
@@ -229,6 +243,7 @@ export class ExpertService {
       examples: expert.examples ?? [],
       skills: expert.skills ?? [],
       mcpServers: expert.mcpServers ?? [],
+      tools: expert.tools ?? [],
       model: expert.model,
       thinkingLevel: expert.thinkingLevel,
       enabled: expert.enabled,
@@ -320,6 +335,7 @@ export class ExpertService {
         examples: preset.examples,
         skills: preset.skills,
         mcpServers: preset.mcpServers,
+        tools: preset.tools,
         model: preset.model,
         thinkingLevel: preset.thinkingLevel,
         enabled: true,
@@ -347,6 +363,7 @@ export class ExpertService {
       examples: input.examples,
       skills: input.skills,
       mcpServers: input.mcpServers,
+      tools: Array.isArray(input.tools) ? input.tools : undefined,
       model: input.model,
       thinkingLevel: input.thinkingLevel,
       body: input.body,
@@ -369,6 +386,7 @@ export class ExpertService {
       examples: expert.examples ?? [],
       skills: expert.skills ?? [],
       mcpServers: expert.mcpServers ?? [],
+      tools: expert.tools ?? [],
       model: expert.model,
       thinkingLevel: expert.thinkingLevel,
       enabled: expert.enabled,
@@ -445,6 +463,8 @@ export class ExpertService {
     thinkingLevel?: string;
     skills: string[];
     mcpServers: string[];
+    /** Hard tool allowlist (module 01 polish); empty = unrestricted. */
+    tools: string[];
   } | null> {
     const resolved = await this.get(id);
     if (!resolved.expert || resolved.body == null) return null;
@@ -455,6 +475,7 @@ export class ExpertService {
       thinkingLevel: resolved.expert.thinkingLevel,
       skills: resolved.expert.skills,
       mcpServers: resolved.expert.mcpServers,
+      tools: resolved.expert.tools ?? [],
     };
   }
 
@@ -495,18 +516,23 @@ export class ExpertService {
     });
     const sessionId = String(created.session?.id ?? "").trim();
     if (!sessionId) throw new Error("session.create returned no session");
-    const boundPrompt = withSkillsBinding(persona.personaPrompt, persona.skills);
+    const boundPrompt = withToolsClause(
+      withSkillsBinding(persona.personaPrompt, persona.skills),
+      persona.tools,
+    );
     this.deps.foregroundRegistry.register(sessionId, {
       kind: "expert",
       id: request.expertId,
       name: persona.name,
       personaPrompt: boundPrompt,
+      ...(persona.tools.length ? { tools: persona.tools } : {}),
     });
 
     const run = await driver.start({
       sessionId,
       prompt: request.task,
       personaPrompt: boundPrompt,
+      ...(persona.tools.length ? { allowedTools: persona.tools } : {}),
       timeoutMs: HOST_RPC_TIMEOUT_MS,
     });
 
@@ -552,6 +578,17 @@ export class ExpertService {
  * summon site renders this block into the persona prompt so the binding is
  * enforced by the payload the agent actually sees (not just the UI).
  */
+/**
+ * Declares the expert's hard tool allowlist in the persona payload (module 01
+ * polish). The runtime catalog is filtered independently; this clause tells
+ * the model why other tools are absent instead of letting it guess.
+ */
+export function withToolsClause(personaPrompt: string, tools: string[]): string {
+  const list = (tools ?? []).map((tool) => String(tool).trim()).filter(Boolean);
+  if (!list.length) return personaPrompt;
+  return `${personaPrompt.trimEnd()}\n\n## 工具白名单\n- 本专家仅可使用以下工具：${list.join("、")}。未列出的工具在本会话中不可用，也不要尝试调用。`;
+}
+
 export function withSkillsBinding(personaPrompt: string, skills: string[]): string {
   const list = (skills ?? []).map((s) => String(s).trim()).filter(Boolean);
   if (!list.length) return personaPrompt;
@@ -571,6 +608,7 @@ const BUILTIN_PRESETS = BUILTIN_EXPERT_DOCUMENTS.map((preset) => {
     examples: parsed.front.examples ?? [],
     skills: parsed.front.skills ?? [],
     mcpServers: parsed.front.mcpServers ?? [],
+    tools: parsed.front.tools ?? [],
     model: parsed.front.model,
     thinkingLevel: parsed.front.thinkingLevel,
   };

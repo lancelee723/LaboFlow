@@ -300,6 +300,8 @@ export interface ExpertListItem {
   examples: string[];
   skills: string[];
   mcpServers: string[];
+  /** Optional hard tool allowlist; empty/absent = unrestricted. */
+  tools?: string[];
   model?: string;
   thinkingLevel?: string;
   budgetTokens?: number;
@@ -316,6 +318,7 @@ export interface ExpertSaveInput {
   examples?: string[];
   skills?: string[];
   mcpServers?: string[];
+  tools?: string[];
   model?: string;
   thinkingLevel?: string;
   budgetTokens?: number;

@@ -49,6 +49,10 @@ pub struct UserExpertRecord {
     pub skills: Vec<String>,
     #[serde(default)]
     pub mcp_servers: Vec<String>,
+    /// Optional hard tool allowlist (module 01 polish): when non-empty the
+    /// session runtime only declares these tools. Empty means unrestricted.
+    #[serde(default)]
+    pub tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -74,6 +78,7 @@ pub struct UserExpertInput {
     pub examples: Option<Vec<String>>,
     pub skills: Option<Vec<String>>,
     pub mcp_servers: Option<Vec<String>>,
+    pub tools: Option<Vec<String>>,
     pub model: Option<String>,
     pub thinking_level: Option<String>,
     pub body: Option<String>,
@@ -252,6 +257,7 @@ fn expert_from_front_matter(
         examples: parse_example_list(front.get("examples")),
         skills: parse_list(front.get("skills")),
         mcp_servers: parse_list(front.get("mcpservers")),
+        tools: parse_list(front.get("tools")),
         model: front
             .get("model")
             .cloned()
@@ -287,6 +293,9 @@ fn render_expert_document(record: &UserExpertRecord, body: &str) -> String {
     }
     if !record.mcp_servers.is_empty() {
         output.push_str(&format!("mcpServers: [{}]\n", record.mcp_servers.join(", ")));
+    }
+    if !record.tools.is_empty() {
+        output.push_str(&format!("tools: [{}]\n", record.tools.join(", ")));
     }
     if let Some(model) = &record.model {
         output.push_str(&format!("model: {model}\n"));
@@ -552,6 +561,12 @@ impl UserExpertRegistry {
                 .into_iter()
                 .take(MAX_LIST_ITEMS)
                 .collect(),
+            tools: input
+                .tools
+                .unwrap_or_default()
+                .into_iter()
+                .take(MAX_LIST_ITEMS)
+                .collect(),
             model: input.model.filter(|value| !value.trim().is_empty()),
             thinking_level: normalize_thinking(input.thinking_level.as_deref()),
             enabled: input.enabled.unwrap_or(true),
@@ -635,6 +650,9 @@ impl UserExpertRegistry {
         }
         if let Some(servers) = input.mcp_servers {
             next.mcp_servers = servers.into_iter().take(MAX_LIST_ITEMS).collect();
+        }
+        if let Some(tools) = input.tools {
+            next.tools = tools.into_iter().take(MAX_LIST_ITEMS).collect();
         }
         next.model = match input.model {
             Some(value) if value.trim().is_empty() => None,
@@ -1119,6 +1137,33 @@ mod tests {
             .unwrap();
         assert_eq!(updated.id, "数据科学家");
         assert_eq!(experts.list().unwrap().len(), 1);
+
+        // Tool allowlist round-trips through the document frontmatter and can
+        // be cleared again with an empty list.
+        let scoped = experts
+            .update(
+                "数据科学家",
+                UserExpertInput {
+                    tools: Some(vec!["Read".into(), "Grep".into(), "Bash".into()]),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(scoped.tools, vec!["Read", "Grep", "Bash"]);
+        let (reloaded, _) = experts.read("数据科学家").unwrap().unwrap();
+        assert_eq!(reloaded.tools, vec!["Read", "Grep", "Bash"]);
+        let cleared = experts
+            .update(
+                "数据科学家",
+                UserExpertInput {
+                    tools: Some(Vec::new()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(cleared.tools.is_empty());
 
         assert!(experts.remove("数据科学家").unwrap());
         assert!(experts.list().unwrap().is_empty());

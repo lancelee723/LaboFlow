@@ -1010,9 +1010,10 @@ function registerIpc() {
     sendToRenderer,
     voiceService,
     liveCallService,
-    // LaboFlow T6.0.2: foreground expert persona lookup (module 01).
+    // LaboFlow T6.0.2: foreground expert persona lookup (module 01); the
+    // record also carries the expert's tool allowlist (module 01 polish).
     resolveExpertPersona: (sessionId: string) =>
-      laboflow.services.expertService.foregroundPersona(sessionId),
+      laboflow.services.expertService.foregroundRecord(sessionId),
   });
   // LaboFlow fork channels (org/expert/kb/channel/space/skill market).
   const ipcOnError = (channel: string, error: unknown) => {
