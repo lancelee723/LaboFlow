@@ -106,6 +106,8 @@ type RuntimeParams = {
   mode?: Mode;
   /** Persona overlay forwarded to the runtime (module 01 experts). */
   personaPrompt?: string;
+  /** Hard tool allowlist (module 01 expert polish); absent = unrestricted. */
+  allowedTools?: string[];
   /** Extra behaviour clauses appended to the composed prompt (module 05). */
   toolGuidanceClauses?: string[];
   /** Durable host turn ID for the prompt currently being executed. */
@@ -228,6 +230,7 @@ async function runtimeFor(
   const reusable = existing?.matches({
     mode,
     personaPrompt: params.personaPrompt,
+    allowedTools: params.allowedTools,
     toolGuidanceClauses: params.toolGuidanceClauses,
     provider,
     thinkingLevel,
@@ -297,6 +300,7 @@ async function runtimeFor(
     sessionId,
     mode,
     personaPrompt: params.personaPrompt,
+    allowedTools: params.allowedTools,
     toolGuidanceClauses: params.toolGuidanceClauses,
     turnId: params.turnId,
     provider,

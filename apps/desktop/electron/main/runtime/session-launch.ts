@@ -263,6 +263,8 @@ export function createSessionLaunchRuntime({
       thinkingLevel?: SessionThinkingLevel;
       /** Persona overlay (module 01 experts) prepended to the harness prompt. */
       personaPrompt?: string;
+      /** Hard tool allowlist (module 01 expert polish); absent = unrestricted. */
+      allowedTools?: string[];
     } = {},
   ) {
     if (!runtimeState.host) throw new Error("host unavailable");
@@ -621,6 +623,7 @@ export function createSessionLaunchRuntime({
         ),
         ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
         ...(overrides.personaPrompt ? { personaPrompt: overrides.personaPrompt } : {}),
+        ...(overrides.allowedTools?.length ? { allowedTools: overrides.allowedTools } : {}),
         thinkingLevel,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
         commandShell,

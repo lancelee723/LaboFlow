@@ -175,6 +175,7 @@ function createRuntime(
     pluginSkills: import("./plugin-skills-prompt.js").PluginSkillDef[];
     commandShell: CommandShellOption;
     turnId: string;
+    allowedTools: string[];
     host: { call: ReturnType<typeof vi.fn>; onNotification?: ReturnType<typeof vi.fn> };
     onEvent: (envelope: unknown) => void;
   }> = {},
@@ -184,6 +185,7 @@ function createRuntime(
     sessionId: "session-1",
     mode: overrides.mode === "chat" ? "plan" : overrides.mode ?? "agent",
     turnId: overrides.turnId,
+    allowedTools: overrides.allowedTools,
     provider: overrides.provider ?? provider,
     commandShell: overrides.commandShell ?? commandShell,
     thinkingLevel: overrides.thinkingLevel ?? "medium",
@@ -10823,5 +10825,80 @@ describe("toolResultFromUi image restoration (issue #1073)", () => {
     };
     const restored = toolResultFromUi(row, timestamp);
     expect(restored.content).toEqual([{ type: "text", text: expect.stringContaining("broken.png") }]);
+  });
+});
+
+describe("expert tool allowlist (module 01 polish)", () => {
+  it("drops non-allowlisted tools from the catalog but retains session-critical ones", async () => {
+    const runtime = createRuntime({ allowedTools: ["Read", "Grep"] });
+    const internals = runtime as any;
+    const catalog = internals.toolCatalog as Map<string, unknown>;
+    const names = [...catalog.keys()];
+
+    // Allowlisted tools survive.
+    expect(names).toContain("Read");
+    expect(names).toContain("Grep");
+    // Session-critical retained tools survive.
+    expect(names).toContain("asktool");
+    expect(names).toContain("new_context");
+    // ToolSearch only exists when on-demand tools remain; the allowlist above
+    // leaves none, so discovery has nothing to search (asserted below).
+    // Mutation tools outside the allowlist are gone — they cannot be called
+    // nor re-discovered through ToolSearch (the deferred set derives from
+    // this catalog).
+    expect(names).not.toContain("Bash");
+    expect(names).not.toContain("Edit");
+    expect(names).not.toContain("Write");
+    await runtime.dispose();
+  });
+
+  it("keeps ToolSearch available when the allowlist leaves on-demand tools", async () => {
+    // BrowserPreview is not a core tool, so it lands in the deferred set and
+    // discovery stays meaningful — it can only surface allowlisted tools.
+    const runtime = createRuntime({ allowedTools: ["Read", "BrowserPreview"] });
+    const internals = runtime as any;
+    const names = [...(internals.toolCatalog as Map<string, unknown>).keys()];
+    expect(names).toContain("BrowserPreview");
+    expect(names).toContain("ToolSearch");
+    expect(names).not.toContain("Bash");
+    await runtime.dispose();
+  });
+
+  it("keeps the Skill tool while skills are advertised and drops it otherwise", async () => {
+    const withSkills = createRuntime({
+      allowedTools: ["Read"],
+      pluginSkills: [{ id: "seo-analysis", name: "seo-analysis", description: "d" }] as never,
+    });
+    expect([...((withSkills as any).toolCatalog as Map<string, unknown>).keys()]).toContain("Skill");
+    await withSkills.dispose();
+
+    const withoutSkills = createRuntime({ allowedTools: ["Read"] });
+    expect([...((withoutSkills as any).toolCatalog as Map<string, unknown>).keys()]).not.toContain("Skill");
+    await withoutSkills.dispose();
+  });
+
+  it("leaves the catalog unrestricted when no allowlist is set", async () => {
+    const runtime = createRuntime();
+    const names = [...((runtime as any).toolCatalog as Map<string, unknown>).keys()];
+    expect(names).toContain("Read");
+    expect(names).toContain("Bash");
+    await runtime.dispose();
+  });
+
+  it("retires the runtime when the allowlist changes", async () => {
+    const runtime = createRuntime({ allowedTools: ["Read", "Grep"] });
+    const internals = runtime as any;
+    const matches = (allowed?: string[]) =>
+      internals.matches({
+        mode: "agent",
+        provider: internals.provider,
+        thinkingLevel: "medium",
+        commandShell: internals.commandShell,
+        allowedTools: allowed,
+      });
+    expect(matches(["Read", "Grep"])).toBe(true);
+    expect(matches(["Read"])).toBe(false);
+    expect(matches(undefined)).toBe(false);
+    await runtime.dispose();
   });
 });

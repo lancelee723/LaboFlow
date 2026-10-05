@@ -33,8 +33,11 @@ export type AgentIpcDependencies = {
   approvedExecutionIdsBySession: Map<string, string>;
   claimedExecutionSessions: Map<string, string>;
   resolveAgentRuntimeLaunch: (...args: any[]) => Promise<any>;
-  /** LaboFlow T6.0.2: foreground expert persona for the session (module 01). */
-  resolveExpertPersona?: (sessionId: string) => string | undefined;
+  /** LaboFlow T6.0.2: foreground expert persona binding for the session
+   * (module 01); includes the tool allowlist (module 01 polish). */
+  resolveExpertPersona?: (sessionId: string) =>
+    | { personaPrompt: string; tools?: string[] }
+    | undefined;
   acquireSessionOperation: (sessionId: string) => Promise<() => void>;
   finishTurn: FinishTurn;
   /**
@@ -448,7 +451,8 @@ export function registerAgentIpc({
     // plumbing flows personaPrompt into the sidecar.
     const expertPersona = resolveExpertPersona?.(req.sessionId);
     const launch = await resolveAgentRuntimeLaunch(req.sessionId, session, settings, {
-      ...(expertPersona ? { personaPrompt: expertPersona } : {}),
+      ...(expertPersona ? { personaPrompt: expertPersona.personaPrompt } : {}),
+      ...(expertPersona?.tools?.length ? { allowedTools: expertPersona.tools } : {}),
     });
     sidecar.setProjectInstructionRoot(req.sessionId, launch.projectPath);
 

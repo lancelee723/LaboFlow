@@ -970,6 +970,10 @@ export type AgentRuntimeOptions = {
   /** Persona overlay (expert identity) prepended ahead of the harness prompt.
    * Unlike `systemPrompt` (full replacement) it keeps the default guidance. */
   personaPrompt?: string;
+  /** Hard tool allowlist (module 01 expert polish): when set, the tool catalog
+   * only declares these names plus session-critical retained tools. Absent or
+   * empty leaves the catalog unrestricted. */
+  allowedTools?: string[];
   /** Behaviour clauses appended after the harness prompt (module 05: KB
    * citation contract, active only when retrieval tools are in the catalog). */
   toolGuidanceClauses?: string[];
@@ -1037,6 +1041,8 @@ export type RuntimeMatchConfig = {
   provider: RuntimeProviderConfig;
   thinkingLevel: SessionThinkingLevel;
   personaPrompt?: string;
+  /** Hard tool allowlist (module 01 expert polish); absent = unrestricted. */
+  allowedTools?: string[];
   toolGuidanceClauses?: string[];
   pluginTools?: PluginToolDef[];
   pluginSkills?: PluginSkillDef[];
@@ -1682,6 +1688,8 @@ export class DesktopAgentRuntime {
   private streamSink: StreamCoalescer;
   private baseSystemPrompt: string;
   private personaPrompt?: string;
+  /** Hard tool allowlist as a Set for catalog filtering (module 01 polish). */
+  private allowedTools?: Set<string>;
   private toolGuidanceClauses?: string[];
   private customSystemPrompt?: CustomSystemPrompt;
   private planningState: PlanningState;
@@ -1925,6 +1933,11 @@ export class DesktopAgentRuntime {
     this.projectMemory = opts.projectMemory?.trim() || undefined;
     this.compactionEnabled = compactionEnabled(opts.compactionSettings);
     this.compactionStrategy = resolveCompactionStrategy(opts.compactionStrategy);
+    // Before the first tool-catalog build: the allowlist filters the catalog.
+    this.allowedTools =
+      opts.allowedTools && opts.allowedTools.length > 0
+        ? new Set(opts.allowedTools)
+        : undefined;
 
     this.rebuildToolCatalog();
     const model = buildProviderModel(this.provider);
@@ -2544,6 +2557,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       // A persona change (expert switch) must retire the runtime so the next
       // prompt composes the new identity instead of reusing the stale one.
       (this.personaPrompt ?? "") === (config.personaPrompt ?? "") &&
+      // Tightening or loosening the expert tool allowlist retires the runtime:
+      // the stale catalog would keep declaring removed tools.
+      safeJson([...(this.allowedTools ?? [])].sort()) ===
+        safeJson([...new Set(config.allowedTools ?? [])].sort()) &&
       safeJson(this.toolGuidanceClauses ?? []) ===
         safeJson(config.toolGuidanceClauses ?? []) &&
       safeJson([...this.subagentModelKeys].sort()) ===
@@ -3659,6 +3676,16 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     const catalog = new Map<string, AgentTool>();
     for (const tool of this.buildToolDefinitions()) {
       if (!this.isToolAllowedInMode(tool.name) && !retainModeToolDeclaration(tool.name)) continue;
+      // Expert allowlist (module 01 polish): a whitelisted session only
+      // declares the allowed names plus session-critical retained tools.
+      // Deferred discovery inherits the same filter because the deferred set
+      // is derived from this catalog.
+      if (
+        this.allowedTools &&
+        !this.allowedTools.has(tool.name) &&
+        !this.isExpertToolRetained(tool.name)
+      )
+        continue;
       // The execution mode is decided here, in one place, so no tool can grow
       // an accidental parallel batch: everything is sequential except `Task`.
       // pi runs a whole batch sequentially when it holds one sequential tool,
@@ -3706,6 +3733,22 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         def.name === name &&
         Array.isArray(def.planSafeActions) &&
         def.planSafeActions.length > 0,
+    );
+  }
+
+  /**
+   * Session-critical tools that survive an expert allowlist (module 01
+   * polish): the user-facing ask channel, host-owned context compaction, and
+   * on-demand discovery — the deferred set is already filtered to allowlisted
+   * tools, so ToolSearch can only re-surface those. The Skill tool stays
+   * while the session advertises skills, so a bound expert can load them.
+   */
+  private isExpertToolRetained(name: string): boolean {
+    return (
+      name === ASK_TOOL_NAME ||
+      name === CONTEXT_COMPACTION_TOOL_NAME ||
+      name === TOOL_SEARCH_NAME ||
+      (name === SKILL_TOOL_NAME && this.pluginSkills.length > 0)
     );
   }
 
