@@ -1,18 +1,18 @@
 /**
- * Slides — bundled first-party plugin (module 06).
+ * Slides — bundled first-party plugin (module 06). Single PPT engine since
+ * ADR 0040: the L1 pptxgenjs quick deck was removed (quick-generation
+ * quality eroded user trust and duplicated the vendored pipeline's niche);
+ * everything routes through PPT-Master.
  *
- * L1 (fast engine): `slides_plan` normalizes/validates the outline the AGENT
- * drafted from the conversation, `slides_export` writes the confirmed outline
- * as an editable .pptx via the vendored pptxgenjs. All heavy logic lives in
- * ./lib/slides.js so it stays testable without a plugin host.
- *
- * L2 (PPT-Master, vendored skill — DEVPLAN Phase A): the skill corpus guides
+ * PPT-Master (vendored skill — DEVPLAN Phase A): the skill corpus guides
  * the agent (skills/ppt-master.md thin shell + upstream body); these tools
  * expose only what the agent cannot do itself:
  *   - ppt_master_status: five-state runtime inspection + the {skillDir,
  *     pythonPath} pair the skill preamble requires before any Bash call
  *   - ppt_master_setup: venv bootstrap as a background job (uv preferred,
- *     AGPL-guarded MIT-only subset) — setup exceeds the 110s tool budget
+ *     AGPL-guarded MIT-only subset) — setup exceeds the 110s tool budget.
+ *     The runtime is PRE-PROVISIONED at plugin load and packaged installs
+ *     install offline from the bundled wheelhouse; first use never waits.
  *   - ppt_job_status: poll background jobs
  *   - ppt_read_doc: read-only whitelist bridge into the vendored corpus
  *     (the agent's Read sandbox cannot reach the app bundle)
@@ -22,13 +22,13 @@
  * ppt_script replaces them with argparse-faithful schemas.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { exec as spawnExec } from "node:child_process";
 import { join, dirname } from "node:path";
+import { arch, platform } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { exportDeckToBuffer, normalizeOutline, sanitizeFileName } from "./lib/slides.js";
 import {
   detectRuntime,
   ensureRuntime,
@@ -93,22 +93,20 @@ async function resolveDataDir() {
 }
 
 function runtimeDeps(extra = {}) {
-  return { pluginDir: getPluginDir(), dataDir: globalThis.__pptDataDir, ...extra };
+  return {
+    pluginDir: getPluginDir(),
+    dataDir: globalThis.__pptDataDir,
+    // Packaged builds ship an offline wheelhouse via extraResources at
+    // <pluginDir>/wheelhouse/<platform>-<arch>; dev checkouts return ""
+    // and install online (mirror setting still applies).
+    wheelhouseDir: bundledWheelhouseDir(),
+    ...extra,
+  };
 }
 
-async function resolveOutputPath(fileName) {
-  let root = "";
-  try {
-    const workspace = await pi.workspace.get();
-    root = String(workspace?.path ?? "");
-  } catch {
-    root = "";
-  }
-  const settings = await pi.plugin.getSettings().catch(() => ({}));
-  const folder = String(settings?.outputDir ?? "slides").replace(/^\/+|\/+$/g, "") || "slides";
-  return root
-    ? join(root, folder, fileName)
-    : join(process.cwd(), folder, fileName);
+function bundledWheelhouseDir() {
+  const dir = join(getPluginDir(), "wheelhouse", `${platform()}-${arch()}`);
+  return existsSync(dir) ? dir : "";
 }
 
 export async function onLoad() {
@@ -121,7 +119,6 @@ export async function onLoad() {
   jobManager = createJobManager({ dataDir: globalThis.__pptDataDir, logger: (line) => pi.log?.("info", line) });
   jobManager.recover();
 
-  registerL1Tools();
   registerMasterTools();
   registerStageTools();
 
@@ -133,6 +130,51 @@ export async function onLoad() {
       await pi.ui.openPanel({ title: "PPT 确认卡" });
     },
   });
+
+  await pi.commands.register({
+    id: "newPresentation",
+    title: "新建 PPT（PPT-Master）/ New presentation",
+    keywords: ["ppt", "新建", "演示", "幻灯片", "presentation", "deck"],
+    run: async () => {
+      // The plugin API cannot prefill the composer or open a docked view,
+      // so this palette entry is a signpost to the two real entries: the
+      // ppt-master skill ("/" menu) and the dockable PPT workbench view.
+      await pi.ui.showToast?.(
+        "新建 PPT：在输入框选择技能 /laboflow.slides/ppt-master，或直接说「用 PPT-Master 做一份 PPT：…」。工作台可从面板「+」中打开。",
+        "info",
+      );
+    },
+  });
+
+  preProvisionRuntime();
+}
+
+/**
+ * FR-PPT-17: pre-provision the L2 runtime shortly after load so the first
+ * PPT request never waits on an install. Fire-and-forget — a failure only
+ * logs; the doctor surfaces the real state when the user asks for PPT.
+ * Tests call onLoad() directly with a mocked host, so they can disable this
+ * via globalThis.__pptPreProvisionDisabled before import.
+ */
+const PRE_PROVISION_DELAY_MS = 10_000;
+
+function preProvisionRuntime() {
+  if (globalThis.__pptPreProvisionDisabled) return;
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const status = await detectRuntime(runtimeDeps());
+        if (status.stage === "ready") return;
+        const submitted = await startSetupJob();
+        pi.log?.(
+          "info",
+          `[laboflow.slides] runtime pre-provision started: ${submitted.id ?? submitted.jobId} (stage=${status.stage})`,
+        );
+      } catch (error) {
+        pi.log?.("warn", `[laboflow.slides] runtime pre-provision skipped: ${error?.message ?? error}`);
+      }
+    })();
+  }, PRE_PROVISION_DELAY_MS).unref?.();
 }
 
 /** Shared setup-job body for the agent tool and the workbench panel. */
@@ -164,113 +206,13 @@ async function startSetupJob() {
   return submitted;
 }
 
-function registerL1Tools() {
-  void pi.agent.registerTool({
-    name: "slides_plan",
-    description:
-      "Normalize and validate a slide-deck outline you drafted from the conversation. Input: { topic, outline: { deckTitle, pages: [{ layout, title, subtitle?, bullets?, data?, columns?, matrix?, milestones?, quote?, attribution?, speakerNotes? }] } }. Returns the canonical outline — show it to the user for review BEFORE calling slides_export.",
-    risk: "low",
-    schema: {
-      type: "object",
-      properties: {
-        topic: { type: "string", description: "Deck subject and core message" },
-        outline: { type: "object", description: "Your drafted outline: { deckTitle, pages: [...] }" },
-      },
-      required: ["topic", "outline"],
-    },
-    execute: async (args) => {
-      const topic = String(args?.topic ?? "").trim();
-      if (!topic) return { error: "topic is required" };
-      if (!args?.outline || typeof args.outline !== "object") {
-        return { error: "outline object is required: { deckTitle, pages }" };
-      }
-      try {
-        const normalized = normalizeOutline({
-          ...args.outline,
-          deckTitle: args.outline.deckTitle ?? topic,
-        });
-        const warnings = [];
-        normalized.pages.forEach((page, index) => {
-          if (page.layout === "bullets" && !(page.bullets ?? []).length) {
-            warnings.push(`第 ${index + 1} 页（${page.title}）为 bullets 版式但没有要点`);
-          }
-          if (page.title && page.title.length <= 8 && !["title", "end", "quote"].includes(page.layout)) {
-            warnings.push(`第 ${index + 1} 页标题「${page.title}」偏短语——行动标题应为完整判断句`);
-          }
-        });
-        return {
-          content: [
-            `大纲已规范化（${normalized.pages.length} 页）。请向用户逐页确认或按修改意见调整，确认后调用 slides_export 导出。`,
-            warnings.length ? `\n质量提示：\n- ${warnings.join("\n- ")}` : "",
-            `\n\n${JSON.stringify(normalized, null, 2)}`,
-          ].join(""),
-          details: { outline: normalized, warnings },
-        };
-      } catch (error) {
-        return { error: error?.message || String(error) };
-      }
-    },
-  });
-
-  void pi.agent.registerTool({
-    name: "slides_export",
-    description:
-      "Export a confirmed outline as an editable .pptx file (PowerPoint/WPS/LibreOffice compatible; every element is a native text box or table). Input: { deckTitle, pages: [...], theme? }. Returns the written file path. Call this only after the user confirmed the outline.",
-    risk: "medium",
-    schema: {
-      type: "object",
-      properties: {
-        deckTitle: { type: "string" },
-        fileName: { type: "string" },
-        theme: {
-          type: "object",
-          properties: {
-            accent: { type: "string" },
-            font: { type: "string" },
-          },
-        },
-        pages: { type: "array", items: { type: "object", properties: { layout: { type: "string" }, title: { type: "string" } } } },
-      },
-      required: ["deckTitle", "pages"],
-    },
-    execute: async (args) => {
-      const deckTitle = String(args?.deckTitle ?? "").trim();
-      if (!deckTitle) return { error: "deckTitle is required" };
-      if (!Array.isArray(args?.pages) || args.pages.length === 0) {
-        return { error: "pages must be a non-empty array" };
-      }
-      try {
-        const settings = await pi.plugin.getSettings().catch(() => ({}));
-        const theme = {
-          accent: args?.theme?.accent ?? settings?.accentColor ?? "1F4E79",
-          font: args?.theme?.font,
-        };
-        const { normalized, buffer } = await exportDeckToBuffer(
-          { deckTitle, pages: args.pages },
-          theme,
-        );
-        const fileName = `${sanitizeFileName(args?.fileName ?? normalized.deckTitle)}.pptx`;
-        const outputPath = await resolveOutputPath(fileName);
-        await mkdir(join(outputPath, ".."), { recursive: true });
-        await writeFile(outputPath, buffer);
-        return {
-          content: `已导出可编辑 PPTX（${normalized.pages.length} 页）：${outputPath}\n可在 PowerPoint / WPS / LibreOffice 中直接编辑每个元素。`,
-          details: { path: outputPath, pages: normalized.pages.length, bytes: buffer.length },
-        };
-      } catch (error) {
-        return { error: error?.message || String(error) };
-      }
-    },
-  });
-}
-
 // ───────── L2: PPT-Master runtime channel (vendored skill, Phase A) ─────────
 
 function registerMasterTools() {
   void pi.agent.registerTool({
     name: "ppt_master_status",
     description:
-      "Check the PPT-Master (L2 精制引擎, vendored ppt-master) Python runtime and get the paths needed to run it. Takes no parameters. Returns { stage: ready|venv-missing|guard-failed|deps-missing, skillDir, pythonPath, doctor }. ALWAYS call this first before any PPT-Master work: use the returned skillDir/pythonPath for every subsequent script invocation — never guess or search for paths. If not ready, follow doctor (usually: call ppt_master_setup, or fall back to slides_export).",
+      "Check the PPT-Master (L2 精制引擎, vendored ppt-master) Python runtime and get the paths needed to run it. Takes no parameters. Returns { stage: ready|venv-missing|guard-failed|deps-missing, skillDir, pythonPath, doctor }. ALWAYS call this first before any PPT-Master work: use the returned skillDir/pythonPath for every subsequent script invocation — never guess or search for paths. If not ready, follow doctor (the runtime is pre-provisioned at app startup; call ppt_master_setup to repair).",
     risk: "low",
     schema: { type: "object", properties: {} },
     execute: async () => {
@@ -284,7 +226,7 @@ function registerMasterTools() {
         hint:
           status.stage === "ready"
             ? "已就绪：按 ppt-master 技能规程用该 pythonPath 执行 ${skillDir}/scripts 下的脚本"
-            : "未就绪：按 doctor 提示处理；用户着急时可先用 slides_export（L1 快速引擎）保底",
+            : "未就绪：按 doctor 提示处理；应用启动时已自动预置运行时（ppt_master_setup 作业），用 ppt_job_status 查看进度",
       };
       return {
         content: `PPT-Master 运行时：${payload.stage}\n${payload.doctor || ""}\n${payload.hint}\n\`\`\`json\n${JSON.stringify({ stage: payload.stage, skillDir: payload.skillDir, pythonPath: payload.pythonPath }, null, 2)}\n\`\`\``,
@@ -470,8 +412,9 @@ function registerStageTools() {
       const projectDir = String(args?.projectDir ?? "").trim();
       const stage = String(args?.stage ?? "").trim();
       if (!projectDir) return { error: "projectDir is required" };
-      // FR-PPT-16: cost estimate rides every submission; stage-2 refuses when
-      // the configured deck budget is exceeded (settings → budgetTokens).
+      // FR-PPT-16: cost estimate rides every submission and is persisted in
+      // the pipeline state; stage-2 refuses when the configured deck budget
+      // is exceeded (settings → budgetTokens).
       const settings = await pi.plugin.getSettings().catch(() => ({}));
       const pageCount = countStagePages(args?.recommendations);
       const estimate = budgetVerdict(pageCount, settings?.budgetTokens);
@@ -483,22 +426,24 @@ function registerStageTools() {
           budget: estimate.budget,
         };
       }
-      const verdict = submitStage(projectDir, stage, args?.recommendations);
+      const verdict = submitStage(projectDir, stage, args?.recommendations, undefined, estimate.estimate);
       if (verdict.error) return { error: verdict.error };
-      return { ...verdict, estimate: estimate.estimate };
       pendingConfirm = { projectDir, stage, submittedAt: verdict.state.stages[stage]?.submittedAt ?? null };
       // The docked workbench polls for this pending decision and renders it at
       // the bottom of the panel; no floating popup anymore. Keep a native
       // notification so the user knows a decision is waiting even when the
       // workbench tab is closed (the command-palette card stays as fallback).
       try {
-        pi.ui.showNativeNotification?.("PPT 设计方案待确认", "打开右侧 PPT 工作台，在下方确认（或从命令面板运行「打开 PPT 确认卡」）");
+        pi.ui.showNativeNotification?.({
+          title: "PPT 设计方案待确认",
+          body: "打开右侧 PPT 工作台，在下方确认（或从命令面板运行「打开 PPT 确认卡」）",
+        });
       } catch {
         /* notifications optional */
       }
       return {
         content: `已提交 ${stage} 设计方案：请在右侧 PPT 工作台下方的「设计确认」区选择并提交（若工作台未打开，请先在面板「+」中打开它；或从命令面板运行「打开 PPT 确认卡」）。**现在停下等待用户操作**——沉默不构成确认。用户操作后用 ppt_stage_status(projectDir, stage) 查询结果；等待期间不要推进任何 ⛔ BLOCKING 之后的步骤。`,
-        details: { statePath: join(projectDir, "laboflow", "pipeline-state.json") },
+        details: { statePath: join(projectDir, "laboflow", "pipeline-state.json"), estimate: estimate.estimate },
       };
     },
   });
@@ -708,6 +653,3 @@ export function onUnload() {
   activeSetupJobId = null;
   pendingConfirm = null;
 }
-
-// Exposed for host-side smoke checks.
-export const __internals = { normalizeOutline };

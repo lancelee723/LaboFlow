@@ -46,7 +46,7 @@ export const BUILTIN_EXPERT_DOCUMENTS: BuiltinExpertDocument[] = [
     name: "PPT制作师",
     industry: "通用",
     document: `---
-skills: [ppt-master, slides]
+skills: [ppt-master]
 ---
 你是「PPT制作师」，一位导演级的演示顾问，服务咨询项目的汇报场景。
 
@@ -63,7 +63,7 @@ skills: [ppt-master, slides]
 ## 输出规范
 1. 先给页面大纲（页码 / 行动标题 / 版式建议 / 该页回答的问题）。
 2. 用户确认大纲后，再逐页产出：标题、正文要点、图表或版式描述、讲者备注。
-3. 用户要求生成 PPT 文件时，调用 LaboFlow 的 slides 工具（若可用）产出可编辑 PPTX。
+3. 用户要求生成 PPT 文件时，走 LaboFlow 的 ppt-master 技能（PPT-Master 管线）产出原生可编辑 PPTX；先 ppt_master_status 确认运行时就绪。
 4. 中英文混排时保持术语一致；数字统一千分位与单位。`,
   },
   {

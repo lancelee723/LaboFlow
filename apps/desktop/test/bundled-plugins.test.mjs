@@ -198,24 +198,23 @@ test("Token Insights ships as an ordinary bundled plugin", () => {
 });
 
 /**
- * LaboFlow Slides (module 06): L1 pptxgenjs baseline + L2 vendored PPT-Master.
+ * LaboFlow Slides (module 06): the single-engine PPT-Master channel.
  *
  * The L2 channel failed acceptance once (tools defined but never registered,
  * vendored SKILL.md invisible to the agent, stale CLI arg contracts). These
  * assertions pin the rebuild contract from
  * docs/laboflow/phase5/06-ppt-assistant/PPT-MASTER-PLUGIN-DEVPLAN.md:
- * every L2 tool the runtime registers must be declared, the PPT-Master skill
+ * every tool the runtime registers must be declared, the PPT-Master skill
  * corpus must be reachable through contributes.skills, and the vendored tree
- * must stay AGPL-clean and pyc-free.
+ * must stay AGPL-clean and pyc-free. The L1 pptxgenjs quick engine was
+ * removed (ADR ppt-single-engine-ppt-master) — it must stay gone.
  */
-test("Slides ships the L1+L2 tool surface it registers", () => {
+test("Slides ships the single-engine tool surface it registers", () => {
   const slidesManifest = JSON.parse(read("resources/plugins/laboflow.slides/manifest.json"));
   const slidesMain = read("resources/plugins/laboflow.slides/main.js");
   assert.equal(slidesManifest.id, "laboflow.slides");
   const declaredTools = slidesManifest.contributes.agentTools.map((t) => t.name);
   for (const tool of [
-    "slides_plan",
-    "slides_export",
     "ppt_master_status",
     "ppt_master_setup",
     "ppt_job_status",
@@ -230,6 +229,13 @@ test("Slides ships the L1+L2 tool surface it registers", () => {
       `main.js must register ${tool}`,
     );
   }
+  for (const removed of ["slides_plan", "slides_export"]) {
+    assert.ok(!declaredTools.includes(removed), `L1 tool ${removed} must stay removed`);
+    assert.ok(
+      !new RegExp(`name:\\s*"${removed}"`).test(slidesMain),
+      `main.js must not register ${removed}`,
+    );
+  }
   // The old dead-code path (defined but never registered) must stay gone.
   assert.doesNotMatch(slidesMain, /registerL2Tools/);
   assert.match(slidesMain, /pi\.agent\.registerTool/);
@@ -239,7 +245,10 @@ test("Slides ships the L1+L2 tool surface it registers", () => {
   assert.equal(slidesManifest.ui.panel, "renderer/confirm-card.html");
   assert.deepEqual(slidesManifest.contributes.views.map((v) => v.id), ["workbench"]);
   assert.ok(existsSync(resolve("resources/plugins/laboflow.slides/renderer/workbench.html")));
-  assert.deepEqual(slidesManifest.contributes.commands.map((c) => c.id), ["openConfirmCard"]);
+  assert.deepEqual(slidesManifest.contributes.commands.map((c) => c.id), [
+    "openConfirmCard",
+    "newPresentation",
+  ]);
   for (const permission of ["ui.panel", "ui.view", "notify"]) {
     assert.ok(slidesManifest.permissions.includes(permission), `permission needed: ${permission}`);
   }
@@ -256,10 +265,10 @@ test("Slides exposes the PPT-Master skill corpus to the agent", () => {
   const skills = slidesManifest.contributes.skills.map((s) =>
     typeof s === "string" ? s : s.path,
   );
-  assert.ok(skills.includes("./skills/slides.md"), "L1 workflow skill must stay");
+  assert.ok(!skills.includes("./skills/slides.md"), "the removed L1 skill must stay gone");
   assert.ok(
     skills.includes("./skills/ppt-master.md"),
-    "vendored PPT-Master needs its thin-shell skill or the agent cannot route to L2",
+    "vendored PPT-Master needs its thin-shell skill or the agent cannot route to the pipeline",
   );
   // Frontmatter contract (Pi skills spec): name + description, description<=240.
   const skill = read("resources/plugins/laboflow.slides/skills/ppt-master.md");
@@ -315,6 +324,7 @@ test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", async ()
     let total = 0;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === "__pycache__") continue; // regenerable bytecode, not shipped intent
+      if (entry.name === "wheelhouse") continue; // bundled offline wheels, measured separately below
       const full = resolve(dir, entry.name);
       if (entry.isDirectory()) total += du(full);
       else total += statSync(full).size;
@@ -326,6 +336,19 @@ test("Slides vendored PPT-Master stays complete, pinned and AGPL-free", async ()
     pluginBytes <= 75 * 1024 * 1024,
     `plugin footprint ${(pluginBytes / 1048576).toFixed(1)} MiB exceeds the 75 MiB packaging ceiling`,
   );
+  // The bundled offline wheelhouse (gitignored, rebuilt per platform via
+  // scripts/make-ppt-wheelhouse.mjs --bundled) rides inside the plugin via
+  // extraResources. Guard it on its own ceiling so a careless requirements
+  // bump cannot silently balloon the installer; it is optional in a fresh
+  // checkout (built at packaging time).
+  const wheelhouseRoot = resolve("resources/plugins/laboflow.slides/wheelhouse");
+  if (existsSync(wheelhouseRoot)) {
+    const wheelhouseBytes = du(wheelhouseRoot);
+    assert.ok(
+      wheelhouseBytes <= 60 * 1024 * 1024,
+      `wheelhouse footprint ${(wheelhouseBytes / 1048576).toFixed(1)} MiB exceeds the 60 MiB ceiling`,
+    );
+  }
 });
 
 test("bundled plugins are packaged and located at runtime", () => {

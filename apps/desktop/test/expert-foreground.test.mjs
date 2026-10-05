@@ -180,8 +180,8 @@ test("FR-PPT-15: withSkillsBinding renders the structured binding block", async 
   const { withSkillsBinding } = await import("../electron/main/expert-service.ts");
   const bare = withSkillsBinding("你是专家。", []);
   assert.equal(bare, "你是专家。", "no skills → no binding block");
-  const bound = withSkillsBinding("你是专家。", ["ppt-master", "slides"]);
+  const bound = withSkillsBinding("你是专家。", ["ppt-master", "chart-helper"]);
   assert.match(bound, /## 工具链绑定（结构化声明）/);
   assert.match(bound, /ppt-master/);
-  assert.match(bound, /slides/);
+  assert.match(bound, /chart-helper/);
 });

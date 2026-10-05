@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "laboflow.slides",
   "name": "Slides",
-  "version": "2.0.0",
-  "description": "PPT assistant: fast editable decks (pptxgenjs baseline) plus the vendored PPT-Master refinement pipeline (native DrawingML, consulting-grade), with an isolated guarded Python runtime.",
+  "version": "3.0.0",
+  "description": "PPT assistant built on the vendored PPT-Master refinement pipeline (native DrawingML, consulting-grade), with an isolated guarded Python runtime pre-provisioned at startup.",
   "author": "LaboFlow",
   "main": "main.js",
   "ui": {
@@ -16,73 +16,6 @@
   "contributes": {
     "agentTools": [
       {
-        "name": "slides_plan",
-        "description": "Normalize and validate a slide-deck outline you drafted from the conversation (fast L1 engine). Returns the canonical outline — show it to the user for review BEFORE calling slides_export. Input: { topic, outline: { deckTitle, pages } }.",
-        "risk": "low",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "topic": {
-              "type": "string",
-              "description": "Deck subject and core message"
-            },
-            "outline": {
-              "type": "object",
-              "description": "Your drafted outline: { deckTitle, pages: [...] }"
-            }
-          },
-          "required": [
-            "topic",
-            "outline"
-          ]
-        }
-      },
-      {
-        "name": "slides_export",
-        "description": "Export a confirmed outline as an editable .pptx (fast L1 engine: native text boxes/tables). Input: { deckTitle, pages: [{ layout, title, bullets?, data?, quote?, speakerNotes? }], theme? }. Call only after the user confirmed the outline.",
-        "risk": "medium",
-        "schema": {
-          "type": "object",
-          "properties": {
-            "deckTitle": {
-              "type": "string"
-            },
-            "fileName": {
-              "type": "string"
-            },
-            "theme": {
-              "type": "object",
-              "properties": {
-                "accent": {
-                  "type": "string"
-                },
-                "font": {
-                  "type": "string"
-                }
-              }
-            },
-            "pages": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "layout": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          },
-          "required": [
-            "deckTitle",
-            "pages"
-          ]
-        }
-      },
-      {
         "name": "ppt_master_status",
         "description": "Check the PPT-Master (L2 精制引擎, vendored ppt-master) Python runtime and get { stage, skillDir, pythonPath, doctor }. ALWAYS call first before PPT-Master work; use the returned paths for every script call — never guess.",
         "risk": "low",
@@ -93,7 +26,7 @@
       },
       {
         "name": "ppt_master_setup",
-        "description": "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard) as a background job. Returns { jobId } — poll with ppt_job_status. Call only when the user asked for L2 setup or approved it.",
+        "description": "Install the isolated PPT-Master Python runtime (venv + MIT-only requirements + AGPL guard) as a background job. Returns { jobId } — poll with ppt_job_status. The runtime is normally pre-provisioned automatically at app startup; call this only to repair or reinstall it on request.",
         "risk": "medium",
         "schema": {
           "type": "object",
@@ -223,6 +156,18 @@
           "slides",
           "设计"
         ]
+      },
+      {
+        "id": "newPresentation",
+        "title": "新建 PPT（PPT-Master）/ New presentation",
+        "keywords": [
+          "ppt",
+          "新建",
+          "演示",
+          "幻灯片",
+          "presentation",
+          "deck"
+        ]
       }
     ],
     "views": [
@@ -238,24 +183,9 @@
       }
     ],
     "skills": [
-      "./skills/slides.md",
       "./skills/ppt-master.md"
     ],
     "settings": [
-      {
-        "key": "accentColor",
-        "type": "string",
-        "default": "1F4E79",
-        "title": "Accent color (hex)",
-        "description": "Theme accent for exported decks (L1)"
-      },
-      {
-        "key": "outputDir",
-        "type": "string",
-        "default": "slides",
-        "title": "Output folder (workspace-relative)",
-        "description": "Where .pptx files are written inside the workspace"
-      },
       {
         "key": "pipMirror",
         "type": "select",

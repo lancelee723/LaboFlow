@@ -1,13 +1,13 @@
 ---
 name: ppt-master
-description: Vendored PPT-Master pipeline: consulting-grade native editable PPTX (麦肯锡/咨询风格精品PPT). Use for 制作/生成/美化PPT、幻灯片、演示文稿、汇报材料, create/beautify/redesign a presentation/deck/slides, or ppt-master. Quick plain decks: slides-l1.
+description: Vendored PPT-Master pipeline: consulting-grade native editable PPTX (麦肯锡/咨询风格精品PPT). Use for 新建/制作/生成/美化PPT、幻灯片、演示文稿、汇报材料, new/create/beautify/redesign a presentation/deck/slides, or ppt-master.
 ---
 
 # PPT Master（LaboFlow 薄壳）
 
-上游 PPT-Master（vendored，MIT，pin 见 `VENDOR_VERSION`）在此宿主中的运行约定。**以下 7 条是硬性前置，优先级高于上游正文；正文原样生效。**
+上游 PPT-Master（vendored，MIT，pin 见 `VENDOR_VERSION`）在此宿主中的运行约定。**以下 8 条是硬性前置，优先级高于上游正文；正文原样生效。**
 
-1. **路径引导（先做）**：任何 PPT-Master 工作开始前，先调用工具 `ppt_master_status`（工具全名 `plugin_laboflow_slides_ppt_master_status`）。返回的 `skillDir` 就是上游正文中的 `${SKILL_DIR}`，`pythonPath` 是唯一合法解释器。**禁止猜测、搜索或假设路径**（对齐上游 "never search or guess"）。若 stage 非 ready：按 `doctor` 处理（通常调用 `ppt_master_setup` 后用 `ppt_job_status` 轮询安装作业，成功后再 status 确认）；用户着急时可先走 slides-l1 快速引擎保底。
+1. **路径引导（先做）**：任何 PPT-Master 工作开始前，先调用工具 `ppt_master_status`（工具全名 `plugin_laboflow_slides_ppt_master_status`）。返回的 `skillDir` 就是上游正文中的 `${SKILL_DIR}`，`pythonPath` 是唯一合法解释器。**禁止猜测、搜索或假设路径**（对齐上游 "never search or guess"）。若 stage 非 ready：按 `doctor` 处理（通常调用 `ppt_master_setup` 后用 `ppt_job_status` 轮询安装作业，成功后再 status 确认）；运行时通常已在应用启动时自动预置，也可用 ppt_master_setup 手动重装。
 2. **语料读取**：正文中的 `Read <path>`（workflows/…、references/… 等）一律用工具 `ppt_read_doc`（传语料库相对路径）。不要用 Bash cat——语料在工作区沙箱之外。
 3. **脚本执行**：正文中的 `python3 "${SKILL_DIR}/scripts/…"` 一律改为 `Bash: PYTHONDONTWRITEBYTECODE=1 <pythonPath> <skillDir>/scripts/…`（用 ppt_master_status 返回的绝对路径展开 `${SKILL_DIR}`；`PYTHONDONTWRITEBYTECODE=1` 前缀必须保留——应用包只读，字节码缓存在正式安装上会直接报错）。每命令一次独立调用，禁止 cd、禁止批量 shell 循环（对齐上游纪律）。**项目必须建在工作区**：`project_manager.py init` 必须传 `--dir <工作区>/projects`（用 ppt_script 白名单工具会强制校验）——上游默认把项目建进 skill 目录（LaboFlow 中为只读应用资源），绝不允许。
 4. **确认面替换**：正文/`references/confirm-surface.md` 中"启动确认页（Flask confirm_ui）"的分支**不可用**（本环境未安装 flask）。两阶段确认一律走 **chat 分支**：把 `recommendations.stage1/stage2` 的内容完整呈现在对话里，然后**停下等待用户显式回复**——沉默不构成确认，禁止代用户确认（上游原文纪律原样适用）。用户明确说"快速生成/不用确认"时才可按上游 Quick profile 跳过。

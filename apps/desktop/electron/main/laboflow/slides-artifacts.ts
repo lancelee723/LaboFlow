@@ -9,8 +9,9 @@
 import type { HostProcess } from "../host-process";
 
 const SLIDES_PLUGIN_ID = "laboflow.slides";
-/** L1 quick export and the L2 pipeline's export gate script. */
-const EXPORT_TOOL_NAMES = new Set(["slides_export", "ppt_script"]);
+/** The L2 pipeline's export gate script (single engine since ADR
+ * ppt-single-engine-ppt-master — the L1 slides_export tool is gone). */
+const EXPORT_TOOL_NAMES = new Set(["ppt_script"]);
 const L2_EXPORT_SCRIPT = "svg_to_pptx";
 
 /** Path-shaped .pptx tokens in tool output text (CJK workspace names included).

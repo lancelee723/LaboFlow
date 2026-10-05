@@ -11,14 +11,14 @@ import test from "node:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PLUGIN_DIR = join(
-  new URL("../resources/plugins/laboflow.slides/", import.meta.url).pathname.replace(/\/$/, ""),
-);
+const PLUGIN_DIR = fileURLToPath(new URL("../resources/plugins/laboflow.slides/", import.meta.url)).replace(/\/$/, "");
 
 const workspaces = [];
 async function loadPlugin({ workspace }) {
   const pluginDataDir = mkdtempSync(join(tmpdir(), "ppt-panel-data-"));
+  globalThis.__pptPreProvisionDisabled = true;
   globalThis.pi = {
     agent: { registerTool: async () => {} },
     plugin: { getSettings: async () => ({}), getDataPath: async () => pluginDataDir },

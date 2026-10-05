@@ -31,9 +31,6 @@ test("ignores bare extensions and non-pptx mentions", () => {
 test("only export-gated slides tools qualify for registration", () => {
   const base = { sessionId: "s1", args: {}, result: { content: "x.pptx" } };
   assert.ok(
-    isSlidesExportResult({ ...base, pluginId: "laboflow.slides", toolName: "slides_export" }),
-  );
-  assert.ok(
     isSlidesExportResult({
       ...base,
       pluginId: "laboflow.slides",
@@ -51,8 +48,18 @@ test("only export-gated slides tools qualify for registration", () => {
     }),
     false,
   );
+  // The removed L1 export must never come back as an artifact source.
   assert.equal(
-    isSlidesExportResult({ ...base, pluginId: "pi.browser", toolName: "slides_export" }),
+    isSlidesExportResult({ ...base, pluginId: "laboflow.slides", toolName: "slides_export" }),
+    false,
+  );
+  assert.equal(
+    isSlidesExportResult({
+      ...base,
+      pluginId: "pi.browser",
+      toolName: "ppt_script",
+      args: { script: "svg_to_pptx" },
+    }),
     false,
   );
 });
