@@ -19,3 +19,12 @@
 ## 与 pi-agent-teams 的语义对齐
 - 白名单默认不限制（与子代理默认只读不同）：专家面向咨询场景，默认全工具可用，白名单是收紧手段；保留集（ask/上下文压缩/发现/Skill）保证会话机制完整，ToolSearch 只能激活白名单内工具。
 - 验证门沿用既有 loop 裁决协议，不引入独立 verify 角色（成本考量）；集成者承担验证者职责，标准在拆解时前置（Workbuddy 式 SOP 前置 + pi-agent-teams 式验收前置）。
+
+## 后记（2026-10-06 rebase）
+main 前进到 `d390cb691`（single PPT engine——L1 移除 + 孤儿 slides.js import 修复），原记录中的 7 例基线失败已随该修复消失。分支已 rebase 到 `d390cb691`，无冲突，提交哈希更新为：
+- `dd31a760e` 验证门（对应原 b1ff5847d）
+- `46f3fb3aa` 白名单存储/透传/编辑器（原 d5c7946e2）
+- `4e1f17121` 硬过滤（原 b02e2359c，可单独 revert）
+- `33d600257` 实施记录
+
+rebase 后全量复验：desktop **3561/3561** · agent-runtime **1132/1132** · host-core **701/701** · tsc 无错 · i18n 9 locale 构建通过。分支就绪待合并。
