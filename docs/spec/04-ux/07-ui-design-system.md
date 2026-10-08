@@ -1294,6 +1294,10 @@ Every dropdown / option-list in Settings **must** use `SettingsMenuSelect`
 instead of the native `Select` (`<select>`) component. Native `Select`
 is reserved for non-Settings contexts where OS-level rendering is acceptable.
 
+Appearance pickers and compact Settings-row triggers use the scaled
+`--ds-settings-picker-height` metric. Full-width `SettingsMenuSelect` controls
+keep `--ds-field-height` so they align with adjacent form inputs.
+
 
 ## 12. State patterns
 
