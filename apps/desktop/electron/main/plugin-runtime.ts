@@ -439,6 +439,7 @@ export type PluginHostServices = {
   }) => Promise<void> | void;
   /** Work-panel guest + CDP, gated by `browser.cdp` in the runtime. */
   browser?: {
+    reveal: (sessionId?: string) => Promise<void>;
     navigate: (
       input: { url?: string; path?: string },
       sessionId?: string,
@@ -528,6 +529,7 @@ const HOST_API_ALLOWLIST = new Set([
   "bus.publish",
   "bus.subscribe",
   "bus.unsubscribe",
+  "browser.reveal",
   "browser.navigate",
   "browser.action",
   "browser.setBounds",
@@ -5687,6 +5689,19 @@ export class PluginRuntime {
           this.busUnsubscribe(loaded, subscriptionId),
       },
       browser: {
+        reveal: async () => {
+          this.assertPermission(loaded, "browser.cdp");
+          if (!this.services.browser) {
+            throw apiError("UNAVAILABLE", "browser host missing");
+          }
+          await this.services.browser.reveal(this.browserSessionId(pluginId));
+          this.services.audit?.({
+            pluginId,
+            api: "browser.reveal",
+            ok: true,
+            ts: Date.now(),
+          });
+        },
         navigate: async (input: { url?: string; path?: string } = {}) => {
           this.assertPermission(loaded, "browser.cdp");
           if (!this.services.browser) {

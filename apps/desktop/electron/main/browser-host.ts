@@ -1,4 +1,4 @@
-import type { BrowserWindow, WebContents } from "electron";
+import type { BrowserWindow } from "electron";
 import type { BrowserState } from "@pi-desktop/shared";
 import type { BrowserPane } from "./browser-view";
 import { BrowserCdp } from "./browser-cdp";
@@ -8,7 +8,6 @@ import { join } from "node:path";
 export const BROWSER_PLUGIN_ID = "pi.browser";
 export const BROWSER_VIEW_ID = "browser";
 const BROWSER_REVEAL_TIMEOUT_MS = 5_000;
-const BROWSER_CDP_TIMEOUT_MS = 30_000;
 
 export type BrowserRect = {
   x: number;
@@ -63,6 +62,7 @@ export type BrowserHostDeps = {
   getFileRoot: (sessionId?: string) => Promise<string | null>;
   getScratchDir?: (sessionId?: string) => string | null;
   onState: (state: BrowserState) => void;
+  onRevealView?: (sessionId: string, tabId?: string) => void;
 };
 
 type ChromeSurface = {
@@ -70,6 +70,13 @@ type ChromeSurface = {
   viewId: string;
   visible: boolean;
   bounds: BrowserRect;
+};
+
+type BrowserRevealWaiter = {
+  sessionId: string;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
 };
 
 type BrowserPage = {
@@ -84,49 +91,6 @@ type BrowserPage = {
   navigating: boolean;
 };
 
-/**
- * Bound any CDP round trip on the guest. A page that opens a native dialog
- * or runs a busy loop never answers `debugger.sendCommand`, and neither the
- * CDP layer nor the RPC timeout table bounds it (#1611) — without this the
- * agent's browser tool call hangs forever. On timeout the whole debugger
- * session is detached as recovery, which also drops previously created
- * snapshot uids; the tool result explains the timeout so the agent can
- * re-snapshot.
- */
-function withCdpDeadline<T>(
-  page: BrowserPage,
-  wc: WebContents,
-  run: () => Promise<T>,
-  label: string,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => {
-      const error = Object.assign(
-        new Error(`browser ${label} timed out after ${BROWSER_CDP_TIMEOUT_MS}ms`),
-        { code: "TIMEOUT" },
-      );
-      reject(error);
-      try {
-        page.cdp.detach(wc);
-      } catch {
-        // Preserve the timeout result if the guest is already shutting down.
-      }
-    }, BROWSER_CDP_TIMEOUT_MS);
-  });
-  return Promise.race([Promise.resolve().then(run), timedOut])
-    .finally(() => { if (timeout) clearTimeout(timeout); });
-}
-
-function captureScreenshotWithDeadline<T>(
-  page: BrowserPage,
-  capture: (wc: WebContents) => Promise<T>,
-): Promise<T> {
-  return page.pane.captureScreenshot((wc) =>
-    withCdpDeadline(page, wc, () => capture(wc), "screenshot"),
-  );
-}
-
 /** Host-owned pages, keyed by conversation and resource tab. */
 export class BrowserHost {
   private readonly deps: BrowserHostDeps;
@@ -135,6 +99,7 @@ export class BrowserHost {
   private readonly selectedTabs = new Map<string, string | null>();
   private readonly pendingSessions = new Map<string, string>();
   private readonly pendingTabs = new Set<string>();
+  private readonly revealWaiters = new Set<BrowserRevealWaiter>();
   private active: BrowserPage | null = null;
   private window: BrowserWindow | null = null;
   private chrome: ChromeSurface | null = null;
@@ -153,6 +118,52 @@ export class BrowserHost {
   setChromeSurface(surface: ChromeSurface | null): void {
     this.chrome = surface;
     this.applyGuest();
+    this.resolveVisibleRevealWaiters();
+  }
+
+  async reveal(sessionId?: string): Promise<void> {
+    const id = sessionId?.trim();
+    if (!id) throw this.unavailableError("Browser reveal requires an active session.");
+    if (!this.deps.isPluginLoaded(BROWSER_PLUGIN_ID)) {
+      throw this.unavailableError("The Browser plugin is unavailable.");
+    }
+    if (this.isBrowserVisibleForSession(id)) return;
+    const revealView = this.deps.onRevealView;
+    if (!revealView) throw this.unavailableError("Browser view cannot be opened by this host.");
+
+    let waiter: BrowserRevealWaiter | undefined;
+    const visible = new Promise<void>((resolve, reject) => {
+      const entry: BrowserRevealWaiter = {
+        sessionId: id,
+        resolve,
+        reject: (error) => reject(error),
+        timeout: setTimeout(() => {
+          this.rejectRevealWaiter(
+            entry,
+            this.unavailableError(
+              "Browser view did not become visible for the calling session. Switch to that session and retry.",
+            ),
+          );
+        }, BROWSER_REVEAL_TIMEOUT_MS),
+      };
+      waiter = entry;
+      this.revealWaiters.add(entry);
+    });
+
+    try {
+      const tabId = this.active?.sessionId === id
+        ? this.active.tabId ?? undefined
+        : this.selectedTabs.get(id) ?? undefined;
+      revealView(id, tabId);
+    } catch (error) {
+      if (waiter) {
+        this.rejectRevealWaiter(
+          waiter,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+    return visible;
   }
 
   getContext(): { sessionId?: string; tabId?: string } {
@@ -164,6 +175,44 @@ export class BrowserHost {
       ...(page.sessionId ? { sessionId: page.sessionId } : {}),
       ...(page.tabId ? { tabId: page.tabId } : {}),
     };
+  }
+
+  private isBrowserVisibleForSession(sessionId: string): boolean {
+    return this.chrome?.visible === true &&
+      this.chrome.pluginId === BROWSER_PLUGIN_ID &&
+      this.chrome.viewId === BROWSER_VIEW_ID &&
+      this.active?.sessionId === sessionId;
+  }
+
+  private resolveVisibleRevealWaiters(): void {
+    for (const waiter of [...this.revealWaiters]) {
+      if (!this.isBrowserVisibleForSession(waiter.sessionId)) continue;
+      this.revealWaiters.delete(waiter);
+      clearTimeout(waiter.timeout);
+      waiter.resolve();
+    }
+  }
+
+  private rejectRevealWaiter(waiter: BrowserRevealWaiter, error: Error): void {
+    if (!this.revealWaiters.delete(waiter)) return;
+    clearTimeout(waiter.timeout);
+    waiter.reject(error);
+  }
+
+  private unavailableError(message: string): Error & { code: string } {
+    return Object.assign(new Error(message), { code: "UNAVAILABLE" });
+  }
+
+  private assertBrowserViewVisible(): void {
+    if (
+      this.chrome?.visible === true &&
+      this.chrome.pluginId === BROWSER_PLUGIN_ID &&
+      this.chrome.viewId === BROWSER_VIEW_ID
+    ) return;
+    throw Object.assign(
+      new Error("Browser view must be visible before browser operations can run"),
+      { code: "UNAVAILABLE" },
+    );
   }
 
   private key(sessionId: string, tabId: string | null): string {
@@ -264,12 +313,13 @@ export class BrowserHost {
   }
 
   async navigate(input: BrowserNavigateInput, sessionId?: string, tabId?: string): Promise<BrowserState | null> {
+    this.assertBrowserViewVisible();
     const target = String(input.path ?? input.url ?? "").trim();
     if (!target) return this.getState();
     const id = sessionId?.trim() || this.active?.sessionId || "";
     if (tabId !== undefined) {
       const page = this.pages.get(this.key(id, tabId));
-      return page ? this.navigatePage(page, target) : null;
+      return page ? this.navigatePage(page, target, true) : null;
     }
     if (!this.active) {
       this.active = this.pageFor(id, this.selectedTabs.get(id) ?? null);
@@ -279,18 +329,43 @@ export class BrowserHost {
       this.rememberLocation(id, target);
       return null;
     }
-    return this.navigatePage(this.active, target);
+    return this.navigatePage(this.active, target, true);
   }
 
-  private async navigatePage(page: BrowserPage, target: string): Promise<BrowserState | null> {
+  private async navigatePage(page: BrowserPage, target: string, requireVisible = false): Promise<BrowserState | null> {
     const version = ++page.navigationVersion;
+    const previousLocation = this.locations.get(page.key);
     page.navigating = true;
     this.locations.set(page.key, target);
     const current = () => this.pages.get(page.key) === page && page.navigationVersion === version;
+    const assertVisible = () => {
+      if (!requireVisible) return;
+      try {
+        this.assertBrowserViewVisible();
+      } catch (error) {
+        page.navigating = false;
+        if (previousLocation === undefined) this.locations.delete(page.key);
+        else this.locations.set(page.key, previousLocation);
+        throw error;
+      }
+    };
+    let root: string | null;
+    try {
+      root = await this.deps.getFileRoot(page.sessionId || undefined);
+    } catch (error) {
+      if (!current()) return null;
+      assertVisible();
+      page.navigating = false;
+      page.started = false;
+      page.state = { url: target, title: "", isLoading: false, canGoBack: false,
+        canGoForward: false, loadError: error instanceof Error ? error.message : String(error) };
+      if (this.active === page) { this.publishCurrent(); this.applyGuest(); }
+      return null;
+    }
+    if (!current()) return null;
+    assertVisible();
     let state: BrowserState | null;
     try {
-      const root = await this.deps.getFileRoot(page.sessionId || undefined);
-      if (!current()) return null;
       state = await page.pane.navigateAndWait(target, root);
     } catch (error) {
       if (!current()) return null;
@@ -315,6 +390,7 @@ export class BrowserHost {
   }
 
   action(action: "back" | "forward" | "reload" | "stop", sessionId?: string, tabId?: string): void {
+    this.assertBrowserViewVisible();
     const page = sessionId !== undefined && tabId !== undefined
       ? this.pages.get(this.key(sessionId, tabId)) : this.active;
     if (page?.state) page.pane.action(action);
@@ -324,40 +400,32 @@ export class BrowserHost {
     return this.active?.state ? { ...this.active.state, ...this.getContext() } : null;
   }
 
+  getStateForPlugin(): BrowserState | null {
+    this.assertBrowserViewVisible();
+    return this.getState();
+  }
+
   openExternal(sessionId?: string, tabId?: string): void {
+    this.assertBrowserViewVisible();
     const page = sessionId !== undefined && tabId !== undefined
       ? this.pages.get(this.key(sessionId, tabId)) : this.active;
     if (page?.started) page.pane.openExternal();
   }
 
   private currentPage(): BrowserPage {
-    if (!this.active?.started) {
-      // Agents hit this when an action arrives before any navigation (the
-      // guest is created by the first navigate). Say the remedy, not just
-      // the failure, so the loop self-corrects in one step.
-      throw Object.assign(
-        new Error('no browser page is open yet — call action="navigate" with a URL first'),
-        { code: "UNAVAILABLE" },
-      );
-    }
+    this.assertBrowserViewVisible();
+    if (!this.active?.started) throw Object.assign(new Error('no browser page is open yet — call action="navigate" with a URL first'), { code: "UNAVAILABLE" });
     return this.active;
   }
 
   private requireWebContents() {
     const wc = this.currentPage().pane.getWebContents();
-    if (!wc || wc.isDestroyed()) {
-      throw Object.assign(
-        new Error("the browser page was closed — call action=\"navigate\" to reopen it"),
-        { code: "UNAVAILABLE" },
-      );
-    }
+    if (!wc || wc.isDestroyed()) throw Object.assign(new Error('no browser page is open yet — call action="navigate" with a URL first'), { code: "UNAVAILABLE" });
     return wc;
   }
 
   async snapshot(): Promise<{ tree: string; url: string; title: string }> {
-    const page = this.currentPage();
-    const wc = this.requireWebContents();
-    return withCdpDeadline(page, wc, () => page.cdp.snapshot(wc), "snapshot");
+    return this.currentPage().cdp.snapshot(this.requireWebContents());
   }
 
   async screenshot(input: { fullPage?: boolean } = {}, sessionId?: string): Promise<{ mimeType: string; data: string; path?: string }> {
@@ -373,22 +441,11 @@ export class BrowserHost {
     } catch { return shot; }
   }
 
-  async click(uid: string): Promise<void> {
-    const page = this.currentPage();
-    const wc = this.requireWebContents();
-    return withCdpDeadline(page, wc, () => page.cdp.click(wc, uid), "click");
-  }
-  async fill(uid: string, text: string): Promise<void> {
-    const page = this.currentPage();
-    const wc = this.requireWebContents();
-    return withCdpDeadline(page, wc, () => page.cdp.fill(wc, uid, text), "fill");
-  }
-  async evaluate(expression: string): Promise<unknown> {
-    const page = this.currentPage();
-    const wc = this.requireWebContents();
-    return withCdpDeadline(page, wc, () => page.cdp.evaluate(wc, expression), "evaluate");
-  }
+  async click(uid: string): Promise<void> { await this.currentPage().cdp.click(this.requireWebContents(), uid); }
+  async fill(uid: string, text: string): Promise<void> { await this.currentPage().cdp.fill(this.requireWebContents(), uid, text); }
+  async evaluate(expression: string): Promise<unknown> { return this.currentPage().cdp.evaluate(this.requireWebContents(), expression); }
   console(limit?: number): { messages: ReturnType<BrowserCdp["console"]> } {
+    this.assertBrowserViewVisible();
     if (!this.active?.started) return { messages: [] };
     const wc = this.requireWebContents();
     void this.active.cdp.attach(wc);
@@ -396,11 +453,10 @@ export class BrowserHost {
   }
   async cdpCommand(method: string, params?: unknown): Promise<unknown> {
     const page = this.currentPage();
-    const wc = this.requireWebContents();
     if (method === "Page.captureScreenshot") {
-      return captureScreenshotWithDeadline(page, (view) => page.cdp.send(view, method, params));
+      return page.pane.captureScreenshot((wc) => page.cdp.send(wc, method, params));
     }
-    return withCdpDeadline(page, wc, () => page.cdp.send(wc, method, params), `cdp ${method}`);
+    return page.cdp.send(this.requireWebContents(), method, params);
   }
 
   /** The renderer-created resource tab is the preview's only navigation owner. */
@@ -441,6 +497,12 @@ export class BrowserHost {
   dispose(): void { this.disposeGuest(); }
 
   disposeGuest(): void {
+    for (const waiter of [...this.revealWaiters]) {
+      this.rejectRevealWaiter(
+        waiter,
+        this.unavailableError("Browser view was closed before it became visible."),
+      );
+    }
     for (const page of this.pages.values()) {
       page.navigationVersion += 1;
       page.cdp.detach(page.pane.getWebContents() ?? undefined);
