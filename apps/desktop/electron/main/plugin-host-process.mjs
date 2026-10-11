@@ -239,6 +239,7 @@ function buildApi() {
     },
     ui: {
       openPanel: (options) => call("ui.openPanel", [options]),
+      openView: (input) => call("ui.openView", [input]),
       closePanel: () => call("ui.closePanel"),
       showToast: (message, level) => call("ui.showToast", [message, level]),
       notify: (input) => call("ui.notify", [input]),

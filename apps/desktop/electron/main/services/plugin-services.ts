@@ -261,6 +261,13 @@ export function createPluginServices({
     closePanel: async (pluginId) => {
       await pluginPanels.close(pluginId);
     },
+    openPluginView: async (request) => {
+      await pluginViews.open({
+        ...request,
+        locale: getUpdaterLocale(),
+        theme: getPluginPanelTheme(),
+      });
+    },
     // `net.fetch` is deliberately not overridden here: the runtime's own
     // implementation follows redirects by hand and re-checks the manifest
     // egress allowlist before every hop. A plain `fetch` service would let an

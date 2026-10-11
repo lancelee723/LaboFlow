@@ -112,6 +112,7 @@ import {
   type PluginShortcutRegistry,
 } from "./plugin-shortcut-registry";
 import { repairImportedExtensionWrapper } from "./imported-plugin-wrapper";
+import { resolveOwnPluginView } from "./plugin-view-request";
 
 export type RegisteredCommand = {
   id: string;
@@ -241,6 +242,23 @@ export type PluginPanelRequest = {
   development?: boolean;
 };
 
+/**
+ * A plugin asking the host to open one of its OWN contributed work-panel
+ * views. The permission / declaration / entry gate has already run in the
+ * runtime (`resolveOwnPluginView`); the view host adds locale and theme at
+ * this service boundary.
+ */
+export type PluginViewOpenServiceRequest = {
+  pluginId: string;
+  viewId: string;
+  /** Absolute path to the view's HTML entry, already resolved. */
+  htmlPath: string;
+  /** The plugin's egress allowlist; the view session is confined to it. */
+  netDomains?: readonly string[];
+  /** The install-time `net.anyHost` grant lifts the view's allowlist too. */
+  netAnyHost?: boolean;
+};
+
 export type PluginPanelBridgeContext = {
   /** Absolute path recorded by the panel preload for a real drop gesture. */
   droppedPath?: string;
@@ -356,6 +374,8 @@ export type PluginHostServices = {
   writeClipboard: (text: string) => Promise<void>;
   readClipboardHistory: () => Promise<ClipboardHistoryEntry[]>;
   openPanel: (request: PluginPanelRequest) => Promise<void>;
+  /** Open one of the plugin's own contributed views in the work panel. */
+  openPluginView: (request: PluginViewOpenServiceRequest) => Promise<void>;
   closePanel: (pluginId: string) => Promise<void>;
   fetch?: (input: {
     url: string;
@@ -503,6 +523,7 @@ const HOST_API_ALLOWLIST = new Set([
   "plugin.setSettings",
   "plugin.getDataPath",
   "ui.openPanel",
+  "ui.openView",
   "ui.closePanel",
   "ui.showToast",
   "ui.notify",
@@ -1395,6 +1416,9 @@ export class PluginRuntime {
       readClipboardHistory: async () => [],
       openPanel: async (request) => {
         this.toasts.push({ message: `Opened panel for ${request.pluginId}` });
+      },
+      openPluginView: async (request) => {
+        this.toasts.push({ message: `Opened view for ${request.pluginId}` });
       },
       closePanel: async () => undefined,
       ...services,
@@ -4967,6 +4991,41 @@ export class PluginRuntime {
         },
         closePanel: async () => {
           await this.services.closePanel(pluginId);
+        },
+        openView: async (input: { view?: unknown }) => {
+          const viewId = String(input?.view ?? "");
+          const resolution = resolveOwnPluginView({
+            permissions: loaded.permissions,
+            views: loaded.manifest.contributes?.views ?? [],
+            pluginPath,
+            viewId,
+          });
+          if (!resolution.ok) {
+            this.services.audit?.({
+              pluginId,
+              api: "ui.openView",
+              ok: false,
+              message: resolution.error,
+              ts: Date.now(),
+            });
+            throw apiError(
+              resolution.code === "PERMISSION" ? "PERMISSION_DENIED" : "NOT_FOUND",
+              resolution.error,
+            );
+          }
+          await this.services.openPluginView({
+            pluginId,
+            viewId,
+            htmlPath: resolution.htmlPath,
+            netDomains: this.netDomains(loaded),
+            netAnyHost: loaded.permissions.has("net.anyHost"),
+          });
+          this.services.audit?.({
+            pluginId,
+            api: "ui.openView",
+            ok: true,
+            ts: Date.now(),
+          });
         },
         showToast: async (message: string, level?: "info" | "warn" | "error") => {
           this.services.showToast(message, level);

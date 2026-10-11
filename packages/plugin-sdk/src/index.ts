@@ -1052,6 +1052,8 @@ export type PluginHostApi = {
   };
   ui: {
     openPanel: (opts?: { title?: string }) => Promise<void>;
+    /** Open one of THIS plugin's contributed views in the work panel. */
+    openView: (input: { view: string }) => Promise<void>;
     closePanel: () => Promise<void>;
     showToast: (message: string, level?: "info" | "warn" | "error") => Promise<void>;
     notify: (input: { title: string; body?: string }) => Promise<void>;
