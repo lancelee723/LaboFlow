@@ -65,11 +65,12 @@ test("skills satisfy the Pi contract (frontmatter fields, length caps)", { skip:
   }
 });
 
-test("panel and view titles localize and the view icon is a host token", { skip: !havePlugin }, () => {
-  const title = resolvePluginLocalizedString(manifestRaw.ui.title, "zh-CN");
-  assert.ok(title.length > 0);
+test("the workbench view title localizes in both host locales", { skip: !havePlugin }, () => {
+  // v4.0.0 retired the floating confirm-card panel along with its manifest
+  // `ui` key (plugin 71e4fb0); contributes.views[0] is the only surface now.
   const view = manifestRaw.contributes.views[0];
   assert.ok(resolvePluginLocalizedString(view.title, "en").length > 0);
+  assert.ok(resolvePluginLocalizedString(view.title, "zh-CN").length > 0);
 });
 
 test("no settings entry can hold a secret", { skip: !havePlugin }, () => {

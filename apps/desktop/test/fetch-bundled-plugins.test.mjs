@@ -30,3 +30,23 @@ test("applyBundle refuses a version mismatch", async () => {
   await assert.rejects(() => applyBundle({ lock, pluginsDir: dest, expectedId: "laboflow.ppt-master" }), /version/i);
   rmSync(src, { recursive: true, force: true }); rmSync(dest, { recursive: true, force: true });
 });
+test("applyBundle excludes repo-hygiene files from the copied plugin", async () => {
+  const src = makeSource("laboflow.ppt-master", "4.0.0");
+  mkdirSync(join(src, "test"), { recursive: true });
+  writeFileSync(join(src, "test/x.test.mjs"), "export {};\n");
+  writeFileSync(join(src, "README.md"), "readme\n");
+  writeFileSync(join(src, "AGENTS.md"), "agents\n");
+  writeFileSync(join(src, "PROVENANCE.md"), "provenance\n");
+  const dest = mkdtempSync(join(tmpdir(), "bund-dest-"));
+  const lock = { "laboflow.ppt-master": { version: "4.0.0", source: src } };
+  const report = await applyBundle({ lock, pluginsDir: dest, expectedId: "laboflow.ppt-master" });
+  assert.equal(report.copied, true);
+  const copied = join(dest, "laboflow.ppt-master");
+  assert.ok(!existsSync(join(copied, "test")), "test/ dir must not ship");
+  assert.ok(!existsSync(join(copied, "README.md")), "README.md must not ship");
+  assert.ok(!existsSync(join(copied, "AGENTS.md")), "AGENTS.md must not ship");
+  assert.ok(!existsSync(join(copied, "PROVENANCE.md")), "PROVENANCE.md must not ship");
+  assert.ok(existsSync(join(copied, "manifest.json")), "manifest.json must ship");
+  assert.ok(existsSync(join(copied, "renderer/x.html")), "renderer must ship");
+  rmSync(src, { recursive: true, force: true }); rmSync(dest, { recursive: true, force: true });
+});

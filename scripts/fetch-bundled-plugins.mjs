@@ -7,13 +7,30 @@
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const lockPath = join(repoRoot, "apps/desktop/plugins.bundle.json");
 const pluginsDir = join(repoRoot, "apps/desktop/resources/plugins");
+
+// Repo-hygiene files at a plugin source root that must never ship in a bundle.
+const NONSHIPPED_TOP_LEVEL_FILES = new Set(["AGENTS.md", "README.md", "PROVENANCE.md"]);
+
+function makeCopyFilter(src) {
+  return (p) => {
+    if (p.includes("__pycache__")) return false;
+    const rel = relative(src, p);
+    if (!rel) return true; // the source root itself
+    const segments = rel.split(sep);
+    if (segments.length === 1) {
+      if (segments[0] === "test") return false;
+      if (NONSHIPPED_TOP_LEVEL_FILES.has(segments[0])) return false;
+    }
+    return true;
+  };
+}
 
 export async function applyBundle({ lock, pluginsDir: dir, expectedId }) {
   const entry = lock[expectedId];
@@ -30,7 +47,7 @@ export async function applyBundle({ lock, pluginsDir: dir, expectedId }) {
   const dest = join(dir, expectedId);
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  cpSync(src, dest, { recursive: true, filter: (p) => !p.includes("__pycache__") });
+  cpSync(src, dest, { recursive: true, filter: makeCopyFilter(src) });
   return { copied: true, id: expectedId, version: entry.version, dest };
 }
 
