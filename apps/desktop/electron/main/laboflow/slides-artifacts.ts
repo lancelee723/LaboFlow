@@ -4,11 +4,12 @@
  * the artifacts table's upsert IS the version chain. Registration is
  * best-effort: extraction failures are silent (nothing to register), host
  * failures surface only in logs.
+ * Bundled-copy integration only — no-op when the plugin is absent (ADR 0041).
  */
 
 import type { HostProcess } from "../host-process";
 
-const SLIDES_PLUGIN_ID = "laboflow.slides";
+const SLIDES_PLUGIN_ID = "laboflow.ppt-master";
 /** The L2 pipeline's export gate script (single engine since ADR
  * ppt-single-engine-ppt-master — the L1 slides_export tool is gone). */
 const EXPORT_TOOL_NAMES = new Set(["ppt_script"]);

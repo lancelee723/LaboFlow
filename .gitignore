@@ -68,4 +68,3 @@ __pycache__/
 .playwright-cli
 worktrees
 apps/desktop/public/pdfjs/
-apps/desktop/resources/plugins/laboflow.slides/wheelhouse/

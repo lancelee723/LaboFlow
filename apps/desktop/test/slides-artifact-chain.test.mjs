@@ -33,7 +33,7 @@ test("only export-gated slides tools qualify for registration", () => {
   assert.ok(
     isSlidesExportResult({
       ...base,
-      pluginId: "laboflow.slides",
+      pluginId: "laboflow.ppt-master",
       toolName: "ppt_script",
       args: { script: "svg_to_pptx" },
     }),
@@ -42,7 +42,7 @@ test("only export-gated slides tools qualify for registration", () => {
   assert.equal(
     isSlidesExportResult({
       ...base,
-      pluginId: "laboflow.slides",
+      pluginId: "laboflow.ppt-master",
       toolName: "ppt_script",
       args: { script: "quality_checker" },
     }),
@@ -50,7 +50,7 @@ test("only export-gated slides tools qualify for registration", () => {
   );
   // The removed L1 export must never come back as an artifact source.
   assert.equal(
-    isSlidesExportResult({ ...base, pluginId: "laboflow.slides", toolName: "slides_export" }),
+    isSlidesExportResult({ ...base, pluginId: "laboflow.ppt-master", toolName: "slides_export" }),
     false,
   );
   assert.equal(
@@ -73,7 +73,7 @@ test("registers via host artifacts.record once per session+path", async () => {
     },
   };
   const input = {
-    pluginId: "laboflow.slides",
+    pluginId: "laboflow.ppt-master",
     toolName: "ppt_script",
     sessionId: "sess1",
     turnId: "turn9",
