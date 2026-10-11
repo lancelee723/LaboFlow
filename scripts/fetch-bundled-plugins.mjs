@@ -5,8 +5,9 @@
  * `source` is a local directory (this iteration) or an http(s) .zip URL.
  * Validates manifest id + version; refuses anything else.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { arch, platform } from "node:os";
 import { join, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -44,11 +45,38 @@ export async function applyBundle({ lock, pluginsDir: dir, expectedId }) {
     const hash = createHash("sha256").update(readFileSync(join(src, "manifest.json"))).digest("hex");
     if (hash !== entry.sha256) throw new Error(`sha256 mismatch for ${expectedId} manifest`);
   }
+  // Design G5: offline pre-provisioned install — a bundle without the platform
+  // wheelhouse would break first-run setup, so its absence is a hard error.
+  const wheelhouse = join(src, "wheelhouse", `${platform()}-${arch()}`);
+  if (!existsSync(wheelhouse)) {
+    throw new Error(
+      `wheelhouse missing for ${platform()}-${arch()} — run 'npm run build:wheelhouse' in the plugin repo`,
+    );
+  }
   const dest = join(dir, expectedId);
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   cpSync(src, dest, { recursive: true, filter: makeCopyFilter(src) });
   return { copied: true, id: expectedId, version: entry.version, dest };
+}
+
+// Packaging-time tripwire: the copied plugin footprint must stay under the
+// release ceiling (75 MiB — formerly enforced by the bundled-plugin test).
+const BUNDLE_SIZE_CEILING = 75 * 1024 * 1024;
+
+function dirSizeSync(dir) {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const p = stack.pop();
+    const st = statSync(p);
+    if (st.isDirectory()) {
+      for (const name of readdirSync(p)) stack.push(join(p, name));
+    } else {
+      total += st.size;
+    }
+  }
+  return total;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -57,5 +85,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   for (const id of Object.keys(lock)) {
     const report = await applyBundle({ lock, pluginsDir, expectedId: id });
     console.log(`bundled ${report.id}@${report.version} -> ${report.dest}`);
+  }
+  const total = Object.keys(lock).reduce((sum, id) => sum + dirSizeSync(join(pluginsDir, id)), 0);
+  if (total > BUNDLE_SIZE_CEILING) {
+    console.error(
+      `bundled plugin footprint is ${(total / 1048576).toFixed(1)} MiB — exceeds the ` +
+        `${BUNDLE_SIZE_CEILING / 1048576} MiB release ceiling; trim the plugin source or wheelhouse`,
+    );
+    process.exitCode = 1;
   }
 }
