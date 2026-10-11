@@ -38,6 +38,15 @@
 - 四轮实机验收（CDP + 真实输入 + OS 截屏）。
 - IM通道改名九语言 + 侧栏图标移除 + PPT工作台 presentation 图标。
 
+### 2026-10-11：Phase 7 PPT-Master 独立插件化
+
+- 文档：[phase7-ppt-master/ACCEPTANCE.md](phase7-ppt-master/ACCEPTANCE.md)（设计见主检出
+  `docs/laboflow/phase7-ppt-master/DESIGN.md`；决策记录 ADR 0041）
+- 插件抽为独立仓库 `/Users/lance/laboflow-ppt-master`（`laboflow.ppt-master` v4.0.0，
+  subtree 30 提交历史保留），工作台成为唯一确认面、自动打开、预览 daemon 禁令。
+- 自动化门全绿（插件 78 测试 + PPT_IT 4/4 + S10 13/13；宿主 3513 tests fail=0 +
+  ppt-host 7/7 + 打包冒烟）；实机 GUI 走查 8 项清单待用户运行。
+
 ## 已归档的 PLAN / SPEC 完成情况
 
 | 文档 | 归档位置 | 完成状态 |
