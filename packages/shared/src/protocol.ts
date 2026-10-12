@@ -471,6 +471,8 @@ export const IPC = {
     configSyncProgress: "pi-desktop/configSync/event/progress",
     extensionsUiPrompt: "pi-desktop/extensions/event/uiPrompt",
     extensionsStatus: "pi-desktop/extensions/event/status",
+    /** Main -> renderer: a plugin opened one of its own views (pi.ui.openView). */
+    pluginViewActivate: "pi-desktop/plugin/event/viewActivate",
     pluginLauncherShown: "pi-desktop/pluginLauncher/event/shown",
     agentMessage: "pi-desktop/agent/event/message",
     agentQueueChanged: "pi-desktop/agent/event/queueChanged",

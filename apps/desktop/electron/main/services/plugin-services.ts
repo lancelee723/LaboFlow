@@ -267,6 +267,14 @@ export function createPluginServices({
         locale: getUpdaterLocale(),
         theme: getPluginPanelTheme(),
       });
+      // The surface now exists in the main process, but only the renderer can
+      // mount its tab (PluginViewTab measures bounds and sets visibility).
+      // Plugin-initiated opens (pi.ui.openView) have no renderer round-trip
+      // of their own, so tell the shell to reveal the view.
+      sendToRenderer(IPC.event.pluginViewActivate, {
+        pluginId: request.pluginId,
+        viewId: request.viewId,
+      });
     },
     // `net.fetch` is deliberately not overridden here: the runtime's own
     // implementation follows redirects by hand and re-checks the manifest

@@ -1821,6 +1821,15 @@ export const api = {
       listener((payload ?? {}) as { reason?: string; pluginId?: string }),
     );
   },
+
+  onPluginViewActivate: (
+    listener: (event: { pluginId: string; viewId: string }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.pluginViewActivate, (payload) =>
+      listener((payload ?? {}) as { pluginId: string; viewId: string }),
+    );
+  },
   onSettingsChanged: (listener: (patch: Record<string, unknown>) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.settingsChanged, (payload) =>
