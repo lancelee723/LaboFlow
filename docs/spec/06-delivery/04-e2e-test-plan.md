@@ -14437,15 +14437,19 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 
 #### E2E-LAYOUT-work-panel-maximize
 
-- **Preconditions**: A desktop session is open with the work panel visible.
+- **Preconditions**: A desktop session is open with the work panel visible and
+  the bundled Browser plugin active on a loaded page.
   1. Note the current panel width. If the sidebar is expanded, collapse it;
      then click the panel header's `+` action to open a real work-panel tab.
   2. Click the panel header's preview toggle.
-  3. Inspect the header border box and tab alignment with the sidebar collapsed
+  3. While preview remains active, collapse and reopen the sidebar. Compare the
+     Browser/plugin placeholder's viewport-relative rectangle with the latest
+     native bounds report after each layout settles.
+  4. Inspect the header border box and tab alignment with the sidebar collapsed
      and expanded on macOS windowed/fullscreen and Windows/Linux. Confirm the
      overlay row and spacer declare neither drag nor no-drag and do not cover
      the panel controls with opaque paint.
-  4. Using native pointer input, click the centers and edges of sidebar and
+  5. Using native pointer input, click the centers and edges of sidebar and
      New Task controls; confirm sidebar toggles and New Task exits preview to
      an editable composer. Reenter preview, operate tabs, close, add, restore,
      panel toggle and native controls, then drag empty header space and confirm
@@ -14454,7 +14458,10 @@ plugin-form fixtures in an isolated temporary directory at runtime.
   width to the panel, so the panel spans the client area minus the expanded
   sidebar (the whole client area when the sidebar is collapsed). The native
   window never changes size. The divider is inert while preview mode is on
-  (`aria-disabled`). Leaving preview mode restores the previous panel width and
+  (`aria-disabled`). The native Browser/plugin surface matches the complete
+  renderer placeholder rect after both sidebar transitions, including when
+  only its absolute position changes; no stale page edge or uncovered strip
+  remains beside it. Leaving preview mode restores the previous panel width and
   keeps whatever sidebar state the user chose last. The mode is transient: it is
   not persisted and ends when the panel closes. Preview mode keeps the shell's
   new-task, sidebar, and system-window actions reachable while MainChat is
@@ -14476,9 +14483,12 @@ plugin-form fixtures in an isolated temporary directory at runtime.
 - **Status**: Partially automated (`scripts/e2e-three-column-layout.mjs` —
   preview entry/exit, DOM action behavior, header border-box exclusion, row/spacer
   drag ownership, and all-platform/fullscreen CSS fixtures in both sidebar
-  states). DOM clicks and CDP input are not native hit-test proof; native pointer,
-  window-drag and visual checks remain required on each platform. Branch runs
-  are exploratory and do not satisfy the integrated-main gate.
+  states). `plugin-view-bounds-sync.test.mjs` mounts the production
+  `PluginViewTab` in Electron and covers a position-only layout commit with
+  unchanged surface dimensions. DOM clicks and CDP input are not native hit-test
+  proof; native pointer, window-drag, and visual checks remain required on each
+  platform. Branch runs are exploratory and do not satisfy the integrated-main
+  gate.
 
 #### E2E-LAYOUT-sidebar-project-group-fold
 

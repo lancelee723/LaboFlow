@@ -1121,6 +1121,12 @@ entirely inside the plugin's isolated page:
 
 ### 5.4 Interactions
 
+- Native plugin bounds follow the placeholder's complete viewport-relative
+  rectangle after every renderer layout commit, not only after the placeholder
+  changes size. Sidebar collapse/expand, preview mode, and ancestor transforms
+  therefore cannot leave the host `WebContentsView` at an earlier horizontal
+  position or expose an uncovered strip beside Browser or another plugin view.
+
 - Trigger: file/URL references and BrowserPreview create/activate their
   resource tab in the originating session's runtime context. BrowserPreview
   events carry `sessionId`, and the renderer retains that session's preview
