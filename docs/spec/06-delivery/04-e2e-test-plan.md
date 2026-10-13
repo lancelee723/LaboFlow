@@ -3922,7 +3922,7 @@ identify the platform validation still needed.
 
 #### E2E-059: Embedded browser preview isolation and overlays
 
-- **Preconditions**: A local dev server is running; a URL or BrowserPreview artifact exists.
+- **Preconditions**: A local dev server is running; a URL or BrowserPreview artifact exists; HTML fixtures exist both inside and outside the workspace.
 - **Steps**: 1) Activate the artifact, enter `localhost:<port>` and
   `localhost:<port>/index.html` without a scheme, and submit each. Enter a
   dotted host with a port (for example, `example.com:8080`), then verify an
@@ -3934,30 +3934,38 @@ identify the platform validation still needed.
   and trigger an inline tool permission card. 5) Switch to another panel tab
   and back; close the panel. 6) Use open-external. 7) From both an existing page
   and a blank Browser tab, enter an existing HTML file inside the workspace by
-  `file:` URL and absolute path. Then enter both `file:///tmp/demo.html` and
-  `/tmp/demo.html`, pointing to an existing file outside the workspace.
+  platform-appropriate `file:` URL and absolute path. Then enter an existing
+  file outside the workspace by its platform-appropriate URL and absolute path
+  (for example, `file:///tmp/demo.html` and `/tmp/demo.html` on Unix, or
+  `file:///D:/demo.html` and `D:\demo.html` on Windows). From the loaded
+  local HTML, follow a link to another existing file outside the workspace.
+  From an HTTP page, try the same outside file link and enter a missing local
+  file path.
 - **Expected**: Scheme-less input normalizes to http; nav state (URL bar,
   back/forward enablement, load spinner) mirrors the page. Popups open in
   the default browser (never in-app) only when the URL parses as http(s) or
-  mailto; `file:`, `javascript:`, and custom schemes are denied. Permission
-  requests are denied; non-http(s) navigation is blocked except in-root
-  `file:` siblings. The preview hides for the whole lifetime of the rename
+  mailto; popups using `file:`, `javascript:`, and custom schemes are denied.
+  Permission requests are denied; top-level navigation allows HTTP(S),
+  in-workspace file links, and existing local file links from a local file
+  page. HTTP pages cannot navigate to files outside the workspace. Missing
+  files, directories, remote file authorities, and other schemes are blocked.
+  The preview hides for the whole lifetime of the rename
   dialog and every other blocking overlay, and while
   unmounted, reappearing with correct bounds afterwards. An inline permission
   card does not hide or remount the preview; resize/drag keeps the native view
   visible and aligned with the placeholder rect without a black flash. Opening
   the work-panel context dropdown moves beside the native view; the view keeps
   its full surface rect and the plugin body does not shift down.
-  Open-external launches an http(s) page in the default browser and an in-root
-  file preview via `openPath`. The view uses an isolated persist partition
-  (no session bleed from the app shell). Both in-root forms open; neither
-  outside form reaches the guest load, the submitted address remains visible,
-  and the browser explains in the active locale that only existing workspace
-  files can open.
-- **Specs linked**: `03-runtime/01-ipc-protocol.md` §13a, ADR 0019, ADR 0168
+  Open-external launches an http(s) page in the default browser and any loaded
+  local file via `openPath`. The view uses an isolated persist partition
+  (no session bleed from the app shell). Both inside and outside forms load;
+  the HTTP page's outside link and missing path do not reach the guest load.
+  The submitted address remains visible on failure, with localized copy that
+  only existing local files can open.
+- **Specs linked**: `03-runtime/01-ipc-protocol.md` §13a, `04-ux/08-component-spec.md`, `05-security/01-security.md`, ADR 0019, ADR 0168, ADR 0328
 - **Acceptance**: Quality, Security
 - **Milestone**: M5
-- **Status**: Draft (manual)
+- **Status**: Partial automation: `scripts/e2e-browser-local-file-access.mjs` covers native local-file navigation; the address-bar and overlay workflow remains manual.
 
 #### E2E-BROWSER-capture-resize: Capture completion preserves the latest viewport
 

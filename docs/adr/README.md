@@ -348,3 +348,17 @@ Each ADR includes:
 | provider-system-certificates | [Desktop sidecar uses OS-trusted certificates](provider-system-certificates.md) | Accepted |
 | image-generation-capability | [Image generation as a configured Agent capability](image-generation-capability.md) | Accepted |
 | retained-browser-pages-per-tab | [Retain a host-owned browser page per resource tab](retained-browser-pages-per-tab.md) | Accepted |
+| 0318 | [Publish native Linux arm64 artifacts](0318-linux-arm64-release-lane.md) | Accepted (D638) |
+| 0319 | [Inline external imports in owning Settings destinations](0319-settings-inline-imports.md) | Accepted (D645) |
+| 0320 | [Host-owned OAuth lifecycle for plugin providers](0320-plugin-oauth-provider-callbacks.md) | Accepted for implementation (D647; amends ADR 0259) |
+| 0321 | [Pin an acceptable address for mixed direct DNS answers](0321-skill-market-direct-dns-pinning.md) | Accepted (D648; amends ADR 0272) |
+| 0322 | [Plugin providers appear in Add Service](0322-plugin-providers-in-add-service.md) | Accepted for implementation (D650; amends ADR 0259) |
+| 0323 | [Make Session Title Generation a Standalone Plugin](0323-plugin-owned-session-titles.md) | Accepted (D652, amended by D654; supersedes ADR 0186) |
+| 0324 | [Make Composer Prompt Enhancement an Optional Plugin](0324-plugin-owned-composer-prompt-enhancement.md) | Accepted (D653; supersedes ADR 0121) |
+| 0325 | [Smooth Windows main-window corner compositing](0325-windows-window-corner-compositing.md) | Proposed (implementation candidate; Windows E2E pending) |
+| 0326 | [Verified SSH Host installation and daily startup](0326-verified-ssh-host-installation.md) | Accepted for experimental implementation (amends ADR 0292; Linux SSH qualification and publication pending) |
+| 0327 | [Automatic remote Host version realignment](0327-remote-host-version-realignment.md) | Accepted for experimental implementation (amends ADR 0326 item 6; Linux SSH qualification pending) |
+| 0328 | [Open arbitrary local files in the embedded Browser](0328-browser-arbitrary-local-files.md) | Accepted (D657; amends ADR 0170; issue #1627) |
+| plugin-fetch-redirect-policy | [Host-enforced plugin fetch redirect policy](plugin-fetch-redirect-policy.md) | Accepted (implementation candidate for #1475) |
+
+| local-agent-remote-workspace-tools | [Local Agent and model requests for remote workspaces](local-agent-remote-workspace-tools.md) | Accepted for implementation |

@@ -35,6 +35,16 @@
 | D635 | 按工作区上限裁剪的 800×560 窗口最小尺寸 | **取代 D156 / D447 中的 1040×700 窗口最小尺寸（及 ADR 0029 / ADR 0238 的对应条款）和 `window/setWorkPanelChatWidth` 的 `1040..10000` 范围（ADR 0146）：Electron 强制 800×560 最小尺寸，并由 `clampMinimumSizeToWorkArea` 按维度裁剪到当前显示器工作区。聊天宽度 IPC 与渲染层接受 `800..10000`。窄窗口下沿用现有 `workPanelLayout` 预算：限制停靠面板宽度以保证 MainChat 的 450px 下限，并优先收起侧边栏。见 US-UI-19 与 E2E-167。** | Windows 150% 缩放下工作区约为 1280×672 DIP，固定最小尺寸可能超过屏幕，导致窗口无法适配。 |
 | D636 | 本地权限确认没有自动截止时间 | **修订 D005 / ADR 0011：需要权限的 `tools.execute` 请求会在 host-core、渲染层和传输中保持待处理，直到用户选择允许一次、允许会话或拒绝，或请求被取消/进程关闭。移除 120 秒倒计时以及本地权限契约中的超时字段。工具自身执行预算以及独立的 RACP/Plan 审批时限保持不变。见 ADR 0310、issue #1214 与 E2E-017。** | 用户可能在其他工作期间错过可见的权限请求；保持取消和执行预算即可保留控制与资源安全，又不会把“未注意”变成一个决定。 |
 | D450 | 签名的 macOS GitHub Release | **修订 D078 / ADR 0022：GitHub tag 发布使用身份 `Developer ID Application: XingYu Liu (DUV63RKYTW)` / 团队 `DUV63RKYTW`，通过 Actions 密钥（`CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`）对 macOS DMG/ZIP 做 Developer ID 签名、`notarytool` 公证、装订和 Gatekeeper 校验；缺少密钥则失败。无证书的本地未签名打包仍可用。`workflow_dispatch` 仅可把 `sign_macos: false` 用于未签名调试产物。打包的 macOS 走应用内 `electron-updater`（ZIP + 合并后的 `latest-mac.yml`）；Linux deb/rpm 与 Windows 便携版 ZIP 仍为通知并打开发布页。禁止 afterPack/afterSign adhoc 签名（ADR 0278）。** | 正式 DMG 应无需 Gatekeeper 警告即可打开，已签名 macOS 安装可下载并重启到新 tag。见 ADR 0289、E2E-196c、E2E-067A。 |
+| D648 | 混合直接 DNS 结果时固定使用可接受地址 | **修订 ADR 0272：在直连路由上，当 DNS 同时包含被拒绝与可接受的结果时，技能市场会选择并固定到一个可接受地址，而不会让 Chromium 在这些地址中自行选择。第三方内容优先使用公网地址；仅在现有策略允许时使用 `benchmark` 假 IP。仅返回 ULA 或其他非公网地址时仍会拦截。代理与无法读取的路由保持现有策略。见 ADR 0321 与 E2E-SKILL-MARKET-NET-BOUNDARY。** | 双栈与透明代理 DNS 可能在可安全使用的地址旁返回未使用的合成 ULA 地址；固定已通过校验的地址可避免连接到被拒绝结果并消除误拦截。 |
+| D649 | 云备份暂不对外开放 *(由 D655 修订)* | **修订 D642 / D643：设置中的 `sync` 目的地重新带上 `developmentOnly: true`，因此打包构建会省略其导轨行、页面和设置搜索命中并回落到常规，开发构建则保留该目的地。开发者模式与它无关，它仍不带实验性徽章。同步行为、协议、Host schema 与持久化数据均不变；移除该标记即可对打包构建重新开放。见 `04-ux/06-settings-ia.md` 与 E2E-CONFIG-SYNC-webdav-portable-configuration。** | 加密 WebDAV 备份尚未准备好提供给打包构建用户，因此先保持已实现但不出现在界面上，直到正式开放。 |
+| D650 | 插件提供商出现在添加服务中 | **修订 ADR 0259：`contributes.providers[].category` 是可选分类；`description` 可提供一句简介。已加载且拥有现有 `provider.register` 权限的插件，可向 Host 渲染的添加服务选择器贡献带端点、尚未配置的 API Key 提供商。卡片只显示站名，悬停或键盘聚焦显示一句简介；分类可自定义。每个插件不设服务数量上限。空模型列表仅适用于带端点的 API Key 提供商，用户保存密钥后由 Host 发现并缓存模型。密钥仍通过现有提供商密钥路径保存，已配置的行从选择器隐藏。不提供 OAuth / 无认证行；不新增权限、运行时 API、提供商行或凭据迁移。见 ADR 0322、`07-plugins/02-plugin-manifest-schema.md` 与 E2E-PLUGIN-provider-catalog-add-service。** | 用户无法在常规添加服务流程中发现由清单声明的社区提供商；每个插件也需要自己分组站点，却不应拥有密钥界面。 |
+| D651 | 对话区工具调用行不再自动展开 | **修订 turn-process / thinking-display 决策中的叶子自动展开条款与 ADR `turn-process-and-thinking-display`：工具调用、托管搜索与计划卡片行在两种显示模式下都保持载荷收起，只有用户显式操作才会打开，包括最后一个活动组的字面最后一项。整体过程与普通活动组的默认展开、失败与被拒行为、逐项保留的用户选择，以及思考行自身的叶子默认都保持不变。仅渲染层改动；无 Host 协议、持久化、权限或插件契约变更。见 `04-ux/08-component-spec.md` §9.1/§9.2/§9.5/§9.6、`04-ux/09-interaction-patterns.md` §4.2 与 E2E-040。** | 自动展开最新调用的载荷会把阅读注意力从用户等待的回答上拽走，也让同一轮对话因结束方式不同而呈现不同样子；把载荷交给用户打开可保持行行为可预测。 |
+| D652 | 会话标题生成改为独立插件 *（由 D654 修订）* | **取代 ADR 0186：移除内置标题补全，只保留 D654 恢复的确定性本地兜底标题；否则新会话在用户或插件修改前保留本地化默认标题。新增高风险 `session.autoTitle` 能力，用于读取有界首轮上下文并通过比较并设置写入标题，数据由架构 v23 的 `sessions.title_source` 支撑。独立插件可在面板配置提示词模板、模型和思考级别，并使用 `session:turnEnded`、`models.list` 和 `agent.complete`。见 ADR 0323、E2E-021a 及插件 API/权限规格。** | 标题生成是可选产品策略，且支持模型与提示词配置；宿主需要狭窄、持久的边界来保证手动标题在竞态中胜出。 |
+| D653 | 输入框提示词增强改为可选插件 | **取代 ADR 0121：移除宿主内置提示词增强界面、设置、直接补全 IPC 与 MCP 操作。新增受 `composer.transform` 权限约束的输入框操作贡献项和插件回调；仅传当前草稿与可选模型标识，并提供输入/输出上限、审计、文件引用恢复、单步撤销及草稿/会话过期保护。`vastsa/pi-prompt-enhancement` 保持独立仓库，必须由用户主动安装；宿主不随附或默认启用。插件首次加载时，将有效旧偏好迁移到尚未设置的插件设置并写入私有标记；旧宿主值继续保留以支持回退。见 ADR 0324、E2E-218 / E2E-259 与插件 API/权限规格。** | 提示词增强是可选行为，应由单独安装的插件拥有；宿主提供狭窄、安全的转换契约及一次性旧设置迁移路径。 |
+| D654 | 核心保留确定性的首条提示标题 | **修订 D652 / ADR 0323：当会话存储标题仍是可识别占位标题时，用首条提示派生一个折叠空白、截断为 48 字符的兜底标题，通过主机 RPC 与 IPC `session/deriveTitle` 写入。host-core 只在标题仍是占位标题且来源为 `default` 时接受，派生文本也保留该来源，因此已安装的标题插件仍可替换它，只有手动重命名会退出自动替换。不调用模型、不新增权限、不改架构或协议版本；`updated_at`、转录内容与消息数都不变。见 `03-runtime/01-ipc-protocol.md`、`03-runtime/02-agent-runtime.md`、`03-runtime/06-host-rpc-protocol.md`、`03-runtime/04-data-storage.md`、`04-ux/08-component-spec.md` 与 E2E-021a。** | 移除全部自动写入会让未触碰的会话一直显示占位标题，直到插件运行，从而让离线可读性依赖安装可选软件。 |
+| D655 | 云同步在打包版开放并标记为实验性 | **修订 D649：移除设置中 `sync` 目的地的打包构建门控，并在导轨行与页面标题恢复实验性徽章。云同步和远程主机在开发版与打包版中均可使用，并带有实验性标签。S3 同步行为、协议、Host schema 与持久化数据不变。见 `04-ux/06-settings-ia.md`、`03-runtime/22-config-sync.md` 与 E2E-CONFIG-SYNC-s3-portable-configuration。** | 已实现的加密云备份对打包版用户同样有用；实验性标签可以说明其成熟度，而无需继续隐藏功能。 |
+| D656 | 隔离宿主持续拒绝的 outbox 追加，避免整队停摆 | **修订 ADR 0041 / D318 / D444 / D597：当 `session.appendMessage` 或 `session.recordUsage` 返回的错误无法归类为重复消息 ID、`PERMISSION_DENIED:` 毒行或外键孤立行时，不再结束本次 flush，而是在同一 Host 代内按有界退避重试（5 秒起、翻倍、上限 60 秒）。同一队头连续第五次失败后，该追加被移入应用自有的死信文件 `session-message-outbox.dead-letter.json`（保留载荷、sessionId、隔离时间与宿主错误；只保留最新 256 条，超出丢弃最旧并记 warn），随后继续排空后续条目，因此单条被拒追加不再长期占用 FIFO 队头、填满 1024 条上限或导致所有会话写入失败。Host 重启属于新代，会立即重试该队头。隔离条目永不自动重放，`session.delete` 会连同该会话的隔离条目一起删除。协议版本、存储架构与队列文件格式均不变。** | 一条 `stream did not contain valid UTF-8` 追加在队头滞留 14.8 小时，期间 `session.persistence.outbox.is.full` 触发 5990 次，导致所有会话的写入直到重启前全部失败；此前只有三类错误有排空出口，其余错误被永久当作瞬时错误（#1560）。 |
+| D657 | 让内置浏览器打开工作区外的本地文件 | **修订 ADR 0170：通过绝对路径或 `file:` URL 可打开任意已存在的本地普通文件，本地文件页面也可导航到其他已存在的本地文件。相对输入仍以工作区为根；HTTP(S) 页面只保留此前工作区内文件链接的权限。缺失文件、目录与远程文件 authority 仍被阻止。`BrowserPreview` 与 sidecar 继续使用工作区根解析。公开的 `pi.browser.navigate` API 在高风险 `browser.cdp` 权限下采用相同策略。见 ADR 0328、E2E-059、`04-ux/08-component-spec.md` 与 `05-security/01-security.md`。** | 用户需要检查项目外的本地 HTML，而工作区范围内的 Agent 文件工具和远程页面导航仍须保留原有边界（#1627）。 |
 
 ## B. 辅助实现默认值
 
@@ -5155,3 +5165,212 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
 - 权限请求不再携带 `timeoutMs`；pending 快照不再暴露 `expiresAt` 或
   `remainingMs`，UI 也不再显示倒计时。工具自身的命令/插件执行预算以及独立的
   Plan/Goal 和 RACP 审批时限保持不变。见 ADR 0310、issue #1214 与 E2E-017。
+
+## 2026-09-29 —— 移除 Windows 无边框窗口的缩放边缘（D637）
+
+- Windows 主窗口关闭 Electron 厚边框，移除左、下、右侧的原生可见边缘。
+  Electron 43.6 仍保留无边框窗口的原生边缘与角落命中检测，因此不新增渲染层
+  缩放路径或几何 IPC。macOS/Linux 的窗口行为和工作面板的缩放归属不变。
+- Windows 主窗口默认使用全局 `--radius-md`（12 DIP）原生圆角，圆角外的像素和命中区域均不存在。
+  获得授权的插件主题可将半径设为 0 至 24 DIP 的整数；撤销主题后恢复 12 DIP。此值替代了
+  不易察觉的 4 DIP 裁切，使原生窗口圆角与应用的全局半径尺度一致。
+  D635 按工作区裁剪的最小尺寸仍然生效。移除厚边框后，主题无法控制原生阴影；
+  外部阴影需要单独决定窗口几何结构。见 ADR 0317 与 E2E-167。
+
+## 2026-10-01 —— 发布原生 Linux arm64 工件（D638）
+
+- 标签发布在 x64 包之外同时发布 Linux arm64 的 AppImage、deb 和 rpm 包。每条通道都在
+  GitHub 托管的原生 Ubuntu 22.04 运行器上运行（`ubuntu-22.04` 与
+  `ubuntu-22.04-arm`），并打包它刚刚构建出的 `pi-desktop-host-core` 二进制，因此 sidecar
+  架构始终与 Electron 应用匹配。两条通道都保持 glibc 2.35 下限。
+- Linux 目标不再固定 `arch`：electron-builder 优先采用配置里的架构列表而不是 CLI
+  参数，把两个架构都固定下来会让每条通道围绕自己的 sidecar 去构建另一个架构。
+  工作流改为传入匹配的 `--x64` / `--arm64` 参数，并在打包前校验 `uname -m`。
+- AppImage 名称带上自己的架构
+  （`PI-Desktop-<version>-linux-x64.AppImage`、
+  `PI-Desktop-<version>-linux-arm64.AppImage`）。因此 x64 资产从之前仅带版本号的名称
+  改名；应用内更新不受影响，因为更新器读取的是已发布的更新源。
+- electron-builder 会按构建的架构为每条 Linux 通道的更新源命名（x64 为
+  `latest-linux.yml`，arm64 为 `latest-linux-arm64.yml`），这正是
+  `electron-updater` 在这些架构上请求的名称，因此两条通道不会互相覆盖更新源，
+  每条通道在上传前校验该名称而不是改名。发布作业可以合并两份工件而不丢失任何更新源。
+- `scripts/export-linux-asar.mjs` 接收通道架构，并从 `linux-unpacked`（x64）或
+  `linux-arm64-unpacked`（arm64）导出 `PI-Desktop-<version>-linux-<arch>.asar`。
+- `release.yml` 的 `pi-host-bundle` 作业构建两个 Linux 架构，`PUBLISHED_TARGETS`
+  发布 `linux-x64` 与 `linux-arm64`，因此 arm64 桌面可以引导 arm64 远端主机（D375 / ADR 0292）。
+- 已知限制：除 Raspberry Pi 板卡之外的 arm64 Linux 设备仍无法采集麦克风，因为
+  `@picovoice/pvrecorder-node` 对 Linux arm64 只认识 Raspberry Pi 的 CPU part。
+  语音转写和应用的其余部分没有架构相关的依赖。见 ADR 0318、issue #1281 与 E2E-192a。
+
+## 2026-10-03 —— 用户 MCP 工具保持常规审批路径（D640）
+
+- D640 在 `PermissionManager` 中把 `mcp_` 工具从 `low` 调整为 `medium` 风险。在 `ask` 与
+  `accept-edits` 下每次调用都显示审批卡片，原因为 "MCP server tool requires approval"；
+  `auto` 不显示卡片直接执行，Plan/Goal 即使存在会话授权也拒绝。
+- 本会话允许只覆盖该会话内同一 `mcp_<serverId>_<tool>` 名称，不覆盖该服务器的其他工具。
+  服务器对自身工具声明的风险标注不被信任，绝不降低审批路径。
+- 通过 `plugins.execute` 的分发、只读模式处理与 `mcp_` 命名空间不变。见 ADR
+  `mcp-tool-approval-risk` 与 E2E-MCP-tool-requires-approval。
+
+## 2026-10-04 —— 云同步是对所有用户开放的实验性目的地（D642）
+
+- D642 移除设置中 `sync` 目的地的开发者模式与打包构建门控：其导轨行、页面和设置搜索
+  命中在任何构建中对所有用户可用，已保存的 `sync` 标签页也不再回落到常规。远程主机
+  保留这两道门控。
+- 该目的地当时在导轨行和页面标题上保留实验性徽章
+  （已由 D643 与 D649 修订）。
+- 由 `apps/desktop/test/settings-developer-only-destinations.test.mjs` 与
+  `pnpm test:e2e:settings-scroll` 的云同步探针覆盖。见 `04-ux/06-settings-ia.md` 与
+  E2E-CONFIG-SYNC-webdav-portable-configuration。
+
+## 2026-10-04 —— 云同步不再带实验性徽章（D643）
+
+- D643 修订 D642：设置中的 `sync` 目的地不再有 `experimentalBadgeKey`，
+  各内置语言包中的 `settings.configSync.experimental` 键也已删除。云同步在任何构建、
+  对所有用户都保持可用（已由 D649 修订）。
+- 远程主机保留自己的徽章和两道门控。同步行为、协议、Host schema 与持久化数据均不变。
+- 由 `apps/desktop/test/settings-developer-only-destinations.test.mjs`、
+  `apps/desktop/test/config-sync-settings.test.mjs` 中的徽章断言，以及
+  `pnpm test:e2e:settings-scroll` 的云同步探针覆盖。
+
+## 2026-10-04 —— 指令文件同步不再有单独的字节上限（D644）
+
+- D644 移除 Host 对便携指令文件施加的 32 KiB 单文件上限。超过该上限的项目
+  `AGENTS.md` 会让整次采集以 `CONFIG_SYNC_LIMIT_EXCEEDED: instruction file is too
+  large` 失败，而设置页只能把它显示为泛化的备份体积错误。
+- 指令内容现在只受其他域同样拥有的便携实体负载上限约束，Host 在上传修订与校验远端
+  修订时检查该上限。UTF-8 校验、symlink 拒绝、作用域选择、映射与审批规则均不变；
+  agent-runtime 的 prompt 指令链保留自己的读取侧预算。
+- 由 `crates/host-core/src/config_sync/domains.rs` 中的
+  `config_sync::domains::tests::captures_project_instruction_files_beyond_the_former_size_cap`
+  与 `config_sync::domains::tests::writes_imported_instruction_files_beyond_the_former_size_cap`
+  覆盖。
+## 2026-10-04 —— 外部导入内嵌到所属设置页（D645）
+
+- D645 移除独立的设置 `import` 目的地。模型配置、外部技能和外部 MCP 扫描分别从
+  “模型”“技能”和“MCP”页内打开。能力导入遵循当前全局/项目层级；项目扫描绑定到
+  所选项目。
+- 设置不再提供核心会话扫描/导入。插件继续使用现有宿主拥有的会话导入 API 与项目绑定
+  行为；不改变 IPC、插件权限、宿主协议或持久化契约。
+- 由隔离的设置 MCP 导入用户路径测试、`agent-import-ipc.test.mjs` 和
+  `import-format.test.mjs` 覆盖。见 ADR 0319、`04-ux/06-settings-ia.md`、
+  `04-ux/08-component-spec.md`、E2E-038 / E2E-043 / E2E-209 与
+  E2E-SETTINGS-inline-capability-imports。
+
+## 2026-10-04 —— 空首页在首个会话之前就显示所属项目（D646）
+
+- D646 修复打开项目后的空首页。此前只有当屏幕上的会话带有该项目路径时英雄标题才会写出
+  项目名，因此新建项目、或打开一个会话全部归档/未选中的项目时，标题会停留在通用的
+  “我可以帮你建造什么？”，用户看不出在这里发出的任务会进入哪个项目。
+- 现在没有会话在屏幕上时英雄回落到当前工作区。有会话时仍以会话为准，临时会话保持自己的
+  文案且没有项目切换菜单；没有打开项目时仍是通用标题。会话状态、IPC、持久化与切换菜单
+  的动作均不变。
+- 由 `apps/desktop/test/home-project-name.test.mjs` 覆盖：它用真实 store 渲染真实界面。
+  见 `04-ux/01-ui-ia.md`、`04-ux/08-component-spec.md` 与 E2E-256。
+
+## 2026-10-06 —— 混合直接 DNS 结果时固定使用可接受地址（D648）
+
+- 在直连路由上，若 DNS 同时返回可接受和被拒绝的地址，技能市场会选择并固定连接到
+  可接受地址。第三方内容优先使用公网地址；现有 `benchmark` 假 IP 选项是唯一允许的
+  非公网选择。仅返回 ULA 的结果仍会拦截，代理或无法读取的路由继续遵循 ADR 0272。
+- 固定地址请求会保留原主机名用于 TLS SNI 和 `Host`，并为每个重定向重新解析、校验和
+  固定连接地址。
+- 由 `apps/desktop/test/public-https-fetch-route.test.mjs` 中的固定地址传输集成测试、
+  公网/ULA 混合结果与 `benchmark`/ULA 测试覆盖。见 ADR 0321、`05-security/01-security.md`
+  §4.1 与 E2E-SKILL-MARKET-NET-BOUNDARY。
+
+## 2026-10-07 —— 云备份暂不对外开放（D649）
+
+- D649 修订 D642 / D643：设置中的 `sync` 目的地再次仅开发构建可见。打包构建会省略其
+  导轨行、页面和设置搜索命中，已保存的 `sync` 标签页会回落到常规；开发构建保留该目的地，
+  开发者模式在其中不起作用。
+- 该目的地仍不带实验性徽章，同步行为、协议、Host schema 与持久化数据均不变。从目的地
+  条目上移除 `developmentOnly: true` 即可对打包构建重新开放。
+- 由 `apps/desktop/test/settings-developer-only-destinations.test.mjs` 与
+  `apps/desktop/test/config-sync-settings.test.mjs` 覆盖，`pnpm test:e2e:settings-scroll`
+  的云同步探针跑的是开发构建。见 `04-ux/06-settings-ia.md` 与
+  E2E-CONFIG-SYNC-webdav-portable-configuration。
+
+## 2026-10-08 —— 插件提供商出现在添加服务中（D650）
+
+- ADR 0322 为插件提供商声明增加可选分类和一句简介，并让已加载且拥有
+  `provider.register` 权限的插件把未配置密钥的 API Key 提供商显示在 Host 渲染的
+  添加服务选择器中。
+- 卡片仅显示站名，悬停或键盘聚焦时显示简介；每个插件不设服务数量上限。空模型列表会在用户
+  保存密钥后由 Host 发现并缓存模型。密钥仍通过现有提供商密钥路径保存，已配置的行从选择器隐藏。
+  OAuth 和无认证声明不会出现。
+- 见 E2E-PLUGIN-provider-catalog-add-service 与
+  `07-plugins/02-plugin-manifest-schema.md` §5.4。
+
+## 2026-10-08 —— 对话区工具调用行不再自动展开（D651）
+
+- D651 修订随 turn-process 披露引入的叶子自动展开条款：在详细与紧凑模式下，工具调用、
+  托管搜索与计划卡片行都保持载荷收起，直到用户打开它，无论它位于活动组的哪一项。整体
+  过程与普通活动组的默认展开、失败与被拒行为、逐项保留的用户选择，以及思考行自身的
+  叶子默认都不变。
+- 由 `apps/desktop/test/interaction-performance.test.mjs`、
+  `apps/desktop/test/thinking-ui.test.mjs` 与
+  `apps/desktop/test/transcript-summary.test.mjs` 覆盖；被移除的叶子归属辅助函数对应的
+  单测已退役。见 `04-ux/08-component-spec.md` §9.1/§9.2/§9.5、
+  `04-ux/09-interaction-patterns.md` §4.2、ADR `turn-process-and-thinking-display` 与
+  E2E-040。
+
+## 2026-10-08 —— 输入框提示词增强改为可选插件（D653）
+
+- ADR 0324 取代 ADR 0121：移除宿主内置增强 UI、设置、直接补全 IPC 和 MCP 操作；新增权限门控的通用输入框文本转换扩展点。
+- `vastsa/pi-prompt-enhancement` 继续位于独立仓库，必须由用户安装，宿主不默认随附。首次加载时，有效的旧设置会迁移到插件私有设置；旧宿主值保留供回退使用。
+- 转换调用只接收草稿文本和可选模型标识；宿主检查权限与声明、限制输入输出、审计调用，并保护文件引用和过期草稿。
+- 见 ADR 0324、E2E-218 / E2E-259 与插件 API/权限规格。
+
+## 2026-10-08 —— 核心保留确定性的首条提示标题（D654）
+
+- `session/deriveTitle` 恢复新会话过去从首条提示获得即时标签的行为：渲染器折叠空白并把
+  请求截断为 48 字符，host-core 只在存储标题仍是可识别占位标题且来源为 `default` 时写入。
+- 写入会保留该来源，因此派生标题仍可替换：`session.autoTitle` 插件仍可通过其比较并设置
+  升级它，而手动重命名、更早的插件标题以及第二条提示都不会改写它。不调用模型，也不新增
+  权限、架构或协议版本。
+- 占位标题识别现在覆盖所有已发布语言：渲染器创建会话时会写入本地化的 `chat.untitledTask`
+  文案，此前 host-core（以及 v23 迁移）会把韩语、繁体中文、巴西葡语和土耳其语的占位标题判为
+  `manual`，导致这些语言下兜底与插件都失效。识别列表与渲染器目录保持一致。
+- 远程会话在各自的 Host 上派生：remote-host RACP profile 新增 `session/deriveTitle`
+  （controller），因此配对桌面不再对 `remote` 会话关闭兜底；原生 Pi 会话保留其自身标题。
+- 由 `apps/desktop/test/session-title-prompt-fallback.test.mjs`、
+  `apps/desktop/test/queue-pending-actions.test.mjs`、host-core 的 `derive_session_title`
+  单测与 E2E-021a 覆盖。见 ADR 0323。
+
+## 2026-10-21 —— 云同步在打包版开放并标记为实验性（D655）
+
+- D655 修订 D649：设置 → 云同步在打包版和开发版中均可见，导轨行与页面标题均显示
+  实验性徽章；设置搜索在两种构建中都包含该目的地。
+- 远程主机在所有构建中保持可用，并保留现有实验性徽章。云同步行为、协议、Host schema
+  与持久化数据均不变。
+- 由 `settings-developer-only-destinations.test.mjs`、`config-sync-settings.test.mjs` 和
+  E2E-CONFIG-SYNC-s3-portable-configuration 中的打包版设置验收场景覆盖。见
+  `04-ux/06-settings-ia.md` 与 `03-runtime/22-config-sync.md`。
+
+## 2026-10-11 —— 隔离宿主持续拒绝的 outbox 追加（D656）
+
+- D656 修订 ADR 0041、D318、D444 与 D597：outbox 对无法归类的宿主失败在同一 Host 代内
+  按有界退避重试（5 秒起、翻倍、上限 60 秒），同一队头连续五次失败后把该追加隔离进
+  应用自有的死信文件，并继续排空后续条目。此前三类已知出口之外的任何错误都会结束本次
+  flush，队头被永久重试，1024 条上限长期占满，导致所有会话的写入直到重启前全部失败。
+- 退避只在同一 Host 代内生效：门控比较失败该队头的 Host 实例，因此 Host 重启后会立即
+  重试暂停中的队头，而不必等完剩余窗口。
+- 被隔离的追加在 `session-message-outbox.dead-letter.json` 中保留载荷、sessionId、
+  隔离时间与宿主错误。它不会自动重放，`session.delete` 会连同该会话的隔离条目一起删除，
+  且只保留最新 256 条——被丢弃的一条会记录其 key、会话与文件路径。队列文件格式、存储
+  架构与宿主协议均不变。
+- 由 `apps/desktop/test/persistence-outbox.test.mjs`（有界重试与退避、隔离并继续排空、
+  跨重启保留死信、死信上限、会话删除）与
+  E2E-SESSION-outbox-unclassifiable-failure-does-not-stall-the-queue 覆盖。见 ADR 0041、
+  `03-runtime/04-data-storage.md` 与 `03-runtime/06-host-rpc-protocol.md`。
+
+## 2026-10-13 —— 内置浏览器打开工作区外本地文件（D657）
+
+- D657 修订 ADR 0170：绝对路径与 `file:` URL 可打开任意已存在的本地普通文件，本地文件页面也可
+  跟随链接访问其他本地文件。相对路径仍以工作区为根；HTTP(S) 页面不能通过 file 链接越出工作区。
+- 公开的 `pi.browser.navigate` API 在现有高风险 `browser.cdp` 权限下采用相同策略。
+  `BrowserPreview` 与 sidecar 仍保留工作区范围校验。
+- 由 `apps/desktop/test/browser-pane-navigation.test.mjs`、
+  `apps/desktop/test/browser-local-file-feedback.test.mjs` 与 E2E-059 覆盖。见 ADR 0328、
+  `04-ux/08-component-spec.md`、`07-plugins/03-plugin-api.md` 与 `05-security/01-security.md`。

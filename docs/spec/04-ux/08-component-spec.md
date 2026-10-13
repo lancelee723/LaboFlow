@@ -1070,17 +1070,19 @@ entirely inside the plugin's isolated page:
   reveals the page without waiting for images or subframes; those continue to
   drive the loading/stop control. A failed switch or one exceeding the 15-second
   main-frame wait shows a retryable error, with the old guest hidden. Superseded
-  and cancelled requests cannot publish over the new navigation. A local file
-  address or absolute path that does not resolve to an existing file inside
-  the session workspace is rejected before loading and shows a specific
-  workspace-boundary message in the browser chrome, including on a blank tab.
-  Existing files inside the workspace remain previewable by absolute path.
+  and cancelled requests cannot publish over the new navigation. The address
+  bar accepts `file:` URLs and absolute paths to existing local files anywhere
+  on the machine; a local file page may also navigate to other existing local
+  files. Missing files, directories, remote file authorities, and unsupported
+  schemes are rejected before loading. Relative paths remain rooted in the
+  session workspace. BrowserPreview remains workspace-scoped.
 
 - Browser address input accepts HTTP(S) URLs and scheme-less web hosts. A
   `localhost` or dotted hostname followed by a numeric port (for example,
   `localhost:3000/index.html` or `example.com:8080`) is treated as an HTTP
   address rather than a custom URL scheme. Unsupported schemes remain blocked;
-  workspace file previews continue to use the in-root file path gate.
+  explicit local-file navigation is not limited to the workspace. BrowserPreview
+  continues to use the in-root file path gate.
 
 - Opening an HTTP(S) link in the work panel creates an additional Browser
   resource tab instead of replacing the previous URL. Each tab owns a host-retained WebContents, address, title and navigation

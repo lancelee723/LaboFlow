@@ -2269,7 +2269,7 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
 
 #### E2E-059：嵌入式浏览器预览隔离和覆盖
 
-- **前提条件**：本地开发服务器正在运行；存在 URL 或 BrowserPreview 工件。
+- **前提条件**：本地开发服务器正在运行；存在 URL 或 BrowserPreview 工件；工作区内外均有 HTML 测试文件。
 - **步骤**： 1) 激活工件，依次输入不带协议的 `localhost:<port>` 和
   `localhost:<port>/index.html` 并提交；再输入带端口的点分主机名
   （如 `example.com:8080`），验证显式 HTTP(S) 地址及被拒绝的 `javascript:` 地址。
@@ -2277,26 +2277,30 @@ MainChat 弥补了缺口。 Maximized/fullscreen 调用保留最新的
   `window.open` 弹出窗口和权限请求页面（例如通知
   提示）。 4) 打开全局搜索，然后打开设置。返回聊天
   并触发内联工具权限卡。 5) 切换到另一个面板选项卡
-  然后回来；关闭面板。 6) 使用开放式外部。7) 分别从已有页面和空白浏览器标签页，
-  使用 `file:` 地址和绝对路径打开工作区内已存在的 HTML 文件；再输入指向工作区外
-  已存在文件的 `file:///tmp/demo.html` 和 `/tmp/demo.html`。
+  然后回来；关闭面板。 6) 使用“在外部打开”。7) 分别从已有页面和空白浏览器标签页，
+  使用平台对应的 `file:` 地址和绝对路径打开工作区内已存在的 HTML 文件；再使用平台对应的
+  URL 和绝对路径打开工作区外已存在文件（Unix 如 `file:///tmp/demo.html` 和
+  `/tmp/demo.html`；Windows 如 `file:///D:/demo.html` 和 `D:\demo.html`）。接着从已加载的
+  本地 HTML 页面点击链接，打开另一个工作区外文件；从 HTTP 页面尝试同一链接，并输入缺失的本地文件路径。
 - **预期**：无方案输入标准化为 http；导航状态（URL 栏，
   back/forward 启用、加载微调器）镜像页面。弹出窗口仅在 URL 解析为
   http(s) 或 mailto 时打开默认浏览器（绝不在应用程序内）；
-  `file:`、`javascript:` 和自定义 scheme 被拒绝。许可请求被拒绝；
-  非 http(s) 导航被阻止，根内 `file:` 同级文件除外。预览隐藏在每个遮挡下
+  弹出的 `file:`、`javascript:` 和自定义 scheme 被拒绝。许可请求被拒绝；
+  顶层导航允许 HTTP(S)、工作区内文件链接，以及从本地文件页面发起的已有本地文件链接。
+  HTTP 页面不能导航到工作区外文件；缺失文件、目录、远程文件 authority 和其他 scheme 均被阻止。
+  预览隐藏在每个遮挡下
   覆盖并卸载时，随后以正确的边界重新出现。
   内嵌权限卡不会隐藏或重新挂载预览；resize/drag 期间原生视图保持可见，
   并与占位符矩形对齐，不再闪出黑色面板底色。打开工作面板上下文下拉框时，
   原生视图在不透明菜单边界下方保持可见，菜单关闭后恢复完整表面矩形。
-  Open-external 对 http(s) 页走系统浏览器，对根内文件预览走 `openPath`。
-  视图使用隔离的持久分区（应用程序外壳中没有会话流失）。工作区内的两种地址
-  都能打开；工作区外的两种地址都不会进入 guest 加载，地址栏保留提交的地址，
-  浏览器用当前语言说明只能打开工作区内已存在的文件。
-- **链接规格**：`03-runtime/01-ipc-protocol.md` §13a、ADR 0019、ADR 0168
+  Open-external 对 http(s) 页走系统浏览器，对任意已加载本地文件走 `openPath`。
+  视图使用隔离的持久分区（应用程序外壳中没有会话流失）。工作区内外的地址都能加载；
+  HTTP 页面发起的工作区外链接与缺失路径不会进入 guest。失败时地址栏保留输入，
+  浏览器用当前语言说明只能打开已存在的本地文件。
+- **链接规格**：`03-runtime/01-ipc-protocol.md` §13a、`04-ux/08-component-spec.md`、`05-security/01-security.md`、ADR 0019、ADR 0168、ADR 0328
 - **验收**：质量、安全
 - **里程碑**：M5
-- **状态**：草案（手动）
+- **状态**：部分自动化：`scripts/e2e-browser-local-file-access.mjs` 覆盖原生本地文件导航；地址栏与遮挡层交互仍需手动验证。
 
 #### E2E-BROWSER-session-preview-race：切换会话不显示过期预览
 
