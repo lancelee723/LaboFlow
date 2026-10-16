@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "id": "laboflow.pdf",
+  "name": "PDF Tools",
+  "version": "1.0.0",
+  "description": "Layered PDF reading for the agent (ADR 0312/0313): pdfjs text extraction for digital pages, model-vision page images for scanned pages, optional MinerU OCR for the rest.",
+  "author": "LaboFlow",
+  "main": "main.js",
+  "contributes": {
+    "agentTools": [
+      {
+        "name": "read",
+        "description": "Read a PDF document page by page. Digital pages return their text layer; image-only (scanned) pages return a model-visible page image when the current model has vision. `path` follows the Read rules (workspace-relative, absolute inside the session scratch, or an attachments reference). `pages` selects a 1-based window such as 5-12,30; defaults to the first window of a large document, so read the opening pages for structure and then pull targeted ranges instead of the whole file. `password` is needed only when the tool reports the document is encrypted - ask the user for it and retry. Scanned pages that cannot be imaged are parsed through the configured MinerU endpoint, if any. Always pass action: \"read\".",
+        "risk": "low",
+        "planSafeActions": ["read"],
+        "schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "const": "read",
+              "description": "Always \"read\"."
+            },
+            "path": {
+              "type": "string",
+              "description": "Existing PDF file; workspace-relative or explicitly approved."
+            },
+            "pages": {
+              "type": "string",
+              "description": "1-based page window, for example 5-12,30. Defaults to the first window of the document."
+            },
+            "password": {
+              "type": "string",
+              "description": "Password for an encrypted PDF; supply on retry when the tool reports encryption."
+            }
+          },
+          "required": ["path"]
+        }
+      }
+    ],
+    "settings": [
+      {
+        "key": "mineruEndpoint",
+        "type": "string",
+        "title": "MinerU endpoint",
+        "description": "Optional OCR backend for scanned PDF pages. Cloud default: https://mineru.net; a self-hosted deployment must expose the same /api/v4 API. Leave empty to keep every document on this machine."
+      },
+      {
+        "key": "mineruApiKey",
+        "type": "string",
+        "title": "MinerU API token",
+        "description": "Bearer token created in the MinerU console. Documents sent to a cloud endpoint leave this machine; configure it only for material you are allowed to upload."
+      }
+    ]
+  },
+  "permissions": [
+    "agent.tool.register",
+    "workspace.read",
+    "net.fetch",
+    "net.anyHost"
+  ],
+  "engines": {
+    "piDesktop": ">=0.8.0"
+  },
+  "enabledByDefault": true
+}

@@ -1265,6 +1265,17 @@ fn tool_read(
         .map(|ext| ext.to_string_lossy().to_lowercase());
     if let Some(ext) = &extension {
         if BINARY_EXTENSIONS.contains(&ext.as_str()) {
+            // PDFs have their own reader (ADR 0312/0313): redirect the model
+            // instead of leaving it at a dead end. The tool exists while the
+            // bundled laboflow.pdf plugin is enabled.
+            if ext == "pdf" {
+                return Err((
+                    "TOOL_BINARY_CONTENT".into(),
+                    format!(
+                        "{display} is a PDF document; Read only handles text files. Call the plugin_laboflow_pdf_read tool with path={path:?} to read it page by page"
+                    ),
+                ));
+            }
             return Err((
                 "TOOL_BINARY_CONTENT".into(),
                 format!("{display} is a binary file (.{ext}) and has no text to read"),
@@ -2925,6 +2936,31 @@ mod tests {
         .await;
         assert!(read.ok, "read failed: {:?}", read.content);
         assert_eq!(read.content["path"].as_str(), Some(r"src/util\test.ts"));
+    }
+
+    #[tokio::test]
+    async fn read_redirects_pdfs_to_the_pdf_plugin_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("report.pdf"),
+            b"%PDF-1.4 not actually parsed",
+        )
+        .unwrap();
+
+        let result = execute_tool(
+            Some(dir.path()),
+            None,
+            "Read",
+            &serde_json::json!({ "path": "report.pdf" }),
+            5_000,
+        )
+        .await;
+        assert!(!result.ok);
+        let message = serde_json::to_string(&result.content).unwrap();
+        assert!(
+            message.contains("plugin_laboflow_pdf_read"),
+            "expected a plugin_laboflow_pdf_read redirect, got: {message}"
+        );
     }
 
     #[test]
