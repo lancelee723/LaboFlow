@@ -1246,8 +1246,16 @@ export type PluginHostApi = {
       method?: string;
       headers?: Record<string, string>;
       body?: string;
+      /** Base64 bytes to send as the request body, for binary uploads. Exclusive with `body`. */
+      bodyBase64?: string;
       timeoutMs?: number;
-    }) => Promise<{ status: number; headers: Record<string, string>; bodyText: string }>;
+    }) => Promise<{
+      status: number;
+      headers: Record<string, string>;
+      bodyText: string;
+      /** Present when the request set `responseFormat: "base64"`. */
+      bodyBase64?: string;
+    }>;
     /**
      * Real-time bidirectional sockets (`net.websocket`). A connect is confined
      * to `manifest.net.domains` exactly like `fetch`, and the host closes every

@@ -43,7 +43,7 @@
         "key": "mineruEndpoint",
         "type": "string",
         "title": "MinerU endpoint",
-        "description": "Optional OCR backend for scanned PDF pages. Cloud default: https://mineru.net; a self-hosted deployment must expose the same /api/v4 API. Leave empty to keep every document on this machine."
+        "description": "Base URL only, for example https://mineru.net (the tool appends its own /api/v4 paths — do not paste a full endpoint URL). A self-hosted deployment must expose the same v4 API. Leave empty to keep every document on this machine."
       },
       {
         "key": "mineruApiKey",

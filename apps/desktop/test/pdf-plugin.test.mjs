@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deflateRawSync } from "node:zlib";
+import { inflateSync, deflateRawSync } from "node:zlib";
 
 import {
   joinTextItems,
@@ -19,12 +19,18 @@ import {
   readPdf,
 } from "../resources/plugins/laboflow.pdf/lib/engine.js";
 import { downscale, encodePng } from "../resources/plugins/laboflow.pdf/lib/png.js";
-import { parseWithMineru, readMarkdownFromZip } from "../resources/plugins/laboflow.pdf/lib/mineru.js";
-import { dataDirFromPluginDataPath, resolvePdfPath } from "../resources/plugins/laboflow.pdf/lib/paths.js";
+import {
+  parseWithMineru,
+  readMarkdownFromZip,
+} from "../resources/plugins/laboflow.pdf/lib/mineru.js";
+import {
+  dataDirFromPluginDataPath,
+  resolvePdfPath,
+} from "../resources/plugins/laboflow.pdf/lib/paths.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = (name) => new Uint8Array(readFileSync(join(here, "fixtures", "pdf", name)));
-const pluginLib = join(here, "..", "resources", "plugins", "laboflow.pdf", "lib");
+const fixture = (name) =>
+  new Uint8Array(readFileSync(join(here, "fixtures", "pdf", name)));
 
 test("parsePageSpec parses ranges, clamps, and rejects malformed input", () => {
   assert.deepEqual(parsePageSpec("3,1-2,2", 10), { pages: [1, 2, 3] });
@@ -49,42 +55,58 @@ test("joinTextItems joins Latin with single spaces and CJK without any", () => {
   assert.equal(joinTextItems([{ str: "营收" }, { str: "1.2B" }]), "营收1.2B");
 });
 
-test("png encoder round-trips pixels and downscale box-averages", async () => {
+test("png encoder round-trips pixels and downscale box-averages", () => {
   const width = 4;
   const height = 3;
-  const data = new Uint8Array(Array.from({ length: width * height * 3 }, (_, i) => (i * 7) % 256));
+  const data = new Uint8Array(
+    Array.from({ length: width * height * 3 }, (_, i) => (i * 7) % 256),
+  );
   const png = encodePng({ width, height, channels: 3, data });
   assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   assert.equal(png.readUInt32BE(16), width);
   assert.equal(png.readUInt32BE(20), height);
   const idatAt = png.indexOf(Buffer.from("IDAT", "ascii"));
   const idatLength = png.readUInt32BE(idatAt - 4);
-  const { inflateSync } = await import("node:zlib");
   const inflated = inflateSync(png.subarray(idatAt + 4, idatAt + 4 + idatLength));
   assert.equal(inflated.length, (width * 3 + 1) * height);
 
   const scaled = downscale(
-    { width: 4, height: 1, channels: 3, data: new Uint8Array([10, 0, 0, 20, 0, 0, 30, 0, 0, 40, 0, 0]) },
+    {
+      width: 4,
+      height: 1,
+      channels: 3,
+      data: new Uint8Array([10, 0, 0, 20, 0, 0, 30, 0, 0, 40, 0, 0]),
+    },
     2,
   );
   assert.equal(scaled.width, 2);
   assert.deepEqual([...scaled.data], [15, 0, 0, 35, 0, 0]);
 });
 
-test("readPdf extracts the text layer page by page", async () => {
-  const result = await readPdf({ data: fixture("text-two-pages.pdf"), includeImages: false });
+test("readPdf extracts the text layer page by page and honors page windows", async () => {
+  const result = await readPdf({
+    data: fixture("text-two-pages.pdf"),
+    includeImages: false,
+  });
   assert.equal(result.totalPages, 2);
   assert.equal(result.pagesTruncated, false);
   assert.ok(result.pages[0].text.includes("Lorem ipsum dolor sit amet"));
   assert.ok(result.pages[1].text.includes("consolidated statements"));
-  const windowed = await readPdf({ data: fixture("text-two-pages.pdf"), pages: [2], includeImages: false });
+  const windowed = await readPdf({
+    data: fixture("text-two-pages.pdf"),
+    pages: [2],
+    includeImages: false,
+  });
   assert.equal(windowed.pages.length, 1);
   assert.equal(windowed.pages[0].page, 2);
   assert.equal(await pdfPageCount(fixture("text-two-pages.pdf")), 2);
 });
 
 test("readPdf classifies scanned pages and recovers bitmaps (RGB and DCTDecode)", async () => {
-  const result = await readPdf({ data: fixture("images-two-pages.pdf"), includeImages: true });
+  const result = await readPdf({
+    data: fixture("images-two-pages.pdf"),
+    includeImages: true,
+  });
   assert.deepEqual(result.pages.map((page) => page.kind), ["scanned", "scanned"]);
   assert.deepEqual(
     { w: result.pages[0].image?.width, h: result.pages[0].image?.height },
@@ -94,7 +116,10 @@ test("readPdf classifies scanned pages and recovers bitmaps (RGB and DCTDecode)"
     { w: result.pages[1].image?.width, h: result.pages[1].image?.height },
     { w: 8, h: 6 },
   );
-  const off = await readPdf({ data: fixture("images-two-pages.pdf"), includeImages: false });
+  const off = await readPdf({
+    data: fixture("images-two-pages.pdf"),
+    includeImages: false,
+  });
   assert.ok(off.pages.every((page) => page.skipped === "vision-unavailable"));
   const capped = await readPdf({
     data: fixture("images-two-pages.pdf"),
@@ -106,12 +131,17 @@ test("readPdf classifies scanned pages and recovers bitmaps (RGB and DCTDecode)"
 
 test("readPdf surfaces encryption as typed, actionable errors", async () => {
   await assert.rejects(
-    () => readPdf({ data: fixture("encrypted-user-password.pdf"), includeImages: false }),
+    () =>
+      readPdf({ data: fixture("encrypted-user-password.pdf"), includeImages: false }),
     PdfEncryptedError,
   );
   await assert.rejects(
     () =>
-      readPdf({ data: fixture("encrypted-user-password.pdf"), password: "wrong", includeImages: false }),
+      readPdf({
+        data: fixture("encrypted-user-password.pdf"),
+        password: "wrong-password",
+        includeImages: false,
+      }),
     (error) => error instanceof PdfEncryptedError && error.wrongPassword === true,
   );
   const opened = await readPdf({
@@ -136,12 +166,24 @@ function buildZip(entries) {
     }
     return (c ^ 0xffffffff) >>> 0;
   };
+  const concat = (parts) => {
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(total);
+    let at = 0;
+    for (const part of parts) {
+      out.set(part, at);
+      at += part.length;
+    }
+    return out;
+  };
   const locals = [];
   const centrals = [];
   let offset = 0;
   for (const entry of entries) {
     const nameBytes = encoder.encode(entry.name);
-    const stored = entry.deflate ? new Uint8Array(deflateRawSync(Buffer.from(entry.data))) : entry.data;
+    const stored = entry.deflate
+      ? new Uint8Array(deflateRawSync(Buffer.from(entry.data)))
+      : entry.data;
     const method = entry.deflate ? 8 : 0;
     const local = new Uint8Array(30 + nameBytes.length + stored.length);
     const localView = new DataView(local.buffer);
@@ -167,16 +209,6 @@ function buildZip(entries) {
     centrals.push(central);
     offset += local.length;
   }
-  const concat = (parts) => {
-    const total = parts.reduce((sum, part) => sum + part.length, 0);
-    const out = new Uint8Array(total);
-    let at = 0;
-    for (const part of parts) {
-      out.set(part, at);
-      at += part.length;
-    }
-    return out;
-  };
   const centralDir = concat(centrals);
   const eocd = new Uint8Array(22);
   const eocdView = new DataView(eocd.buffer);
@@ -188,7 +220,9 @@ function buildZip(entries) {
   return concat([...locals, centralDir, eocd]);
 }
 
-const markdown = new TextEncoder().encode("# Annual Report\n\nRevenue grew 12% year over year.");
+const markdown = new TextEncoder().encode(
+  "# Annual Report\n\nRevenue grew 12% year over year.",
+);
 
 test("readMarkdownFromZip prefers full.md and reads deflated entries", () => {
   const zip = buildZip([
@@ -196,30 +230,56 @@ test("readMarkdownFromZip prefers full.md and reads deflated entries", () => {
     { name: "smuggle.md", data: new TextEncoder().encode("wrong file") },
     { name: "full.md", data: markdown },
   ]);
-  assert.equal(readMarkdownFromZip(zip), "# Annual Report\n\nRevenue grew 12% year over year.");
+  assert.equal(
+    readMarkdownFromZip(zip),
+    "# Annual Report\n\nRevenue grew 12% year over year.",
+  );
   const deflated = buildZip([{ name: "chunk0.md", data: markdown, deflate: true }]);
   assert.ok(readMarkdownFromZip(deflated).includes("Revenue grew 12%"));
-  assert.throws(() => readMarkdownFromZip(new TextEncoder().encode("not a zip")), /not a ZIP/);
+  assert.throws(
+    () => readMarkdownFromZip(new TextEncoder().encode("not a zip")),
+    /not a ZIP/,
+  );
 });
 
-test("parseWithMineru uploads base64, polls the task, and downloads the archive", async () => {
+test("parseWithMineru follows the official v4 signed-upload flow", async () => {
   const zip = buildZip([{ name: "full.md", data: markdown }]);
   const calls = [];
   const fetchImpl = async (input) => {
     calls.push(`${input.method ?? "GET"} ${input.url}`);
-    if (input.url.endsWith("/api/v4/file-queue/file")) {
+    if (input.url.endsWith("/api/v4/file-urls/batch")) {
       assert.equal(input.headers.Authorization, "Bearer tok");
       const body = JSON.parse(input.body);
-      assert.equal(body.name, "report.pdf");
-      assert.ok(body.file.length > 0);
-      return { status: 200, bodyText: JSON.stringify({ code: 0, data: { task_id: "t1" } }) };
-    }
-    if (input.url.includes("/api/v4/extract-results/task/t1")) {
+      // Exact official example shape: model_version + files[name, data_id].
+      assert.deepEqual(body, {
+        model_version: "vlm",
+        files: [{ name: "report.pdf", data_id: "report.pdf" }],
+      });
       return {
         status: 200,
         bodyText: JSON.stringify({
           code: 0,
-          data: { state: "done", full_zip_url: "https://oss/zip" },
+          data: { batch_id: "b1", file_urls: ["https://oss/upload"] },
+        }),
+      };
+    }
+    if (input.url === "https://oss/upload") {
+      // PUT of raw bytes: no auth header or content type may leak onto the
+      // signed URL, and the PDF rides bodyBase64.
+      assert.equal(input.method, "PUT");
+      assert.equal(input.headers?.Authorization, undefined);
+      assert.equal(input.headers?.["Content-Type"], undefined);
+      assert.equal(Buffer.from(input.bodyBase64, "base64")[0], 1);
+      return { status: 200 };
+    }
+    if (input.url.includes("/api/v4/extract-results/batch/b1")) {
+      return {
+        status: 200,
+        bodyText: JSON.stringify({
+          code: 0,
+          data: {
+            extract_result: [{ state: "done", full_zip_url: "https://oss/zip" }],
+          },
         }),
       };
     }
@@ -230,11 +290,16 @@ test("parseWithMineru uploads base64, polls the task, and downloads the archive"
     throw new Error(`unexpected fetch ${input.url}`);
   };
   const result = await parseWithMineru(
-    { endpoint: "https://mineru.net/", apiKey: "tok" },
-    { fileName: "report.pdf", data: new Uint8Array([1, 2, 3]), fetchImpl, pollIntervalMs: 1 },
+    { endpoint: "https://mineru.net", apiKey: "tok" },
+    {
+      fileName: "report.pdf",
+      data: new Uint8Array([1, 2, 3]),
+      fetchImpl,
+      pollIntervalMs: 1,
+    },
   );
   assert.ok(result.includes("Revenue grew 12%"));
-  assert.ok(calls[0].includes("file-queue/file"));
+  assert.ok(calls[0].includes("file-urls/batch"));
 });
 
 test("parseWithMineru surfaces upload and parse failures", async () => {
@@ -245,7 +310,10 @@ test("parseWithMineru surfaces upload and parse failures", async () => {
         {
           fileName: "r.pdf",
           data: new Uint8Array([1]),
-          fetchImpl: async () => ({ status: 200, bodyText: JSON.stringify({ code: 401, msg: "invalid token" }) }),
+          fetchImpl: async () => ({
+            status: 200,
+            bodyText: JSON.stringify({ code: 401, msg: "invalid token" }),
+          }),
         },
       ),
     /invalid token/,
@@ -258,17 +326,29 @@ test("parseWithMineru surfaces upload and parse failures", async () => {
           fileName: "r.pdf",
           data: new Uint8Array([1]),
           pollIntervalMs: 1,
-          fetchImpl: async (input) =>
-            input.url.endsWith("/api-queue/x") ||
-            input.url.endsWith("/api/v4/file-queue/file")
-              ? { status: 200, bodyText: JSON.stringify({ code: 0, data: { task_id: "t2" } }) }
-              : {
-                  status: 200,
-                  bodyText: JSON.stringify({
-                    code: 0,
-                    data: { state: "failed", err_msg: "page limit exceeded" },
-                  }),
+          fetchImpl: async (input) => {
+            if (input.url.endsWith("/api/v4/file-urls/batch")) {
+              return {
+                status: 200,
+                bodyText: JSON.stringify({
+                  code: 0,
+                  data: { batch_id: "b2", file_urls: ["https://oss/u"] },
+                }),
+              };
+            }
+            if (input.url === "https://oss/u") return { status: 200 };
+            return {
+              status: 200,
+              bodyText: JSON.stringify({
+                code: 0,
+                data: {
+                  extract_result: [
+                    { state: "failed", err_msg: "page limit exceeded" },
+                  ],
                 },
+              }),
+            };
+          },
         },
       ),
     /page limit exceeded/,
@@ -276,28 +356,43 @@ test("parseWithMineru surfaces upload and parse failures", async () => {
 });
 
 test("resolvePdfPath confines reads to the session roots", async () => {
-  const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
+  const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
+  const { tmpdir, homedir } = await import("node:os");
   const dataDir = mkdtempSync(join(tmpdir(), "pdfroots-"));
   mkdirSync(join(dataDir, "attachments"), { recursive: true });
   mkdirSync(join(dataDir, "scratch", "s1"), { recursive: true });
   const workspace = mkdtempSync(join(tmpdir(), "pdfws-"));
+  const { realpathSync } = await import("node:fs");
   writeFileSync(join(workspace, "report.pdf"), "pdf");
   writeFileSync(join(dataDir, "attachments", "abc123"), "pdf");
   writeFileSync(join(dataDir, "scratch", "s1", "pasted.pdf"), "pdf");
   writeFileSync(join(tmpdir(), "outside.pdf"), "pdf");
 
   const resolve = (path, sessionId = "s1") =>
-    resolvePdfPath({ path, workspacePath: workspace, dataDir, sessionId });
+    resolvePdfPath({
+      path,
+      workspacePath: workspace,
+      dataDir,
+      sessionId,
+    });
 
-  const { realpathSync } = await import("node:fs");
-  assert.equal(resolve("report.pdf")?.absolute, realpathSync(join(workspace, "report.pdf")));
+  assert.equal(
+    resolve("report.pdf")?.absolute,
+    realpathSync(join(workspace, "report.pdf")),
+  );
   assert.ok(resolve(join(dataDir, "attachments", "abc123")));
   assert.ok(resolve(join(dataDir, "scratch", "s1", "pasted.pdf")));
   assert.equal(resolve(join(tmpdir(), "outside.pdf")), undefined);
   assert.equal(resolve("../escape.pdf"), undefined);
   assert.equal(resolve("missing.pdf"), undefined);
   assert.equal(resolve("pasted.pdf", "s2"), undefined);
-  assert.equal(dataDirFromPluginDataPath(join(dataDir, "plugins", "data", "laboflow.pdf")), dataDir);
-  assert.equal(dataDirFromPluginDataPath(join(tmpdir(), "nowhere", "a", "b")), undefined);
+  assert.equal(
+    dataDirFromPluginDataPath(join(dataDir, "plugins", "data", "laboflow.pdf")),
+    dataDir,
+  );
+  assert.equal(
+    dataDirFromPluginDataPath(join(tmpdir(), "nowhere", "a", "b")),
+    undefined,
+  );
+  void homedir;
 });

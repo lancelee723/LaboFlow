@@ -30,10 +30,16 @@ const MINERU_MARKDOWN_CHAR_LIMIT = 80000;
 const ENDPOINT_PATTERN = /^https?:\/\/[^\s/]+(:\d+)?(\/[^\s]*)?$/;
 
 function normalizeMineruSettings(settings) {
-  const endpoint =
+  let endpoint =
     typeof settings?.mineruEndpoint === "string"
       ? settings.mineruEndpoint.trim().replace(/\/+$/, "")
       : "";
+  // A pasted full endpoint (e.g. https://mineru.net/api/v4/extract/task) is a
+  // common slip: the client appends its own /api/v4/... paths, so only the
+  // base origin is meaningful. The extract/task endpoint also cannot upload
+  // local files, so the paste never works as-is.
+  const apiAt = endpoint.indexOf("/api/v");
+  if (apiAt > 0) endpoint = endpoint.slice(0, apiAt);
   const apiKey =
     typeof settings?.mineruApiKey === "string" ? settings.mineruApiKey.trim() : "";
   if (!ENDPOINT_PATTERN.test(endpoint)) return undefined;

@@ -5618,6 +5618,8 @@ export class PluginRuntime {
           method?: string;
           headers?: Record<string, string>;
           body?: string;
+          /** Base64 bytes sent as the raw request body, for binary uploads (ADR 0313). */
+          bodyBase64?: string;
           timeoutMs?: number;
           /** "text" (default) keeps bodyText; "base64" returns bodyBase64 for binary payloads (ADR 0313). */
           responseFormat?: "text" | "base64";
@@ -5645,7 +5647,9 @@ export class PluginRuntime {
               res = await fetch(url, {
                 method: input.method ?? "GET",
                 headers: input.headers,
-                body: input.body,
+                ...(input.bodyBase64 !== undefined
+                  ? { body: Buffer.from(input.bodyBase64, "base64") }
+                  : { body: input.body }),
                 redirect: "manual",
                 signal: controller.signal,
               });

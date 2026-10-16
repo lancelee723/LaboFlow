@@ -1,12 +1,12 @@
 /**
  * MinerU client for PDFRead's external OCR leg (ADR 0312/0313).
  *
- * Uses the JSON-upload v4 flow so every request rides `pi.net.fetch`, whose
- * body is text-only: the PDF is submitted base64-encoded to
- * POST /api/v4/file-queue/file, polled at
- * GET  /api/v4/extract-results/task/{task_id}, and the resulting archive is
- * downloaded with `responseFormat: "base64"` and read by a minimal
- * central-directory ZIP walker over node:zlib (stored + deflate).
+ * Official v4 local-file flow, adapted to `pi.net.fetch` (text bodies, but
+ * binary bodies may ride base64 in both directions):
+ *   1. POST /api/v4/file-urls/batch        -> batch id + one signed upload URL
+ *   2. PUT  <signed url> (raw bytes)       -> upload submits parsing implicitly
+ *   3. GET  /api/v4/extract-results/batch/{batch_id} until `state: "done"`
+ *   4. download `full_zip_url` and read `full.md` out of the archive
  */
 import { inflateRawSync } from "node:zlib";
 
@@ -93,23 +93,33 @@ export async function parseWithMineru(config, input) {
   const pollIntervalMs = input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const base = config.endpoint.replace(/\/+$/, "");
 
-  const headers = { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" };
+  const auth = { Authorization: `Bearer ${config.apiKey}` };
   const submitResponse = await fetchImpl({
-    url: `${base}/api/v4/file-queue/file`,
+    url: `${base}/api/v4/file-urls/batch`,
     method: "POST",
-    headers,
+    headers: { ...auth, "Content-Type": "application/json" },
+    // Exact shape from the official docs' example; extra/unknown fields are
+    // not documented for v4, so none are sent.
     body: JSON.stringify({
-      name: input.fileName,
-      is_ocr: true,
-      enable_table: true,
-      language: "ch",
-      file: Buffer.from(input.data).toString("base64"),
+      model_version: "vlm",
+      files: [{ name: input.fileName, data_id: input.fileName }],
     }),
   });
   const submit = JSON.parse(submitResponse.bodyText ?? "{}");
-  const taskId = submit?.data?.task_id;
-  if (submit.code !== 0 || !taskId) {
-    throw new MineruError(`MinerU rejected the upload: ${submit.msg ?? `code ${submit.code}`}`);
+  const batchId = submit?.data?.batch_id;
+  const uploadUrl = submit?.data?.file_urls?.[0];
+  if (submit.code !== 0 || !batchId || !uploadUrl) {
+    throw new MineruError(`MinerU rejected the batch request: ${submit.msg ?? `code ${submit.code}`}`);
+  }
+
+  // The signed URL must not carry our auth header or a content type.
+  const upload = await fetchImpl({
+    url: uploadUrl,
+    method: "PUT",
+    bodyBase64: Buffer.from(input.data).toString("base64"),
+  });
+  if (upload.status >= 300) {
+    throw new MineruError(`MinerU file upload failed with HTTP ${upload.status}`);
   }
 
   for (;;) {
@@ -120,14 +130,14 @@ export async function parseWithMineru(config, input) {
       );
     }
     const pollResponse = await fetchImpl({
-      url: `${base}/api/v4/extract-results/task/${taskId}`,
-      headers: { Authorization: `Bearer ${config.apiKey}` },
+      url: `${base}/api/v4/extract-results/batch/${batchId}`,
+      headers: auth,
     });
     const payload = JSON.parse(pollResponse.bodyText ?? "{}");
     if (payload.code !== 0) {
       throw new MineruError(`MinerU result poll failed: ${payload.msg ?? `code ${payload.code}`}`);
     }
-    const result = payload?.data;
+    const result = payload?.data?.extract_result?.[0];
     if (result?.state === "done" && result.full_zip_url) {
       const zipResponse = await fetchImpl({
         url: result.full_zip_url,
