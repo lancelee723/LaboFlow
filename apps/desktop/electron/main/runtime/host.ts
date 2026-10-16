@@ -11,6 +11,12 @@ import { interceptUnattendedAsk } from "../assistant/unattended-policy";
 
 export type HostRuntimeDependencies = {
   runtimeState: RuntimeState;
+  /**
+   * Best-effort "does the session's pinned model accept images" for plugin
+   * tool context (ADR 0313). Undefined means unresolved; callers must treat
+   * it as "do not assume either way".
+   */
+  resolveSessionVision: (sessionId: string) => Promise<boolean | undefined>;
   dataDir: string;
   logger: Logger;
   persistenceOutbox: PersistenceOutbox;
@@ -46,6 +52,7 @@ export type HostRuntimeDependencies = {
 
 export function createHostRuntime({
   runtimeState,
+  resolveSessionVision,
   dataDir,
   logger,
   persistenceOutbox,
@@ -226,6 +233,14 @@ export function createHostRuntime({
             // uses the mode to enforce plan-safe action restrictions
             // (ADR 0211).
             let sessionMode: "agent" | "plan" | "goal" | undefined;
+            let supportsVision: boolean | undefined;
+            try {
+              supportsVision = q.sessionId
+                ? await resolveSessionVision(q.sessionId)
+                : undefined;
+            } catch {
+              // Executor capability is best-effort, like the model key.
+            }
             const normalizedMode = typeof q.mode === "string" ? q.mode : undefined;
             if (normalizedMode === "agent" || normalizedMode === "plan" || normalizedMode === "goal") {
               sessionMode = normalizedMode;
@@ -282,6 +297,7 @@ export function createHostRuntime({
                 mode: sessionMode,
                 modelKey,
                 thinkingLevel,
+                supportsVision,
               });
               payload = {
                 executionId: q.executionId,

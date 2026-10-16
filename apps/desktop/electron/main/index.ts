@@ -796,6 +796,28 @@ const { startSidecar } = sidecarRuntime;
 
 const { startHost } = createHostRuntime({
   runtimeState,
+  resolveSessionVision: async (sessionId: string) => {
+    try {
+      const host = runtimeState.host;
+      if (!host) return undefined;
+      const detail = await host.call<{
+        session?: { providerId?: string; modelId?: string };
+      }>("session.get", { id: sessionId });
+      const session = detail?.session;
+      if (!session?.providerId || !session?.modelId) return undefined;
+      const context = await sessionCapabilityContext();
+      const providers = context.providers ?? [];
+      if (!providers.some((item) => item.id === session.providerId)) return undefined;
+      const enriched = enrichSession(
+        { providerId: session.providerId, modelId: session.modelId },
+        providers,
+        context.defaults,
+      );
+      return typeof enriched.supportsVision === "boolean" ? enriched.supportsVision : undefined;
+    } catch {
+      return undefined;
+    }
+  },
   dataDir,
   logger,
   persistenceOutbox,

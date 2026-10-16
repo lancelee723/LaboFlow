@@ -547,6 +547,7 @@ async function handleParentCall(method, payload, invocationId) {
           mode: payload?.mode,
           modelKey: payload?.modelKey,
           thinkingLevel: payload?.thinkingLevel,
+          supportsVision: payload?.supportsVision,
           signal: invocation.controller.signal,
           log: (msg) => log("info", msg),
         }));

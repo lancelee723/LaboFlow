@@ -147,6 +147,12 @@ export type RegisteredPluginTool = {
       mode?: "agent" | "plan" | "goal";
       modelKey?: string;
       thinkingLevel?: string;
+      /**
+       * Whether the session's effective model accepts image input, resolved
+       * best-effort by the host (ADR 0313): plugins that return page images
+       * route on it instead of guessing.
+       */
+      supportsVision?: boolean;
     },
   ) => Promise<unknown>;
 };
@@ -2629,6 +2635,7 @@ export class PluginRuntime {
                       mode: ctx?.mode,
                       modelKey: ctx?.modelKey,
                       thinkingLevel: ctx?.thinkingLevel,
+                      supportsVision: ctx?.supportsVision,
                     },
                   },
                   PLUGIN_TOOL_TIMEOUT_MS,
@@ -5612,6 +5619,8 @@ export class PluginRuntime {
           headers?: Record<string, string>;
           body?: string;
           timeoutMs?: number;
+          /** "text" (default) keeps bodyText; "base64" returns bodyBase64 for binary payloads (ADR 0313). */
+          responseFormat?: "text" | "base64";
         }) => {
           this.assertPermission(loaded, "net.fetch");
           if (!/^https?:\/\//i.test(input.url)) {
@@ -5653,9 +5662,15 @@ export class PluginRuntime {
             res.headers.forEach((value, key) => {
               headers[key] = value;
             });
-            const bodyText = await res.text();
+            let bodyText: string | undefined;
+            let bodyBase64: string | undefined;
+            if (input.responseFormat === "base64") {
+              bodyBase64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+            } else {
+              bodyText = await res.text();
+            }
             this.services.audit?.(netFetchAuditEntry(pluginId, url, res.status, headers));
-            return { status: res.status, headers, bodyText };
+            return { status: res.status, headers, bodyText, bodyBase64 };
           } finally {
             clearTimeout(timer);
           }
