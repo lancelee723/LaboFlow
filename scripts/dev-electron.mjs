@@ -45,6 +45,7 @@ function setPlistString(plistPath, key, value) {
 export function prepareMacDevelopmentBundle({
   electronExecutable,
   electronVersion,
+  appVersion,
   iconPath,
   cacheRoot,
   sign = true,
@@ -54,7 +55,9 @@ export function prepareMacDevelopmentBundle({
     .update(readFileSync(iconPath))
     .digest("hex")
     .slice(0, 12);
-  const cacheKey = `${electronVersion}-${iconHash}-${BRANDING_SCHEMA}`;
+  // The app version rides the cache key: a version bump must rebuild the
+  // dev bundle or app.getVersion() keeps reporting the baked old version.
+  const cacheKey = `${electronVersion}-${appVersion}-${iconHash}-${BRANDING_SCHEMA}`;
   const targetRoot = join(cacheRoot, cacheKey);
   const targetBundle = join(targetRoot, `${APP_NAME}.app`);
   const targetExecutable = join(
@@ -94,6 +97,8 @@ export function prepareMacDevelopmentBundle({
     setPlistString(plistPath, "CFBundleExecutable", APP_NAME);
     setPlistString(plistPath, "CFBundleIdentifier", DEV_BUNDLE_ID);
     setPlistString(plistPath, "CFBundleIconFile", "icon.icns");
+    setPlistString(plistPath, "CFBundleShortVersionString", appVersion);
+    setPlistString(plistPath, "CFBundleVersion", appVersion);
 
     if (sign) {
       // macOS no longer supports `codesign --deep` reliably on Electron
@@ -132,10 +137,12 @@ function run() {
   // Electron 43+ downloads its platform binary when its package is resolved.
   // electron-vite requires the resulting path.txt marker on every platform.
   const electron = resolveElectronInstallation();
+  const appVersion = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
   if (process.platform === "darwin") {
     env.ELECTRON_EXEC_PATH = prepareMacDevelopmentBundle({
       electronExecutable: electron.executablePath,
       electronVersion: electron.version,
+      appVersion,
       iconPath: join(DESKTOP_ROOT, "build", "icon.icns"),
       cacheRoot: join(ROOT, ".cache", "electron-dev"),
     });
