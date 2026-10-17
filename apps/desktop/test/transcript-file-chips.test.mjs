@@ -51,7 +51,7 @@ test("a file chip is routed by where the reference resolved, never optimisticall
   // Session scratch and attachment files live outside the plugin's project
   // roots, so completion hands them back as an absolute path.
   assert.match(hook, /inProject: false/);
-  assert.match(hook, /openFile\(resolved\.path, mimeType\)/);
+  assert.match(hook, /openFile\(resolved\.path/);
   // The OS handoff is no longer what a chat click does; the channel itself
   // stays part of the public IPC surface.
   assert.doesNotMatch(hook, /api\.fsOpen\(/);
@@ -67,8 +67,12 @@ test("a tool row and a tool result row open a file where the message body does",
   assert.match(hook, /const openFileRef = useOpenChatFileRef\(\);/);
   assert.match(
     hook,
-    /target\.kind === "file" \? openFileRef\(target\.path\) : openHttpUrl\(target\.url\)/,
+    /target\.kind === "file"\s*\? openFileRef\(target\.path[\s\S]*?: openHttpUrl\(target\.url\)/,
   );
+  // Document formats (pdf/docx/pptx/xlsx) intentionally take the host file
+  // tab, where the in-app document renderers live (T-A Q2 routing).
+  assert.match(hook, /isDocumentPreviewPath\(resolved\.path\)/);
+  assert.match(hook, /openFile\(resolved\.path/);
   assert.doesNotMatch(hook, /openFile\(target\.path\)/);
   // Both surfaces still call that opener, and neither reaches the host viewer's
   // store action directly: the tool row summary carries the call's own path,

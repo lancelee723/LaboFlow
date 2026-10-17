@@ -128,11 +128,12 @@ test("a Settings-row dropdown matches the row's input", () => {
   );
   // A Settings row can hold a text input, a select or a picker pill; all three
   // resolve to the shared field metric, so the column has one control height.
+  // The language/theme/font triggers use the compact picker height (upstream
+  // D: settings triggers free vertical space) while the menu select trigger
+  // keeps the field metric beside adjacent inputs.
   assert.equal(heightValue(pill, "height"), "var(--ds-field-height)");
   assert.equal(heightValue(pill, "min-height"), "var(--ds-field-height)");
-  for (const rule of [picker]) {
-    assert.equal(heightValue(rule, "height"), "var(--ds-field-height)");
-  }
+  assert.equal(heightValue(picker, "height"), "var(--ds-settings-picker-height)");
   // The row's own text input takes the same metric through the field
   // vocabulary; a compact row input would have to declare its own minimum.
   assert.doesNotMatch(rowInput, /height:/);
