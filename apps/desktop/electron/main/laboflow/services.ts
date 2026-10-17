@@ -270,6 +270,51 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
     return created;
   }
 
+  /** FR-TC-12: in-place AI rewrite of one selection (one-shot, no doc write —
+   * the text lands in the revision dialog and goes through the revision
+   * pipeline when the user submits it). */
+  async function rewriteSelection(input: {
+    text: string;
+    instruction?: string;
+    before?: string;
+    after?: string;
+  }): Promise<{ text: string }> {
+    const selectedText = String(input?.text ?? "");
+    if (!selectedText.trim()) {
+      throw Object.assign(new Error("empty selection"), {
+        errorCode: "NOT_SUPPORTED",
+      });
+    }
+    const oneShot = await getOneShotProvider();
+    if (!oneShot) {
+      throw Object.assign(new Error("model not configured"), {
+        errorCode: "MODEL_NOT_CONFIGURED",
+      });
+    }
+    const { REWRITE_SYSTEM_PROMPT, buildRewriteUserPrompt, cleanRewriteOutput } =
+      await import("./revision-review");
+    const result = await completeOneShot(
+      oneShot.provider,
+      {
+        systemPrompt: REWRITE_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user" as const,
+            content: buildRewriteUserPrompt(
+              selectedText,
+              String(input?.instruction ?? ""),
+              { before: input?.before, after: input?.after },
+            ),
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      oneShot.thinkingLevel,
+      { sessionId: "space-rewrite" },
+    );
+    return { text: cleanRewriteOutput(result.text ?? "", selectedText) };
+  }
+
   const kbService = new KbService({
     getHost,
     getLogger: () => logger,
@@ -721,6 +766,7 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
       deleteJson: (path) => spaceOrgRequest("DELETE", path),
     })),
     reviewByComments: (spaceId, nodeId) => reviewByComments(spaceId, nodeId),
+    rewriteSelection: (input) => rewriteSelection(input),
     emit: (frame) => sendToRenderer(IPC.event.spaceEvent, frame),
     warn: (context, message) =>
       logger.app("session", "warn", "space events poll", {

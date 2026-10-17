@@ -2156,6 +2156,15 @@ export const api = {
       IPC.invoke.spaceRevisionsReviewByComments,
       input,
     ),
+  /** FR-TC-12: one-shot AI rewrite of the current selection. */
+  spaceRewriteSelection: (input: {
+    spaceId: string;
+    nodeId: string;
+    text: string;
+    instruction?: string;
+    before?: string;
+    after?: string;
+  }) => invoke<{ text: string }>(IPC.invoke.spaceRewriteSelection, input),
   spaceEventsPull: (input: { spaceId: string; since: number }) =>
     invoke<{
       events: import("@pi-desktop/shared").SpaceEventPayload[];

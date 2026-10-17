@@ -65,3 +65,56 @@ export function parseReviewSuggestions(text: string): ReviewSuggestionDraft[] {
   }
   return out;
 }
+
+/**
+ * FR-TC-12 划词 AI 就地改: rewrite ONE selection in place. The renderer
+ * collects the selection and an optional instruction; the result feeds the
+ * existing revision-suggestion dialog (human reviews before submit), so the
+ * revision pipeline — anchors, hashing, accept/reject — stays the only write
+ * path. Pure prompt/cleanup logic lives here like the review prompts above.
+ */
+
+export const REWRITE_SYSTEM_PROMPT = [
+  "你是文档编辑助手。把用户选中的文本就地改写：只输出改写后的文本本身。",
+  "规则：不改写选区之外的任何内容；保留原有的 Markdown 结构（标题/列表/表格/代码块）；",
+  "不解释、不加前言后语、不用引号包裹；无法执行指令时原样返回选区文本。",
+].join("\n");
+
+export function buildRewriteUserPrompt(
+  selectedText: string,
+  instruction: string,
+  context?: { before?: string; after?: string },
+): string {
+  const before = (context?.before ?? "").slice(-400);
+  const after = (context?.after ?? "").slice(0, 400);
+  return [
+    before ? `选区前文（仅供理解上下文，不要输出）：\n"""\n${before}\n"""` : "",
+    `选区文本（就地改写它）：\n"""\n${selectedText}\n"""`,
+    instruction.trim()
+      ? `改写指令：${instruction.trim()}`
+      : "改写指令：使表达更精炼、更专业，其余保持原意。",
+    after ? `选区后文（仅供理解上下文，不要输出）：\n"""\n${after}\n"""` : "",
+    "只输出改写后的选区文本。",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Models occasionally wrap the rewrite in fences or echo quotes; strip them. */
+export function cleanRewriteOutput(text: string, originalText: string): string {
+  let out = text.trim();
+  const fence = /^```[a-zA-Z0-9]*\n([\s\S]*?)\n```$/.exec(out);
+  if (fence) out = fence[1].trim();
+  if (
+    out.length > 1 &&
+    ((out.startsWith('"') && out.endsWith('"')) ||
+      (out.startsWith("“") && out.endsWith("”")))
+  ) {
+    out = out.slice(1, -1).trim();
+  }
+  // A model that answered with prose about the task instead of the rewrite
+  // would corrupt the document on accept; falling back to the original makes
+  // the no-op visible in the dialog instead.
+  if (!out || out === originalText.trim()) return originalText;
+  return out;
+}

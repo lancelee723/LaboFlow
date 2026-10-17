@@ -456,6 +456,7 @@ export const IPC = {
     spaceRevisionsDecide: "pi-desktop/space/revisions/decide",
     spaceRevisionsReviewByComments:
       "pi-desktop/space/revisions/reviewByComments",
+    spaceRewriteSelection: "pi-desktop/space/rewriteSelection",
     spaceEventsPull: "pi-desktop/space/events/pull",
     spaceEventsSubscribe: "pi-desktop/space/events/subscribe",
     spaceEventsUnsubscribe: "pi-desktop/space/events/unsubscribe",

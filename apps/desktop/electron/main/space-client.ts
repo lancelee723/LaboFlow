@@ -295,6 +295,13 @@ export interface SpaceIpcHostDeps {
     spaceId: string,
     nodeId: string,
   ): Promise<RevisionSuggestion[]>;
+  /** FR-TC-12: one-shot in-place rewrite of one selection (main-side model). */
+  rewriteSelection?(input: {
+    text: string;
+    instruction?: string;
+    before?: string;
+    after?: string;
+  }): Promise<{ text: string }>;
 }
 
 export interface SpaceIpcHost {
@@ -603,6 +610,28 @@ export function createSpaceIpcHost(deps: SpaceIpcHostDeps): SpaceIpcHost {
             const nodeId = String(input?.nodeId ?? "");
             if (deps.reviewByComments) return deps.reviewByComments(spaceId, nodeId);
             return client.reviewByComments(spaceId, nodeId);
+          }),
+      );
+      handle(
+        IPC.invoke.spaceRewriteSelection,
+        async (input: {
+          text?: string;
+          instruction?: string;
+          before?: string;
+          after?: string;
+        }) =>
+          wrap(() => {
+            if (!deps.rewriteSelection) {
+              throw Object.assign(new Error("rewrite unavailable"), {
+                errorCode: "NOT_SUPPORTED",
+              });
+            }
+            return deps.rewriteSelection({
+              text: String(input?.text ?? ""),
+              instruction: input?.instruction ? String(input.instruction) : undefined,
+              before: input?.before ? String(input.before) : undefined,
+              after: input?.after ? String(input.after) : undefined,
+            });
           }),
       );
       handle(IPC.invoke.spaceEventsPull, async (input: { spaceId?: string; since?: number }) =>

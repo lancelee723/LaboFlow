@@ -20,8 +20,11 @@ async function sha256Hex(text: string): Promise<string> {
  * selection → anchor {kind:"text", paraIndex, textPrefix, textHash} → comment
  * or revision suggestion. v1 deliberate choices:
  *  - undo stays the textarea's native stack (no mixed AI/manual undo yet);
- *  - "AI 改写" is user-mediated: the dialog collects the revised text +
- *    rationale and posts producedBy:"user"; the agent pipeline lands later;
+ *  - "AI 改写" (FR-TC-12) runs a one-shot rewrite of the selection in main
+ *    and fills the dialog; the text still reaches the document only through
+ *    the revision pipeline below (submit → anchors → accept/reject), and an
+ *    untouched AI draft submits as producedBy:"agent" while an edited one
+ *    is the user's own;
  *  - accept/reject happens in the RevisionPanel; the server applies the text
  *    with serial anchor merging and surfaces 409 EANCHOR on drift.
  */
@@ -56,6 +59,10 @@ export function MdDocEditor(props: {
   const [commentDraft, setCommentDraft] = useState<string | null>(null);
   const [revisionDraft, setRevisionDraft] = useState<string | null>(null);
   const [revisionRationale, setRevisionRationale] = useState("");
+  // FR-TC-12: tracks that the current draft text is the AI's untouched
+  // output, so submit records producedBy "agent" (any edit flips it back).
+  const [aiOriginText, setAiOriginText] = useState<string | null>(null);
+  const [rewriting, setRewriting] = useState(false);
 
   const content = doc?.content ?? "";
 
@@ -189,16 +196,47 @@ export function MdDocEditor(props: {
         originalText: picked.text,
         revisedText: revised,
         rationale: revisionRationale.trim(),
-        producedBy: "user",
+        producedBy: aiOriginText !== null && revised === aiOriginText ? "agent" : "user",
       });
       setRevisionDraft(null);
       setRevisionRationale("");
+      setAiOriginText(null);
       onRevisionsChanged();
       onToast(t("space.revisions.created"), "success");
     } catch (error) {
       onToast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** FR-TC-12: one-shot AI rewrite of the live selection into the dialog. */
+  const rewriteInPlace = async () => {
+    const picked = selection();
+    if (!picked) {
+      onToast(t("space.selectFirst"), "error");
+      return;
+    }
+    setRewriting(true);
+    try {
+      const value = textareaRef.current?.value ?? "";
+      const result = await api.spaceRewriteSelection({
+        spaceId,
+        nodeId: node.id,
+        text: picked.text,
+        instruction: revisionRationale.trim() || undefined,
+        before: value.slice(0, picked.start),
+        after: value.slice(picked.start + picked.text.length),
+      });
+      setRevisionDraft(result.text);
+      setAiOriginText(result.text === picked.text ? null : result.text);
+      if (result.text === picked.text) {
+        onToast(t("space.revisions.aiUnchanged"), "info");
+      }
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setRewriting(false);
     }
   };
 
@@ -247,6 +285,23 @@ export function MdDocEditor(props: {
             >
               <IconSparkles size={13} />
               {t("space.revisions.suggest")}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || rewriting}
+              title={t("space.revisions.aiRewriteTitle")}
+              onClick={() => {
+                if (!selection()) {
+                  onToast(t("space.selectFirst"), "error");
+                  return;
+                }
+                setRevisionDraft(revisionDraft ?? "");
+                void rewriteInPlace();
+              }}
+            >
+              <IconSparkles size={13} />
+              {rewriting ? t("space.revisions.aiRewriting") : t("space.revisions.aiRewrite")}
             </Button>
           </>
         ) : (
@@ -325,7 +380,13 @@ export function MdDocEditor(props: {
             autoFocus
             value={revisionDraft}
             placeholder={t("space.revisions.revisedPlaceholder")}
-            onChange={(event) => setRevisionDraft(event.target.value)}
+            onChange={(event) => {
+              setRevisionDraft(event.target.value);
+              // A hand edit makes the text the user's own again.
+              if (aiOriginText !== null && event.target.value !== aiOriginText) {
+                setAiOriginText(null);
+              }
+            }}
           />
           <input
             className="field-input text-sm"
@@ -336,13 +397,28 @@ export function MdDocEditor(props: {
           <span className="flex items-center gap-1.5">
             <Button
               size="sm"
+              variant="secondary"
+              disabled={busy || rewriting}
+              onClick={() => void rewriteInPlace()}
+            >
+              {rewriting ? t("space.revisions.aiRewriting") : t("space.revisions.aiRegenerate")}
+            </Button>
+            <Button
+              size="sm"
               variant="primary"
               disabled={busy || !revisionDraft.trim() || revisionDraft === selection()?.text}
               onClick={() => void submitRevision()}
             >
               {t("space.revisions.submit")}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setRevisionDraft(null)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setRevisionDraft(null);
+                setAiOriginText(null);
+              }}
+            >
               {t("common.cancel")}
             </Button>
           </span>
