@@ -4,6 +4,7 @@ import type {
   SpaceComment,
   SpaceDoc,
   SpaceDto,
+  SpaceEventFrame,
   SpaceNode,
   SpaceNodeType,
   RevisionSuggestion,
@@ -21,6 +22,7 @@ import {
   IconTriangleAlert,
   IconUser,
   IconUsers,
+  IconActivity,
 } from "../components/icons";
 import { NodeTypeIcon, SpaceTree } from "../components/space/SpaceTree";
 import { MdDocEditor } from "../components/space/MdDocEditor";
@@ -29,6 +31,7 @@ import { HtmlCollabEditor } from "../components/space/HtmlCollabEditor";
 import { CommentSidebar, groupThreads } from "../components/space/CommentSidebar";
 import { RevisionPanel } from "../components/space/RevisionPanel";
 import { SpaceSharePanel } from "../components/space/SpaceSharePanel";
+import { SpaceActivityStream } from "../components/space/SpaceActivityStream";
 
 type PromptDialog =
   | { kind: "new-space"; value: string }
@@ -211,6 +214,20 @@ export function SpacePage() {
    * and hand the article HTML to the editor as its initial seed. */
   const [clipSeed, setClipSeed] = useState<{ nodeId: string; html: string } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  // FR-TC-19: activity stream — buffered live frames + a server history pull.
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [liveFrames, setLiveFrames] = useState<SpaceEventFrame[]>([]);
+  const [activityMembers, setActivityMembers] = useState<
+    Array<{ userId: string; username: string; displayName: string | null }>
+  >([]);
+  useEffect(() => {
+    setLiveFrames([]);
+    if (!activityOpen || !activeSpaceId) return;
+    api
+      .spaceMembersList({ spaceId: activeSpaceId })
+      .then((rows) => setActivityMembers(rows ?? []))
+      .catch(() => setActivityMembers([]));
+  }, [activityOpen, activeSpaceId]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   useEffect(() => {
     if (!activeSpaceId) return;
@@ -321,6 +338,9 @@ export function SpacePage() {
     void api.spaceEventsSubscribe(activeSpaceId).catch(() => undefined);
     const off = api.onSpaceEvent((frame) => {
       if (frame.spaceId !== activeSpaceId) return;
+      // FR-TC-19: every event feeds the activity buffer (capped; the stream
+      // dedupes against the history pull by seq).
+      setLiveFrames((prev) => [...prev.slice(-199), frame]);
       const payloadNodeId =
         typeof (frame.payload as { nodeId?: unknown })?.nodeId === "string"
           ? ((frame.payload as { nodeId: string }).nodeId)
@@ -610,6 +630,19 @@ export function SpacePage() {
                   </button>
                   <button
                     type="button"
+                    className={cx(
+                      "rounded-sm p-1 hover:opacity-100",
+                      activityOpen ? "opacity-100" : "opacity-70",
+                    )}
+                    title={t("space.activity.title")}
+                    aria-label={t("space.activity.title")}
+                    data-testid="space-activity-button"
+                    onClick={() => setActivityOpen((value) => !value)}
+                  >
+                    <IconActivity size={13} />
+                  </button>
+                  <button
+                    type="button"
                     className="rounded-sm p-1 opacity-70 hover:opacity-100"
                     title={t("space.clip")}
                     aria-label={t("space.clip")}
@@ -732,6 +765,19 @@ export function SpacePage() {
               data-testid="space-search-input"
               onChange={(event) => setSearchQuery(event.target.value)}
             />
+          ) : null}
+
+          {activityOpen && activeSpaceId ? (
+            <div className="flex max-h-64 min-h-32 flex-col rounded-md border p-1" data-testid="space-activity-panel">
+              <span className="px-2 pb-1 text-xs font-medium opacity-70">
+                {t("space.activity.title")}
+              </span>
+              <SpaceActivityStream
+                spaceId={activeSpaceId}
+                liveFrames={liveFrames.filter((frame) => frame.spaceId === activeSpaceId)}
+                members={activityMembers}
+              />
+            </div>
           ) : null}
 
           <span className="mt-auto text-center text-xs opacity-40">
