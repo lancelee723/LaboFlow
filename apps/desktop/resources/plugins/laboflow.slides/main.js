@@ -570,6 +570,16 @@ function projectListings(projectDir) {
     svgPages: safeList(join(projectDir, "svg_output"), [".svg"]),
     svgFinal: safeList(join(projectDir, "svg_final"), [".svg"]),
     exports: safeList(join(projectDir, "exports"), [".pptx"]),
+    backups: (() => {
+      try {
+        return readdirSync(join(projectDir, "backup"), { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name }))
+          .sort((a, b) => b.name.localeCompare(a.name));
+      } catch {
+        return [];
+      }
+    })(),
   };
 }
 
