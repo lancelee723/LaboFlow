@@ -108,7 +108,11 @@ export async function onLoad() {
           isError: true,
         };
       }
-      const data = new Uint8Array(await readFile(source.absolute));
+      // pdf.js takes ownership of any buffer handed to getDocument and
+      // detaches it on first use, so every consumer (page-count probe, page
+      // read, MinerU upload) must hold its own freshly-read bytes.
+      const readBytes = async () => new Uint8Array(await readFile(source.absolute));
+      const data = await readBytes();
       const settings = await pi.plugin.getSettings();
       const mineru = normalizeMineruSettings(settings);
       const vision = ctx?.supportsVision === true;
@@ -123,9 +127,7 @@ export async function onLoad() {
           return { content: `PDF read: ${spec.error}`, isError: true };
         }
         result = await readPdf({
-          // pdf.js takes ownership of the buffer handed to getDocument (the
-          // page-count probe transfer/detaches it), so the read re-reads bytes.
-          data: new Uint8Array(await readFile(source.absolute)),
+          data: await readBytes(),
           ...(spec?.pages ? { pages: spec.pages } : {}),
           ...(password ? { password } : {}),
           includeImages: vision,
@@ -193,7 +195,8 @@ export async function onLoad() {
           try {
             const markdown = await parseWithMineru(mineru, {
               fileName: name,
-              data,
+              // Fresh bytes: the shared buffer was detached by the probes above.
+              data: await readBytes(),
               signal: ctx?.signal,
               fetchImpl: mineruFetch,
             });
