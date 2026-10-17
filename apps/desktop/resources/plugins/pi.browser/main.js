@@ -27,7 +27,7 @@ export async function onLoad() {
   await pi.agent.registerTool({
     name: "Browser",
     description: [
-      "Drive PI-Desktop's work-panel browser via CDP.",
+      "Drive LaboFlow's work-panel browser via CDP.",
       'Call ToolSearch for "browser" or "cdp" to load this tool.',
       "Browser operations automatically reveal the work-panel view for this session and wait until it is ready.",
       "Keep the panel visible while working.",
