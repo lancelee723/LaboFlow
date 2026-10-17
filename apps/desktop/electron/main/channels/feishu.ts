@@ -84,7 +84,8 @@ const FEISHU_FILE_MAX_BYTES = 30 * 1024 * 1024;
 export const FEISHU_CAPABILITIES: ChannelCapabilities = {
   maxTextBytes: FEISHU_TEXT_MAX_BYTES,
   fileMaxBytes: FEISHU_FILE_MAX_BYTES,
-  streaming: false,
+  // FR-IM-07: cards create once and patch in place (streaming updates).
+  streaming: true,
   card: true,
 };
 
@@ -166,6 +167,12 @@ export interface FeishuRestClient {
     content: Record<string, unknown>;
     uuid?: string;
   }): Promise<{ messageId?: string }>;
+  /** FR-IM-07: PATCH an already-sent interactive message's card content. */
+  updateMessageCard(input: {
+    messageId: string;
+    content: Record<string, unknown>;
+    uuid?: string;
+  }): Promise<void>;
   /** Health check: acquires a token (network + credential). */
   testConnection(): Promise<DiagInfo | null>;
 }
@@ -255,6 +262,29 @@ export function createFeishuRestClient(options: FeishuRestOptions): FeishuRestCl
       return { messageId: data?.message_id };
     },
 
+    async updateMessageCard({ messageId, content, uuid }) {
+      const token = await getTenantAccessToken();
+      const payload = await requestJson(
+        `${baseUrl}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            content: JSON.stringify(content),
+            uuid: uuid ?? randomUUID(),
+          }),
+        },
+      );
+      if (payload.code !== 0) {
+        throw createDiagError(
+          mapFeishuDiag(payload.code as number | undefined, String(payload.msg ?? "")),
+        );
+      }
+    },
+
     async testConnection() {
       try {
         await getTenantAccessToken();
@@ -300,6 +330,89 @@ export function buildStatusCardContent(payload: {
       template: "blue",
     },
     elements,
+  };
+}
+
+/** Bodies longer than this fold into a collapsible panel (展开全文). */
+const FEISHU_CARD_FOLD_CHARS = 1200;
+
+function formatElapsed(ms: number): string {
+  if (ms < 1_000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1_000);
+  return `${minutes}m${seconds.toString().padStart(2, "0")}s`;
+}
+
+/**
+ * FR-IM-07 rich reply card: title header, a status line (状态/耗时/token),
+ * and the reply body. Long bodies go into a card-2.0 collapsible panel so
+ * the client renders a native「展开全文」instead of a truncated wall of text.
+ * Pure JSON — the streaming patch path reuses it verbatim.
+ */
+export function buildReplyCardContent(payload: {
+  title: string;
+  status: string;
+  elapsedMs?: number;
+  totalTokens?: number;
+  text?: string;
+  /** Fold overrides the length heuristic (tests / explicit control). */
+  fold?: boolean;
+}): Record<string, unknown> {
+  const meta: string[] = [`**状态**：${payload.status}`];
+  if (typeof payload.elapsedMs === "number") {
+    meta.push(`耗时：${formatElapsed(payload.elapsedMs)}`);
+  }
+  if (typeof payload.totalTokens === "number" && payload.totalTokens > 0) {
+    meta.push(`Tokens：${payload.totalTokens.toLocaleString("en-US")}`);
+  }
+  const header = {
+    title: { tag: "plain_text", content: payload.title },
+    template: payload.status === "运行中" ? "blue" : payload.status === "失败" ? "red" : "green",
+  };
+  const text = (payload.text ?? "").trim();
+  const shouldFold = payload.fold ?? text.length > FEISHU_CARD_FOLD_CHARS;
+  if (!text) {
+    return {
+      config: { wide_screen_mode: true },
+      header,
+      elements: [{ tag: "div", text: { tag: "lark_md", content: meta.join(" · ") } }],
+    };
+  }
+  if (!shouldFold) {
+    return {
+      config: { wide_screen_mode: true },
+      header,
+      elements: [
+        { tag: "div", text: { tag: "lark_md", content: meta.join(" · ") } },
+        { tag: "hr" },
+        { tag: "div", text: { tag: "lark_md", content: text } },
+      ],
+    };
+  }
+  // Card schema 2.0: the collapsible panel is the platform's native
+  // 展开全文 — folded by default, one tap opens the full body.
+  return {
+    schema: "2.0",
+    config: { wide_screen_mode: true, update_multi: true },
+    header,
+    body: {
+      direction: "vertical",
+      elements: [
+        { tag: "div", text: { tag: "lark_md", content: meta.join(" · ") } },
+        {
+          tag: "collapsible_panel",
+          expanded: false,
+          border: { type: "plain" },
+          vertical_spacing: "auto",
+          padding: "8px 12px",
+          background_style: "default",
+          elements: [
+            { tag: "div", text: { tag: "lark_md", content: text } },
+          ],
+        },
+      ],
+    },
   };
 }
 
@@ -705,6 +818,14 @@ export function createFeishuAdapter(
         kind: "unknown",
         message: "通道未连接，无法发送消息",
       });
+      if (payload.replyCard) {
+        await rest.sendMessage({
+          chatId: chatRef,
+          msgType: "interactive",
+          content: buildReplyCardContent(payload.replyCard),
+        });
+        return;
+      }
       if (payload.statusCard) {
         await rest.sendMessage({
           chatId: chatRef,
@@ -718,6 +839,43 @@ export function createFeishuAdapter(
         chatId: chatRef,
         msgType: "text",
         content: { text },
+      });
+    },
+
+    /** FR-IM-07 streaming: create the reply card now, return its message id
+     * so later patches land on the SAME message (one bubble, live content). */
+    async sendCard(chatRef, payload: OutboundPayload) {
+      if (!rest) throw createDiagError({
+        kind: "unknown",
+        message: "通道未连接，无法发送消息",
+      });
+      const card = payload.replyCard ?? {
+        title: payload.replyText.slice(0, 40) || "任务",
+        status: "运行中",
+      };
+      const result = await rest.sendMessage({
+        chatId: chatRef,
+        msgType: "interactive",
+        content: buildReplyCardContent(card),
+      });
+      return result.messageId;
+    },
+
+    /** FR-IM-07 streaming: patch the card in place (卡片 patches). */
+    async patchCard(messageId: string, payload: OutboundPayload) {
+      if (!rest) throw createDiagError({
+        kind: "unknown",
+        message: "通道未连接，无法更新消息",
+      });
+      if (!payload.replyCard) {
+        throw createDiagError({
+          kind: "unknown",
+          message: "缺少 replyCard，无法更新卡片",
+        });
+      }
+      await rest.updateMessageCard({
+        messageId,
+        content: buildReplyCardContent(payload.replyCard),
       });
     },
 

@@ -389,25 +389,65 @@ export class ChannelRegistry {
     const logger = this.deps.getLogger();
     const adapter = this.adaptersByAccount.get(account.id);
     if (!adapter) return;
+    // FR-IM-07: on card-capable channels the reply is ONE card bubble —
+    // created as 受理中 when the task starts, patched in place with the final
+    // content (streaming patches). Any card failure degrades to plain text.
+    let cardMessageId: string | undefined;
+    if (adapter.sendCard) {
+      try {
+        cardMessageId = await adapter.sendCard(message.chatRef, {
+          replyText: message.text,
+          replyCard: {
+            title: message.text.slice(0, 40) || "任务",
+            status: "运行中",
+          },
+        });
+      } catch (error) {
+        logger.app("channels", "warn", "channel accept-card send failed", {
+          data: String(error),
+        });
+        cardMessageId = undefined;
+      }
+    }
     try {
       const driver = this.deps.getDriver();
       if (!driver) {
         await adapter.send(message.chatRef, { replyText: DRIVER_NOT_READY_REPLY });
         return;
       }
+      const startedAt = Date.now();
       const handle = await driver.start({
         newSession: { title: `IM·${message.senderRef}` },
         prompt: message.text,
         unattendedPolicy: "degraded",
       });
       const result = await handle.completion;
+      const elapsedMs = Date.now() - startedAt;
+      const totalTokens = (result as { usage?: { totalTokens?: number } }).usage?.totalTokens;
       const finalText =
         result.status === "completed" && result.finalText.trim().length > 0
           ? result.finalText
           : result.status === "completed"
             ? NO_TEXT_REPLY
             : `任务未正常完成（${result.status}）`;
-      await adapter.send(message.chatRef, { replyText: finalText });
+      const replyCard = {
+        title: message.text.slice(0, 40) || "任务",
+        status: result.status === "completed" ? "完成" : "失败",
+        elapsedMs,
+        ...(typeof totalTokens === "number" ? { totalTokens } : {}),
+        text: finalText,
+      };
+      if (cardMessageId && adapter.patchCard) {
+        try {
+          await adapter.patchCard(cardMessageId, { replyText: finalText, replyCard });
+          return;
+        } catch (error) {
+          logger.app("channels", "warn", "channel card patch failed, falling back to text", {
+            data: String(error),
+          });
+        }
+      }
+      await adapter.send(message.chatRef, { replyText: finalText, replyCard });
     } catch (error) {
       logger.app("channels", "error", "channel dispatch failed", {
         data: { accountId: account.id, chatRef: message.chatRef, error: String(error) },

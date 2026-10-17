@@ -295,6 +295,18 @@ export interface OutboundPayload {
     status: string;
     detail?: string;
   };
+  /**
+   * FR-IM-07: rich reply card — task title/status plus elapsed time and
+   * token usage when known. `text` carries the reply body; the platform
+   * folds long bodies natively (Feishu collapsible panel).
+   */
+  replyCard?: {
+    title: string;
+    status: string;
+    elapsedMs?: number;
+    totalTokens?: number;
+    text?: string;
+  };
 }
 
 export interface ChannelCapabilities {

@@ -167,11 +167,13 @@ test("serial per-chat queue: second message waits for first completion", async (
   assert.equal(h.driver.pending.length, 2, "second run starts after the first settles");
   assert.equal(h.driver.pending[1].request.prompt, "第二条");
 
-  // The first chat received its reply through adapter.send.
-  assert.deepEqual(adapter.sent[0], {
-    chatRef: "oc_chat1",
-    payload: { replyText: "今天晴" },
-  });
+  // The first chat received its reply through adapter.send, with the rich
+  // reply card (FR-IM-07); elapsedMs is wall-clock so assert its presence.
+  assert.equal(adapter.sent[0].chatRef, "oc_chat1");
+  assert.equal(adapter.sent[0].payload.replyText, "今天晴");
+  assert.equal(adapter.sent[0].payload.replyCard.status, "完成");
+  assert.equal(adapter.sent[0].payload.replyCard.text, "今天晴");
+  assert.equal(typeof adapter.sent[0].payload.replyCard.elapsedMs, "number");
 });
 
 test("different chats dispatch concurrently", async () => {
@@ -397,4 +399,72 @@ test("credential store persists across restarts via the host secret store", asyn
   await second.delete("channel:feishu:acct-1");
   assert.equal(await second.has("channel:feishu:acct-1"), false);
   assert.equal(sealedTable.has("channel:feishu:acct-1"), false);
+});
+
+// ---------------------------------------------------------------------------
+// FR-IM-07: one card bubble per task — created 受理中, patched with the final
+// content; card failures degrade to plain text.
+// ---------------------------------------------------------------------------
+
+test("card channels stream: sendCard at dispatch, patchCard with the result", async () => {
+  const { h, adapter } = await setupConnected({}, {});
+  adapter.patched = [];
+  adapter.sendCard = async (chatRef, payload) => {
+    adapter.cardCreated = { chatRef, payload };
+    return "om_1";
+  };
+  adapter.patchCard = async (messageId, payload) => {
+    adapter.patched.push({ messageId, payload });
+  };
+
+  adapter.emitMessage(baseMessage({ text: "流式任务" }));
+  await sleep(0);
+  assert.equal(adapter.cardCreated.payload.replyCard.status, "运行中");
+
+  h.driver.pending[0].resolve({
+    sessionId: h.driver.pending[0].sessionId,
+    status: "completed",
+    finalText: "流式结果",
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+  });
+  await sleep(10);
+  assert.equal(adapter.sent.length, 0, "no second bubble");
+  assert.equal(adapter.patched.length, 1);
+  assert.equal(adapter.patched[0].messageId, "om_1");
+  assert.equal(adapter.patched[0].payload.replyCard.status, "完成");
+  assert.equal(adapter.patched[0].payload.replyCard.totalTokens, 30);
+  assert.equal(adapter.patched[0].payload.replyCard.text, "流式结果");
+});
+
+test("a card patch failure falls back to adapter.send instead of dropping the reply", async () => {
+  const { h, adapter } = await setupConnected();
+  adapter.sendCard = async () => "om_2";
+  adapter.patchCard = async () => {
+    throw new Error("card expired");
+  };
+
+  adapter.emitMessage(baseMessage());
+  await sleep(0);
+  h.driver.pending[0].resolve({
+    sessionId: h.driver.pending[0].sessionId,
+    status: "completed",
+    finalText: "兜底结果",
+  });
+  await sleep(10);
+  assert.equal(adapter.sent.length, 1, "reply arrives as text");
+  assert.equal(adapter.sent[0].payload.replyText, "兜底结果");
+});
+
+test("channels without card support keep the plain-text path", async () => {
+  const { h, adapter } = await setupConnected();
+  adapter.emitMessage(baseMessage());
+  await sleep(0);
+  h.driver.pending[0].resolve({
+    sessionId: h.driver.pending[0].sessionId,
+    status: "completed",
+    finalText: "普通回复",
+  });
+  await sleep(10);
+  assert.equal(adapter.sent.length, 1);
+  assert.equal(adapter.sent[0].payload.replyText, "普通回复");
 });

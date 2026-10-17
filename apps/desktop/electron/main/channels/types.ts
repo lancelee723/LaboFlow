@@ -53,6 +53,15 @@ export interface ChannelAdapter {
   disconnect(): Promise<void>;
   /** Push a reply into the chat identified by the platform chat ref. */
   send(chatRef: string, payload: OutboundPayload): Promise<void>;
+  /**
+   * FR-IM-07 流式卡片: create a card message NOW and return its platform
+   * message id, so later `patchCard` calls update the SAME bubble instead of
+   * appending. Optional — card-less channels simply omit it and the caller
+   * falls back to `send`.
+   */
+  sendCard?(chatRef: string, payload: OutboundPayload): Promise<string | undefined>;
+  /** FR-IM-07: replace an existing card's content (卡片 patches). */
+  patchCard?(messageId: string, payload: OutboundPayload): Promise<void>;
   /** Normalized inbound callback (dedup already applied by the adapter). */
   onMessage(cb: (message: InboundMessage) => void): void;
   onState(cb: (state: ChannelState, diag?: DiagInfo) => void): void;

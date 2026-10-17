@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   FEISHU_CAPABILITIES,
   FeishuWebhookTransport,
+  buildReplyCardContent,
   buildStatusCardContent,
   createFeishuAdapter,
   createFeishuAdapterFactory,
@@ -449,7 +450,7 @@ test("capabilities declare feishu limits", () => {
   assert.equal(FEISHU_CAPABILITIES.maxTextBytes, 150 * 1024);
   assert.equal(FEISHU_CAPABILITIES.fileMaxBytes, 30 * 1024 * 1024);
   assert.equal(FEISHU_CAPABILITIES.card, true);
-  assert.equal(FEISHU_CAPABILITIES.streaming, false);
+  assert.equal(FEISHU_CAPABILITIES.streaming, true); // FR-IM-07 card patches
 });
 
 test("truncateUtf8Safe never splits a code point", () => {
@@ -466,4 +467,97 @@ test("adapter factory creates independent adapters", () => {
   const b = factory("b");
   assert.notEqual(a, b);
   assert.equal(a.provider, "feishu");
+});
+
+// ---------------------------------------------------------------------------
+// FR-IM-07: rich reply cards + streaming card patches
+// ---------------------------------------------------------------------------
+
+test("reply card: short body stays flat, long body folds into a collapsible panel", () => {
+  const short = buildReplyCardContent({
+    title: "帮我查天气",
+    status: "完成",
+    elapsedMs: 42_000,
+    totalTokens: 12_345,
+    text: "今天是晴天。",
+  });
+  assert.equal(short.schema, undefined, "short card keeps the v1 shape");
+  assert.match(short.elements[0].text.content, /\*\*状态\*\*：完成/);
+  assert.match(short.elements[0].text.content, /41\.0s|42\.0s|40\.0s/);
+  assert.match(short.elements[0].text.content, /12,345/);
+  assert.equal(short.elements[2].text.content, "今天是晴天。");
+
+  const long = buildReplyCardContent({
+    title: "调研报告",
+    status: "完成",
+    text: "很长的结论。".repeat(400),
+  });
+  assert.equal(long.schema, "2.0");
+  const panel = long.body.elements.find((el) => el.tag === "collapsible_panel");
+  assert.ok(panel, "long body folds");
+  assert.equal(panel.expanded, false, "folded by default = 展开全文");
+  assert.match(panel.elements[0].text.content, /很长的结论/);
+});
+
+test("reply card: failure renders a red header and meta-only card when no text", () => {
+  const failed = buildReplyCardContent({ title: "T", status: "失败" });
+  assert.equal(failed.header.template, "red");
+  assert.equal(failed.elements.length, 1);
+  assert.match(failed.elements[0].text.content, /\*\*状态\*\*：失败/);
+});
+
+test("streaming: sendCard creates the bubble, patchCard PATCHes the same message", async () => {
+  const stub = makeFetchStub([
+    TOKEN_ROUTE,
+    {
+      match: "/im/v1/messages?receive_id_type",
+      response: () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ code: 0, data: { message_id: "om_1" } }),
+      }),
+    },
+    {
+      match: "/im/v1/messages/om_1",
+      response: () => ({ ok: true, status: 200, json: async () => ({ code: 0 }) }),
+    },
+  ]);
+  const adapter = createFeishuAdapter("acc-stream", {
+    mode: "webhook",
+    fetchImpl: stub.fetchImpl,
+  });
+  await adapter.connect({
+    id: "acc-stream",
+    provider: "feishu",
+    scope: "both",
+    allowlist: [],
+    enabled: true,
+    credentials: { app_id: "cli_x", app_secret: "sec" },
+  });
+  const messageId = await adapter.sendCard("oc_chat", {
+    replyText: "任务",
+    replyCard: { title: "任务", status: "运行中" },
+  });
+  assert.equal(messageId, "om_1");
+  const createCall = stub.calls.find((c) => c.url.includes("receive_id_type"));
+  assert.equal(createCall.body.msg_type, "interactive");
+  const created = JSON.parse(createCall.body.content);
+  assert.match(created.elements[0].text.content, /运行中/);
+
+  await adapter.patchCard("om_1", {
+    replyText: "完成",
+    replyCard: { title: "任务", status: "完成", elapsedMs: 1_500, text: "结果在此" },
+  });
+  const patchCall = stub.calls.find((c) => c.init.method === "PATCH");
+  assert.ok(patchCall, "card patched in place");
+  assert.ok(patchCall.url.includes("/im/v1/messages/om_1"));
+  const patched = JSON.parse(patchCall.body.content);
+  assert.match(patched.elements[0].text.content, /完成/);
+  assert.match(patched.elements[0].text.content, /1\.5s/);
+  await adapter.disconnect();
+});
+
+test("capabilities flip streaming on for the card patch path", () => {
+  assert.equal(FEISHU_CAPABILITIES.streaming, true);
+  assert.equal(FEISHU_CAPABILITIES.card, true);
 });
