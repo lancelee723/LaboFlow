@@ -139,4 +139,8 @@ export type ScheduledTask = {
   thinkingLevel?: SessionThinkingLevel;
   providerId?: string;
   modelId?: string;
+  /** FR-MC-11: per-task missed-run catch-up; absent = enabled. */
+  catchUpEnabled?: boolean | null;
+  /** FR-MC-17: strict | degraded | lenient; absent = executor default. */
+  unattendedPolicy?: "strict" | "degraded" | "lenient" | null;
 };

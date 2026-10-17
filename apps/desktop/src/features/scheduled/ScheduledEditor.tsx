@@ -20,6 +20,10 @@ export type ScheduledDraft = Pick<ScheduledTask, "title" | "prompt" | "cadence" 
   providerId?: string | null;
   modelId?: string | null;
   thinkingLevel?: ScheduledTask["thinkingLevel"] | null;
+  /** FR-MC-11: absent = enabled (historical behaviour). */
+  catchUpEnabled?: boolean | null;
+  /** FR-MC-17: absent = executor default (strict for scheduled runs). */
+  unattendedPolicy?: ScheduledTask["unattendedPolicy"];
 };
 
 export function ScheduledEditor({
@@ -63,6 +67,14 @@ export function ScheduledEditor({
   // LaboFlow module 03 (R5-1): 5-field cron mode alongside the calendar UI.
   const [cronExpr, setCronExpr] = useState(task?.cronExpr ?? "");
   const [outputDestination, setOutputDestination] = useState(task?.outputDestination ?? "");
+  // FR-MC-11: per-task catch-up toggle (cron only — catch-up is a cron concept).
+  const [catchUpEnabled, setCatchUpEnabled] = useState(task?.catchUpEnabled ?? true);
+  // FR-MC-17: strict is the scheduled default; the select only sends a value
+  // once the user touches it, so legacy tasks keep the executor default.
+  const [unattendedPolicy, setUnattendedPolicy] = useState<
+    NonNullable<ScheduledTask["unattendedPolicy"]>
+  >(task?.unattendedPolicy ?? "strict");
+  const [policyTouched, setPolicyTouched] = useState(false);
   const cronLocal = useMemo(() => {
     const expr = cronExpr.trim();
     if (!expr) return { ok: true as const, error: "" };
@@ -140,6 +152,12 @@ export function ScheduledEditor({
           cadence,
           cronExpr: cadence === "cron" ? cronExpr.trim() : null,
           outputDestination: outputDestination || null,
+          // FR-MC-11: only cron tasks carry a catch-up flag; null clears it.
+          catchUpEnabled: cadence === "cron" ? catchUpEnabled : null,
+          // FR-MC-17: send the policy once touched (or editing a task that
+          // has one); null keeps the executor default.
+          unattendedPolicy:
+            policyTouched || task?.unattendedPolicy ? unattendedPolicy : null,
           schedule:
             cadence === "manual" || cadence === "cron"
               ? null
@@ -277,6 +295,36 @@ export function ScheduledEditor({
           <option value="deliverables">{t("scheduled.outputDeliverables")}</option>
           <option value="team-space">{t("scheduled.outputTeamSpace")}</option>
         </select>
+      </label>
+      {cadence === "cron" && (
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={catchUpEnabled}
+            disabled={busy}
+            onChange={(e) => setCatchUpEnabled(e.target.checked)}
+          />
+          <span className="opacity-70">{t("scheduled.catchUp")}</span>
+        </label>
+      )}
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="opacity-70">{t("scheduled.unattendedPolicy")}</span>
+        <select
+          className="rounded-md border px-2 py-1.5 text-sm"
+          value={unattendedPolicy}
+          disabled={busy}
+          onChange={(e) => {
+            setUnattendedPolicy(
+              e.target.value as NonNullable<ScheduledTask["unattendedPolicy"]>,
+            );
+            setPolicyTouched(true);
+          }}
+        >
+          <option value="strict">{t("scheduled.policyStrict")}</option>
+          <option value="degraded">{t("scheduled.policyDegraded")}</option>
+          <option value="lenient">{t("scheduled.policyLenient")}</option>
+        </select>
+        <span className="opacity-50">{t("scheduled.unattendedPolicyHint")}</span>
       </label>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" disabled={busy || !valid}>

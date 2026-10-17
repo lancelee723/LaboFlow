@@ -5,6 +5,44 @@ register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));
 const { createScheduledRunner, executeScheduledTask } = await import(
   "../electron/main/runtime/scheduled-runner.ts"
 );
+const { unattendedPolicyOf, resetUnattendedPolicies } = await import(
+  "../electron/main/assistant/unattended-policy.ts"
+);
+
+test("the task's unattended policy arms the launched session (FR-MC-17)", async () => {
+  resetUnattendedPolicies();
+  const host = {
+    async call() {
+      return {
+        sessionId: "session", runId: "run", prompt: "Inspect",
+        task: { unattendedPolicy: "degraded", catchUpEnabled: false, outputDestination: "deliverables" },
+      };
+    },
+  };
+  await executeScheduledTask({
+    host, id: "task", automatic: true, runs: new Map(), isCurrent: () => true,
+    prompt: async () => {},
+  });
+  assert.equal(unattendedPolicyOf("session"), "degraded");
+  resetUnattendedPolicies();
+});
+
+test("an absent or invalid task policy falls back to strict", async () => {
+  resetUnattendedPolicies();
+  for (const task of [undefined, {}, { unattendedPolicy: "yolo" }, { unattendedPolicy: null }]) {
+    const host = {
+      async call() {
+        return { sessionId: "session", runId: "run", prompt: "Inspect", task };
+      },
+    };
+    await executeScheduledTask({
+      host, id: "task", automatic: true, runs: new Map(), isCurrent: () => true,
+      prompt: async () => {},
+    });
+    assert.equal(unattendedPolicyOf("session"), "strict");
+    resetUnattendedPolicies();
+  }
+});
 
 test("slow dispatch does not hold later tasks or subsequent polls", async () => {
   let release;

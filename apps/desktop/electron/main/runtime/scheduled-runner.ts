@@ -1,6 +1,26 @@
 type Host = { call<T>(method: string, params?: Record<string, unknown>): Promise<T> };
 import { clearUnattendedPolicy, registerUnattendedPolicy } from "../assistant/unattended-policy";
-export type ScheduledLaunch = { sessionId: string; prompt: string; runId: string };
+export type ScheduledLaunch = {
+  sessionId: string;
+  prompt: string;
+  runId: string;
+  /** Full task snapshot from the host; carries the per-task overrides. */
+  task?: {
+    unattendedPolicy?: string | null;
+    catchUpEnabled?: boolean | null;
+    outputDestination?: string | null;
+  } | null;
+};
+
+/** FR-MC-17 tiers, validated host-side before they ever persist. */
+const UNATTENDED_POLICIES = ["strict", "degraded", "lenient"] as const;
+type UnattendedPolicyName = (typeof UNATTENDED_POLICIES)[number];
+
+/** R5-6: scheduled runs default to strict — ask-class calls auto-deny. */
+function taskUnattendedPolicy(task: ScheduledLaunch["task"]): UnattendedPolicyName {
+  const policy = task?.unattendedPolicy;
+  return UNATTENDED_POLICIES.find((name) => name === policy) ?? "strict";
+}
 
 /** Runs through the same prompt entry point as an interactive desktop turn. */
 export async function executeScheduledTask(options: {
@@ -16,9 +36,8 @@ export async function executeScheduledTask(options: {
   try {
     if (!isCurrent()) throw new Error("scheduled runtime stopped");
     runs.set(launch.sessionId, launch.runId);
-    // R5-6: scheduled tasks default to the strict unattended policy — ask-
-    // class calls auto-deny and the task keeps moving (FR-MC-17).
-    registerUnattendedPolicy(launch.sessionId, "strict");
+    // FR-MC-17: the task's own policy wins; strict stays the default.
+    registerUnattendedPolicy(launch.sessionId, taskUnattendedPolicy(launch.task));
     await prompt(launch.sessionId, launch.prompt);
     return launch;
   } catch (error) {

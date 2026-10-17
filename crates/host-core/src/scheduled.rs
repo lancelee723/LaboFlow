@@ -45,6 +45,17 @@ pub struct ScheduledTask {
     pub model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    /// FR-MC-11: per-task missed-run catch-up toggle; absent means enabled
+    /// (the historical behaviour).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catch_up_enabled: Option<bool>,
+    /// FR-MC-17: task-level unattended policy (strict/degraded/lenient);
+    /// absent keeps the executor default ("strict" for scheduled runs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unattended_policy: Option<String>,
+    /// FR-MC-15: output destination tag; absent/empty means session only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_destination: Option<String>,
     /// Presence distinguishes a saved project (including null) from legacy tasks.
     #[serde(skip)]
     pub(crate) workspace_bound: bool,
@@ -234,6 +245,19 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
             .get("thinkingLevel")
             .and_then(Value::as_str)
             .filter(|level| sessions::is_valid_thinking_level(level))
+            .map(str::to_string),
+        catch_up_enabled: config.get("catchUpEnabled").and_then(Value::as_bool),
+        unattended_policy: config
+            .get("unattendedPolicy")
+            .and_then(Value::as_str)
+            .filter(|policy| {
+                matches!(*policy, "strict" | "degraded" | "lenient")
+            })
+            .map(str::to_string),
+        output_destination: config
+            .get("outputDestination")
+            .and_then(Value::as_str)
+            .filter(|dest| !dest.trim().is_empty())
             .map(str::to_string),
     })
 }

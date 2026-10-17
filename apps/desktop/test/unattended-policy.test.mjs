@@ -79,7 +79,9 @@ test("lenient behaves like an attended session", () => {
 
 test("launch sites declare their default policies", async () => {
   const scheduled = read("../electron/main/runtime/scheduled-runner.ts");
-  assert.match(scheduled, /registerUnattendedPolicy\(launch\.sessionId, "strict"\)/);
+  // FR-MC-17: the task's own policy wins; strict stays the scheduled default.
+  assert.match(scheduled, /taskUnattendedPolicy\(launch\.task\)/);
+  assert.match(scheduled, /\?\? "strict"/);
   const channels = read("../electron/main/channels/registry.ts");
   assert.match(channels, /unattendedPolicy: "degraded"/);
   const services = read("../electron/main/laboflow/services.ts");
