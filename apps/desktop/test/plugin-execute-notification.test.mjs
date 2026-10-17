@@ -127,7 +127,7 @@ function fixture({ activeTurn } = {}) {
       ],
       drainToasts: () => [],
     },
-    userMcp: { callTool: async () => null },
+    userMcp: { callTool: async () => null, serverIdForTool: () => undefined },
     pluginActiveInProject: () => true,
     sendToRenderer() {},
     emitAgentEvent() {},

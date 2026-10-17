@@ -41,7 +41,7 @@ function launchRuntime() {
         throw new Error(`Unexpected host call ${method}`);
       },
     } },
-    logger: { app() {} }, userMcp: { setRecords() {}, toolsForProject: async () => [] },
+    logger: { app() {} }, userMcp: { setRecords() {}, listRecords: () => [], toolsForProject: async () => [] },
     plugins: { listLoaded: () => [], getSkills: () => [], getTools: () => [], getAgentExtensions: () => [] },
     sessionProjects: new Map(), dataDir: workspace, vendorOAuth: {},
     modelsDevCatalog: { ensureLoaded: async () => {}, findModel: () => undefined },

@@ -37,7 +37,7 @@ test("launch resolves definition-only pins without granting Task.model selection
         throw new Error(`Unexpected host call ${method}`);
       },
     } },
-    logger: { app() {} }, userMcp: { setRecords() {}, toolsForProject: async () => [] },
+    logger: { app() {} }, userMcp: { setRecords() {}, listRecords: () => [], toolsForProject: async () => [] },
     plugins: { listLoaded: () => [], getSkills: () => [], getTools: () => [], getAgentExtensions: () => [] },
     sessionProjects: new Map(), dataDir: root, vendorOAuth: {},
     modelsDevCatalog: { ensureLoaded: async () => {}, findModel: () => undefined },
