@@ -70,14 +70,15 @@ test("send path dispatches teams through invokeExpertTeam with the envelope", ()
 });
 
 test("mention resolution covers both registries, experts winning ties", () => {
-  const resolver =
-    mention.match(/export async function matchExpertMention\([\s\S]*?^\}/m)?.[0] ?? "";
-  assert.match(resolver, /api\s*\.listExperts\(\)/);
-  assert.match(resolver, /api\s*\.listExpertTeams\(\)/);
-  assert.match(resolver, /expert\.enabled !== false/);
-  assert.match(resolver, /team\.enabled !== false/);
-  assert.match(resolver, /kind: "expert", id: expertId, name, task/);
-  assert.match(resolver, /kind: "team", id: teamId, name, task/);
+  // The registry fetch lives in the shared `resolveRegistries` helper both
+  // the single-mention and the FR-E-17 chain parse go through.
+  assert.match(mention, /async function resolveRegistries\(\)/);
+  assert.match(mention, /api\s*\.listExperts\(\)/);
+  assert.match(mention, /api\s*\.listExpertTeams\(\)/);
+  assert.match(mention, /expert\.enabled !== false/);
+  assert.match(mention, /team\.enabled !== false/);
+  assert.match(mention, /kind: "expert", id: expertId, name, task/);
+  assert.match(mention, /kind: "team", id: teamId, name, task/);
   // Unknown names and expert-registry outages still fall back to the agent.
-  assert.match(resolver, /return null/);
+  assert.match(mention, /return null/);
 });

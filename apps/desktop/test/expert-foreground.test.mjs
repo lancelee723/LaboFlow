@@ -140,9 +140,12 @@ test("team invoke streams into a NEW session and registers the moderator persona
 });
 
 test("expert invoke foregrounds: session.create, driver on the new session, no back-posted card", () => {
+  // The lifecycle lives in `invokeWithCompletion` (FR-E-17 split so a serial
+  // chain can await the first turn); plain `invoke` is a thin delegate.
   const invoke = expertServiceSource.match(
-    /async invoke\(request: ExpertInvocation\): Promise<\{ sessionId: string \}> \{[\s\S]*?\n  \}/,
+    /async invokeWithCompletion\([\s\S]*?return \{ sessionId, completion: run\.completion \};\n  \}/,
   )?.[0] ?? "";
+  assert.match(expertServiceSource, /await this\.invokeWithCompletion\(request\)/);
   assert.match(invoke, /session\.create/);
   assert.match(invoke, /projectPath/);
   assert.match(invoke, /mode: "agent"/);

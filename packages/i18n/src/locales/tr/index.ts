@@ -2823,6 +2823,7 @@ export const tr = {
     noSession: "Oturum yok (sonuç kartı iletilmez)",
     dispatch: "Gönder",
     dispatched: "{{expert}} çağrıldı — yeni sohbet açıldı",
+    chainDispatched: "{{count}} uzmana sıralı gönderim başladı: {{names}} — her biri bir önceki bitince çalışır",
     dispatchFailed: "Gönderim başarısız",
     teamDispatched: "\"{{team}}\" ekibi yeni bir sohbette çalışıyor, açıldı",
     sourcePreset: "Hazır",

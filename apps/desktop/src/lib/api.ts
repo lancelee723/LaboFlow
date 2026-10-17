@@ -968,6 +968,15 @@ export const api = {
   /** Dispatches an expert into a NEW foreground session and returns it. */
   invokeExpert: (input: { sessionId?: string; expertId: string; task: string }) =>
     invoke<{ sessionId: string }>(IPC.invoke.expertInvoke, input),
+  /** FR-E-17: serial multi-expert chain; returns the FIRST step's session. */
+  invokeExpertChain: (input: {
+    sessionId?: string;
+    steps: Array<{ expertId: string; name: string; task: string }>;
+  }) =>
+    invoke<{ firstSessionId: string | undefined }>(
+      IPC.invoke.expertChainInvoke,
+      input,
+    ),
   listExpertTeams: () => invoke<ExpertTeamListItem[]>(IPC.invoke.expertTeamsList),
   /** The team record plus the leader body, for the editor. */
   getExpertTeam: (id: string) =>

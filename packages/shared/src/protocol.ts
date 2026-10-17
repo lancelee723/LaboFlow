@@ -194,6 +194,7 @@ export const IPC = {
     expertDelete: "pi-desktop/expert/delete",
     expertToggle: "pi-desktop/expert/toggle",
     expertInvoke: "pi-desktop/expert/invoke",
+    expertChainInvoke: "pi-desktop/expert/chainInvoke",
     expertTeamsList: "pi-desktop/expertTeams/list",
     expertTeamGet: "pi-desktop/expertTeams/get",
     expertTeamSave: "pi-desktop/expertTeams/save",

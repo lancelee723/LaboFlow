@@ -2823,6 +2823,7 @@ export const zhTW = {
     noSession: "不關聯會話（結果卡片將不會回傳）",
     dispatch: "派發",
     dispatched: "已召喚 {{expert}}，已為你開啟新會話",
+    chainDispatched: "已按序指派 {{count}} 位專家：{{names}}，前一位完成後自動接力下一位",
     dispatchFailed: "派發失敗",
     teamDispatched: "團隊「{{team}}」正在新會話中執行，已為你開啟",
     sourcePreset: "預設",

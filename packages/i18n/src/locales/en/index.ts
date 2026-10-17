@@ -2821,6 +2821,7 @@ export const en = {
     noSession: "No session (the result card is dropped)",
     dispatch: "Dispatch",
     dispatched: "Summoned {{expert}} — the new conversation is now open",
+    chainDispatched: "Serial dispatch of {{count}} experts started: {{names}} — each runs when the previous one finishes",
     dispatchFailed: "Dispatch failed",
     teamDispatched: "Team \"{{team}}\" is working in a new conversation, now open",
     sourcePreset: "Preset",

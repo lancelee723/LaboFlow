@@ -2823,6 +2823,7 @@ export const es = {
     noSession: "Sin sesión (no se envía la tarjeta de resultado)",
     dispatch: "Despachar",
     dispatched: "Has invocado a {{expert}}; la nueva conversación está abierta",
+    chainDispatched: "Despacho en serie de {{count}} expertos iniciado: {{names}} — cada uno se ejecuta cuando termina el anterior",
     dispatchFailed: "Error al despachar",
     teamDispatched: "El equipo \"{{team}}\" trabaja en una conversación nueva, ya abierta",
     sourcePreset: "Predefinido",

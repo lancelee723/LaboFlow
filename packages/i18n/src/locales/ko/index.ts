@@ -2823,6 +2823,7 @@ export const ko = {
     noSession: "세션 없음 (결과 카드가 전달되지 않음)",
     dispatch: "지시",
     dispatched: "{{expert}}을(를) 호출했습니다. 새 대화가 열렸습니다",
+    chainDispatched: "전문가 {{count}}명 순차 지시가 시작되었습니다: {{names}} — 앞 단계가 끝나면 다음이 실행됩니다",
     dispatchFailed: "지시 실패",
     teamDispatched: "팀 \"{{team}}\"이(가) 새 대화에서 작업 중입니다. 열렸습니다",
     sourcePreset: "프리셋",

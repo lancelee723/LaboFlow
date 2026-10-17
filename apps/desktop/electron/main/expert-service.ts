@@ -485,11 +485,25 @@ export class ExpertService {
    * the durable driver — streaming into the transcript like any chat — and
    * register the persona so later turns in that session keep being the
    * expert. No completion card is posted anywhere; the session IS the result.
-   * the durable driver — streaming into the transcript like any chat — and
-   * register the persona so later turns in that session keep being the
-   * expert. No completion card is posted anywhere; the session IS the result.
    */
   async invoke(request: ExpertInvocation): Promise<{ sessionId: string }> {
+    const { sessionId } = await this.invokeWithCompletion(request);
+    return { sessionId };
+  }
+
+  /**
+   * FR-E-17: the invoke lifecycle plus the first turn's completion promise,
+   * so a serial chain can feed one expert's final output into the next.
+   */
+  async invokeWithCompletion(request: ExpertInvocation): Promise<{
+    sessionId: string;
+    completion: Promise<{
+      sessionId: string;
+      status: "completed" | "aborted" | "error";
+      finalText: string;
+      usage?: { totalTokens: number };
+    }>;
+  }> {
     const driver = this.deps.getDriver();
     if (!driver) throw new Error("backend unavailable");
     const persona = await this.resolvePersona(request.expertId);
@@ -568,7 +582,7 @@ export class ExpertService {
       type: "member",
       payload: { expert: persona.name, status: "running" },
     });
-    return { sessionId };
+    return { sessionId, completion: run.completion };
   }
 }
 

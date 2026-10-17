@@ -23,7 +23,7 @@ import type {
   ComposerPrefill,
 } from "../../lib/composer-smart-stop";
 import { optimisticUserMessage } from "../../lib/session-transcript";
-import { matchExpertMention } from "../expert-mention";
+import { matchExpertMention, matchExpertMentionChain } from "../expert-mention";
 import { buildExpertDispatchTask } from "../../lib/expert-dispatch";
 import type { AppState } from "../app-state";
 import {
@@ -398,6 +398,45 @@ export function createQueueSlice({
       // starts an independent expert (or team) run instead of the normal
       // agent turn. The run posts its completion card back into this session
       // asynchronously; the draft's explicit context travels with the task.
+      // FR-E-17: a serial chain (`@A 做X，然后 @B 做Y`) dispatches step by
+      // step in main, each later expert receiving the previous one's output;
+      // only the first session opens here. The draft's files ride with the
+      // FIRST step — later steps chain on upstream artifacts instead.
+      const chainSteps = await matchExpertMentionChain(content);
+      if (chainSteps) {
+        try {
+          const { firstSessionId } = await api.invokeExpertChain({
+            sessionId,
+            steps: chainSteps.map((step, index) => ({
+              expertId: step.id,
+              name: step.name,
+              task:
+                index === 0
+                  ? buildExpertDispatchTask(step.task, draft)
+                  : step.task,
+            })),
+          });
+          get().showToast(
+            i18n.t("expert.chainDispatched", {
+              count: chainSteps.length,
+              names: chainSteps.map((step) => step.name).join(" → "),
+            }),
+            { variant: "success" },
+          );
+          if (firstSessionId) {
+            await get().refreshSessions();
+            await get().selectSession(firstSessionId);
+          }
+          onAccepted?.(sessionId);
+          return true;
+        } catch (e) {
+          get().showToast(
+            e instanceof Error ? e.message : i18n.t("expert.dispatchFailed"),
+            { variant: "error" },
+          );
+          return false;
+        }
+      }
       const expertDispatch = await matchExpertMention(content);
       if (expertDispatch) {
         const task = buildExpertDispatchTask(expertDispatch.task, draft);

@@ -32,6 +32,7 @@ import { createWebhookServer } from "../assistant/im-server";
 import { ForegroundSessionRegistry } from "../expert-foreground";
 import { ExpertService } from "../expert-service";
 import { TeamRunner } from "../team-runner";
+import { startExpertChain } from "./expert-chain";
 import { KbService } from "../kb-service";
 import { OrgService } from "../org-service";
 import { OrgWorkspaceHub } from "../org-workspaces";
@@ -1016,6 +1017,40 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
           expertId: String(req?.expertId ?? "").trim(),
           task: String(req?.task ?? "").trim(),
         }),
+    );
+    // FR-E-17: serial multi-expert chain; the first session returns
+    // immediately, later steps dispatch as earlier turns settle.
+    laboflowHandle(
+      IPC.invoke.expertChainInvoke,
+      async (req: {
+        sessionId?: string;
+        steps: Array<{ expertId: string; name: string; task: string }>;
+      }) => {
+        const steps = (Array.isArray(req?.steps) ? req.steps : [])
+          .map((step) => ({
+            expertId: String(step?.expertId ?? "").trim(),
+            name: String(step?.name ?? "").trim(),
+            task: String(step?.task ?? "").trim(),
+          }))
+          .filter((step) => step.expertId && step.task);
+        if (steps.length < 2) {
+          throw Object.assign(
+            new Error("a chain needs at least two expert steps"),
+            { errorCode: "NOT_SUPPORTED" },
+          );
+        }
+        return startExpertChain(
+          {
+            invokeWithCompletion: (request) =>
+              expertService.invokeWithCompletion(request),
+            postSessionCard,
+            broadcast: (event) => sendToRenderer(IPC.event.expertTeamRun, event),
+            logger,
+          },
+          steps,
+          req?.sessionId,
+        );
+      },
     );
     laboflowHandle(IPC.invoke.expertTeamsList, async () => expertService.listTeams());
     laboflowHandle(

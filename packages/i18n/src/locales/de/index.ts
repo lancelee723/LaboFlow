@@ -2823,6 +2823,7 @@ export const de = {
     noSession: "Keine Sitzung (Ergebniskarte geht verloren)",
     dispatch: "Übergeben",
     dispatched: "{{expert}} gerufen — das neue Gespräch ist geöffnet",
+    chainDispatched: "Serielle Delegation an {{count}} Experten gestartet: {{names}} — jeder läuft, wenn der vorherige fertig ist",
     dispatchFailed: "Übergabe fehlgeschlagen",
     teamDispatched: "Team \"{{team}}\" arbeitet in einem neuen Gespräch, das geöffnet ist",
     sourcePreset: "Preset",

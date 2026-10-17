@@ -2823,6 +2823,7 @@ export const zhCN = {
     noSession: "不关联会话（结果卡片将不会回传）",
     dispatch: "派发",
     dispatched: "已召唤 {{expert}}，已为你打开新会话",
+    chainDispatched: "已按序指派 {{count}} 位专家：{{names}}，前一位完成后自动接力下一位",
     dispatchFailed: "派发失败",
     teamDispatched: "团队「{{team}}」正在新会话中执行，已为你打开",
     sourcePreset: "预设",

@@ -2823,6 +2823,7 @@ export const ptBR = {
     noSession: "No session (the result card is dropped)",
     dispatch: "Dispatch",
     dispatched: "Summoned {{expert}} — the new conversation is now open",
+    chainDispatched: "Despacho em série de {{count}} especialistas iniciado: {{names}} — cada um executa quando o anterior termina",
     dispatchFailed: "Dispatch failed",
     teamDispatched: "Team \"{{team}}\" is working in a new conversation, now open",
     sourcePreset: "Preset",

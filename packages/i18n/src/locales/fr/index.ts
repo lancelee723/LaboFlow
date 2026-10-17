@@ -2823,6 +2823,7 @@ export const fr = {
     noSession: "Aucune session (la carte de résultat est perdue)",
     dispatch: "Déléguer",
     dispatched: "{{expert}} invoqué — la nouvelle conversation est ouverte",
+    chainDispatched: "Délégation en série de {{count}} experts lancée : {{names}} — chacun démarre dès que le précédent termine",
     dispatchFailed: "Échec de la délégation",
     teamDispatched: "L'équipe « {{team}} » travaille dans une nouvelle conversation, ouverte",
     sourcePreset: "Prédéfini",
