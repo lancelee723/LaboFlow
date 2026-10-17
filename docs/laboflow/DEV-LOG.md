@@ -31,6 +31,13 @@
 - 上游 PI-Desktop v0.14.5 → v0.15.10（2335 提交）合并。
 - T6.0 fork 能力重挂载完成；`feat/phase6-remainder` 分支 39 提交。
 
+### 2026-10-17：Phase 6 剩余项收尾（分支 `feat/phase6-remainder`）
+
+- 文档：[archive/phase6-status/REMAINDER-TASKS-2026-10-02.md](archive/phase6-status/REMAINDER-TASKS-2026-10-02.md)（收尾批次表）
+- 8 项 S/M 级缺口落地，每项独立提交：FR-E-17 多专家串行指派、FR-MC-11/17 任务级补跑/无人值守策略（config_json 模式，MC-15 输出目的地一并落库）、FR-TC-12 划词 AI 就地改、FR-KB-05 多库路由、FR-KB-14 检索用量计量、FR-IM-07 飞书流式卡片（建卡+PATCH+原生折叠）、FR-IM-13 测试号指引（产品内+文档）、FR-TC-19 空间动态流。
+- FR-PPT-04 删页/移页 + FR-PPT-13 原生图表开关落在新插件仓库 `laboflow-ppt-master`（提交 3720ace，随 ADR 0041 抽仓），bundled laboflow.slides 有意不动以避免与抽仓分支冲突。
+- 横切：九语言 i18n、typecheck 0 error、biome 通过、host-core scheduled 43/43、专家/通道套件全绿、插件仓 77/77。
+
 ### 2026-10-02 ~ 10-04：T6.4 M 级缺口清零
 
 - 文档：[archive/phase6-status/REMAINDER-TASKS-2026-10-02.md](archive/phase6-status/REMAINDER-TASKS-2026-10-02.md)

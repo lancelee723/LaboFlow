@@ -412,3 +412,21 @@
 - FR-TC-12 的划词 AI 就地改（复用修订管线，编辑器本体已就位）；FR-TC-14 已随编辑器落地（预览+导出）。
 - S 级扫尾：FR-KB-05/14、FR-PPT-08/13/15/18、FR-IM-04/07/13、FR-TC-16/19。
 - 外部项不变（T6.3）：真实租户联调、WeKnora 端到端、30 天 soak、AC 场景实机轮。
+
+### 收尾批次（2026-10-17，Phase 6 剩余项专项，分支 `feat/phase6-remainder`）
+
+以上「仍开放」清单中的 8 项在本批全部落地（每项独立提交 + 测试 + i18n 九语言）：
+
+| 项 | 落点 | 提交 |
+|---|---|---|
+| FR-E-17 多专家串行指派 | `@A 做X，然后 @B 做Y` 解析（然后/接着/then/；/换行分段）+ 主进程 expert-chain 串行派发，上游 finalText 作为「上游专家产出」块传入下一步；进度卡回贴发起会话；失败即停链 | c53fe8a34 |
+| FR-MC-11/17 + MC-15 落库 | 任务级 catchUpEnabled / unattendedPolicy / outputDestination 走 config_json（cronExpr 先例，无需新列迁移）；host 校验非法值；补跑开关只闸补跑不闸排程；执行器按任务策略武装会话（默认 strict） | d07121ab7 |
+| FR-TC-12 划词 AI 就地改 | 主进程 one-shot 改写选区 → 填入修订对话框，正文仍只经修订管线落盘；未改动 AI 稿 producedBy=agent，手改即翻转为 user；输出清洗（剥围栏/引号，模型复述原文时回退原选区） | 6b6e6ffb9 |
+| FR-KB-05 多库路由 | ≥2 个检索服务时系统提示注入按名路由契约（派生自同一 mcp.active 记录，不扩权）；工具审批沿用 MCP | caf2065c9 |
+| FR-KB-14 检索用量 | kb- 前缀 MCP 工具调用按日计量（次数/失败/4字符每token估算）入 settings blob（90 天滚动，写合并、记录串行化）；用量页新增「知识库检索」区段 | caf2065c9 |
+| FR-IM-07 飞书流式卡片 | 一张卡泡：受理即建卡，完成后 PATCH 原消息（状态/耗时/token）；长文走卡片 2.0 collapsible_panel 原生展开全文；卡片失败降级纯文本不且回复 | 2a9e20c16 |
+| FR-IM-13 测试号模式 | 飞书卡内新增「测试号（开发用途）」折叠指引（WSS 免公网回调 / webhook 需穿透）+ `docs/laboflow/phase6/im-test-account-guide.md` | 003f6933f |
+| FR-TC-19 空间动态流 | 侧栏「动态」面板：space_events 历史拉取 + 实时帧合并（按 seq 去重，新→旧，80 条封顶）；审计词表渲染（谁·做了什么·何时），成员表解析人名 | 943021bcc |
+| FR-PPT-04 删页/移页 + FR-PPT-13 原生图表开关 | **落点为新插件仓库 `laboflow-ppt-master`（提交 3720ace，随 ADR 0041 抽仓走）**：翻页器删除（先确认）+ 相邻换名移页（编号连续、字节不变）；原生图表/表格开关按项目持久化于 pipeline-state.json，svg_to_pptx 未显式传参时以其为默认。bundled laboflow.slides 有意不动，避免与 `feat/ppt-master-plugin-extraction` 抽仓分支冲突 | 3720ace（插件仓） |
+
+本批各项的验证命令与结果记录在各自提交；横切验证：`pnpm --filter @pi-desktop/desktop typecheck` 0 error、`pnpm lint:biome` 通过、host-core scheduled 43/43、桌面专家套件 33/33、通道套件 45/45、插件仓 77/77。剩余未清：FR-E-11、FR-TC-05/06/11/16、FR-MC-02/05/16/19、FR-PPT-06/08/15、NFR-MC5、运行记录 90 天滚动（低优/C 级），及外部项（T6.3）。M-2/M-3/M-4 三项实机验证仍待用户组织登录后配合（同第三轮记录）。
