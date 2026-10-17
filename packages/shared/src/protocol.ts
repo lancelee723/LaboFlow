@@ -207,6 +207,7 @@ export const IPC = {
     kbDeleteUrl: "pi-desktop/kb/deleteUrl",
     kbApplyOrgDelivery: "pi-desktop/kb/applyOrgDelivery",
     kbDisableOrgServers: "pi-desktop/kb/disableOrgServers",
+    kbUsageHistory: "pi-desktop/kb/usageHistory",
     scheduledExecute: "pi-desktop/scheduled/execute",
     scheduledListRuns: "pi-desktop/scheduled/listRuns",
     toolResolvePermission: "pi-desktop/tool/resolvePermission",

@@ -1552,6 +1552,17 @@ export const api = {
     invoke<KbUrlEntry[]>(IPC.invoke.kbSaveUrl, entry),
   deleteKbUrl: (id: string) =>
     invoke<KbUrlEntry[]>(IPC.invoke.kbDeleteUrl, { id }),
+  /** FR-KB-14: per-day KB retrieval usage, newest day first. */
+  kbUsageHistory: () =>
+    invoke<
+      Array<{
+        date: string;
+        calls: number;
+        errors: number;
+        totalTokens: number;
+        byServer: Record<string, { calls: number; totalTokens: number }>;
+      }>
+    >(IPC.invoke.kbUsageHistory),
   fsList: (path?: string) =>
     invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "" }),
   fsRead: (path: string, mimeType?: string) =>

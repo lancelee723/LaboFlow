@@ -33,6 +33,7 @@ import { ForegroundSessionRegistry } from "../expert-foreground";
 import { ExpertService } from "../expert-service";
 import { TeamRunner } from "../team-runner";
 import { startExpertChain } from "./expert-chain";
+import { kbUsageHistory, type KbUsageLedger } from "./kb-usage";
 import { KbService } from "../kb-service";
 import { OrgService } from "../org-service";
 import { OrgWorkspaceHub } from "../org-workspaces";
@@ -1164,6 +1165,13 @@ export function createLaboflowServices(deps: LaboflowServicesDeps) {
         kbService.applyOrgDelivery(String(req?.orgId ?? "").trim(), req?.items ?? []),
     );
     laboflowHandle(IPC.invoke.kbDisableOrgServers, async () => kbService.disableOrgServers());
+    // FR-KB-14: per-day retrieval usage for the usage page (settings blob).
+    laboflowHandle(IPC.invoke.kbUsageHistory, async () => {
+      const settings = await requireHost()
+        .call<{ kbUsage?: KbUsageLedger }>("settings.get")
+        .catch(() => undefined);
+      return kbUsageHistory(settings?.kbUsage);
+    });
 
     // Organization session + Phase 3 provider + Phase 4 workspaces
     laboflowHandle(

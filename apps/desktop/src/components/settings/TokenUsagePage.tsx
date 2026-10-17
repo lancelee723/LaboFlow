@@ -16,6 +16,15 @@ type RangeId = "7d" | "30d";
 /** ZCode-parity granularity for the activity heatmap. */
 type HeatMode = "day" | "week" | "cumulative";
 
+/** FR-KB-14: one day of KB retrieval usage, newest first from main. */
+type KbUsageDayRow = {
+  date: string;
+  calls: number;
+  errors: number;
+  totalTokens: number;
+  byServer: Record<string, { calls: number; totalTokens: number }>;
+};
+
 // Half-width cells: 52 columns fit a full year of days in the same canvas.
 const HEAT_WEEKS = 52;
 const TREND_MAX_DAYS = 30;
@@ -149,6 +158,43 @@ export function TokenUsagePage() {
   const heatRef = useRef<HTMLDivElement | null>(null);
   const [orgStatus, setOrgStatus] = useState<OrgStatus | null>(null);
   const [quota, setQuota] = useState<OrgQuotaRemaining | null>(null);
+  // FR-KB-14: per-day KB retrieval calls + token estimate (settings blob).
+  const [kbUsage, setKbUsage] = useState<KbUsageDayRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .kbUsageHistory()
+      .then((rows) => {
+        if (!cancelled) setKbUsage(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const kbStats = useMemo(() => {
+    const windowStart = Date.now() - (range === "7d" ? 7 : 30) * 86_400_000;
+    let calls = 0;
+    let errors = 0;
+    let totalTokens = 0;
+    const byServer = new Map<string, { calls: number; totalTokens: number }>();
+    for (const row of kbUsage) {
+      if (Date.parse(`${row.date}T00:00:00`) < windowStart) continue;
+      calls += row.calls;
+      errors += row.errors;
+      totalTokens += row.totalTokens;
+      for (const [serverId, entry] of Object.entries(row.byServer)) {
+        const current = byServer.get(serverId) ?? { calls: 0, totalTokens: 0 };
+        byServer.set(serverId, {
+          calls: current.calls + entry.calls,
+          totalTokens: current.totalTokens + entry.totalTokens,
+        });
+      }
+    }
+    return { calls, errors, totalTokens, byServer: [...byServer.entries()] };
+  }, [kbUsage, range]);
 
   useEffect(() => {
     let cancelled = false;
@@ -877,6 +923,38 @@ export function TokenUsagePage() {
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {kbStats.calls > 0 ? (
+        <section className="usage-section">
+          <h3 className="usage-section-title">{t("settings.usage.kbRetrieval")}</h3>
+          <p className="text-xs opacity-60">
+            {t("settings.usage.kbRetrievalSummary", {
+              calls: kbStats.calls,
+              tokens: formatTokenCount(kbStats.totalTokens),
+            })}
+            {kbStats.errors > 0
+              ? ` · ${t("settings.usage.kbRetrievalErrors", { errors: kbStats.errors })}`
+              : ""}
+          </p>
+          <div className="usage-donut-legend">
+            {kbStats.byServer
+              .sort(([, a], [, b]) => b.totalTokens - a.totalTokens)
+              .map(([serverId, entry]) => (
+                <div className="usage-donut-row" key={serverId}>
+                  <div className="usage-donut-row-head">
+                    <span className="usage-donut-model">{serverId}</span>
+                    <span className="usage-donut-pct">
+                      {t("settings.usage.kbServerCalls", { calls: entry.calls })}
+                    </span>
+                  </div>
+                  <div className="usage-donut-tokens">
+                    {formatTokenCount(entry.totalTokens)} tokens
+                  </div>
+                </div>
+              ))}
           </div>
         </section>
       ) : null}

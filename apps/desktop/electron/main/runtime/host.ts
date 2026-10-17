@@ -8,6 +8,10 @@ import type { UserMcpRuntime } from "../user-mcp";
 import type { RuntimeState } from "./context";
 import type { FinishTurn } from "./plans";
 import { interceptUnattendedAsk } from "../assistant/unattended-policy";
+import {
+  createKbUsageMeter,
+  type KbUsageLedger,
+} from "../laboflow/kb-usage";
 
 export type HostRuntimeDependencies = {
   runtimeState: RuntimeState;
@@ -78,6 +82,30 @@ export function createHostRuntime({
   wireHost: (host: HostProcess) => void;
   startHost: () => Promise<void>;
 } {
+  // FR-KB-14: per-day KB retrieval usage meter, persisted in the settings
+  // blob. Writes coalesce on a short trailing timer — a chatty retrieval
+  // session must not turn into a settings write per tool call.
+  const kbUsageMeter = createKbUsageMeter({
+    load: async () => {
+      const host = runtimeState.host;
+      if (!host) return undefined;
+      const settings = await host
+        .call<{ kbUsage?: KbUsageLedger }>("settings.get")
+        .catch(() => undefined);
+      return settings?.kbUsage;
+    },
+    save: async (ledger) => {
+      const host = runtimeState.host;
+      if (!host) return;
+      await host
+        .call("settings.set", { kbUsage: ledger })
+        .catch((error) =>
+          logger.app("kb", "warn", "kb usage persist failed", { data: String(error) }),
+        );
+    },
+    warn: (message) => logger.app("kb", "warn", "kb usage meter failed", { data: message }),
+  });
+
   const wireHost = (h: HostProcess) => {
 
   h.onNotification((method, params) => {
@@ -192,10 +220,15 @@ export function createHostRuntime({
         const tool = plugins.getTools().find((t) => t.fullName === q.toolName);
         let payload: Record<string, unknown>;
         if (q.toolName.startsWith("mcp_")) {
+          let kbResult: unknown = null;
+          let kbOk = false;
           try {
             const result = await userMcp.callTool(q.toolName, q.args, projectPath, q.sessionId);
+            kbResult = result ?? null;
+            kbOk = true;
             payload = { executionId: q.executionId, ok: true, content: result ?? null };
           } catch (e) {
+            kbResult = { error: e instanceof Error ? e.message : String(e) };
             payload = {
               executionId: q.executionId,
               ok: false,
@@ -205,6 +238,16 @@ export function createHostRuntime({
                   : (e as { errorCode?: string })?.errorCode ?? "TOOL_FAILED",
               content: { error: e instanceof Error ? e.message : String(e) },
             };
+          } finally {
+            // FR-KB-14: meter KB retrieval calls (count + token estimate) even
+            // when the call failed — the usage page shows the error share too.
+            kbUsageMeter?.record({
+              fullName: q.toolName,
+              serverId: userMcp.serverIdForTool(q.toolName),
+              ok: kbOk,
+              args: q.args,
+              result: kbResult,
+            });
           }
         } else if (!tool) {
           payload = {

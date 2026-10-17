@@ -38,6 +38,7 @@ import {
 import type { Logger } from "../logger";
 import type { PluginRuntime } from "../plugin-runtime";
 import type { UserMcpRuntime } from "../user-mcp";
+import { kbToolGuidanceClauses } from "../laboflow/kb-routing";
 import type { RuntimeState } from "./context";
 import type { RuntimeProvider } from "./provider-catalog";
 import type { LoadedSkillDocument } from "../skill-document";
@@ -443,6 +444,10 @@ export function createSessionLaunchRuntime({
     const userSkills = await activeUserSkills(projectPath);
     await refreshUserMcp(projectPath);
     const userMcpTools = await userMcp.toolsForProject(projectPath ?? null);
+    // FR-KB-05: with several retrieval services live, the prompt names them
+    // and fixes the by-name routing contract. Derived from the SAME active
+    // records above, so the clause never widens what the session can call.
+    const kbRoutingClauses = kbToolGuidanceClauses(userMcp.listRecords());
     // Skill catalog (D174): only id/name/description cross to the sidecar; the
     // document body is fetched on demand through the local `Skill` tool. Host
     // skills come first so a plugin's entry reads as a refinement of them, and
@@ -624,6 +629,7 @@ export function createSessionLaunchRuntime({
         ...(overrides.turnId ? { turnId: overrides.turnId } : {}),
         ...(overrides.personaPrompt ? { personaPrompt: overrides.personaPrompt } : {}),
         ...(overrides.allowedTools?.length ? { allowedTools: overrides.allowedTools } : {}),
+        ...(kbRoutingClauses.length ? { toolGuidanceClauses: kbRoutingClauses } : {}),
         thinkingLevel,
         infiniteProviderRetry: settings.infiniteProviderRetry === true,
         commandShell,

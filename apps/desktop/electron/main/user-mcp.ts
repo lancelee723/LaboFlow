@@ -205,6 +205,13 @@ export class UserMcpRuntime {
     return this.findTool(fullName) !== undefined;
   }
 
+  /** The owning server id for a full tool name (FR-KB-14 usage metering).
+   * Names are not parseable — server ids may contain underscores — so the
+   * registry is the only source of truth. */
+  serverIdForTool(fullName: string): string | undefined {
+    return this.findTool(fullName)?.serverId;
+  }
+
   /**
    * Run a tool. The name carries the server id, but the lookup goes through the
    * cached tool list so a name the server never advertised is refused instead of
