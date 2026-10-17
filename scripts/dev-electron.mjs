@@ -137,8 +137,8 @@ function run() {
   // Electron 43+ downloads its platform binary when its package is resolved.
   // electron-vite requires the resulting path.txt marker on every platform.
   const electron = resolveElectronInstallation();
-  const appVersion = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
   if (process.platform === "darwin") {
+    const appVersion = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
     env.ELECTRON_EXEC_PATH = prepareMacDevelopmentBundle({
       electronExecutable: electron.executablePath,
       electronVersion: electron.version,
