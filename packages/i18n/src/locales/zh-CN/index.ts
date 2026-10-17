@@ -1657,6 +1657,8 @@ export const zhCN = {
     assistant: {
     feishuTitle: "飞书机器人",
     feishuHelp: "企业自建应用，粘贴 App ID + App Secret。指引：open.feishu.cn 建应用并开通 im:message.* 权限。",
+    testAccountTitle: "使用飞书测试号（开发用途）",
+    feishuTestGuide: "测试号凭证（飞书测试企业／开发版自建应用）填写方式相同：粘贴 App ID + App Secret。推荐默认的 WSS 长连接模式——无需公网回调。若切换 webhook 模式，本机端口需可被公网访问（用内网穿透如 ngrok/frp 映射后在开放平台配置回调地址与 verification token / encrypt key）。测试号仅用于开发调试：消息 API 配额受限，请勿作为生产通道。",
     wecomTitle: "企业微信机器人",
     wecomHelp: "企业微信智能机器人（API 模式），粘贴 BotID + Secret。指引：work.weixin.qq.com 管理后台创建。",
     wechatTitle: "微信公众号（中继）",

@@ -85,3 +85,17 @@ test("channel card never echoes stored secrets back into inputs", async () => {
   assert.match(src, /credentialUnchanged/);
   assert.doesNotMatch(src, /account\.credentials/);
 });
+
+test("FR-IM-13: the feishu card carries the test-account dev-use guide", async () => {
+  const page = await read("../src/components/settings/AssistantChannelsPage.tsx");
+  assert.match(page, /PROVIDER_TEST_GUIDE_KEYS/);
+  assert.match(page, /feishu: "settings\.assistant\.feishuTestGuide"/);
+  assert.match(page, /data-test-guide=\{provider\}/);
+  const en = await read("../../../packages/i18n/src/locales/en/index.ts");
+  const zh = await read("../../../packages/i18n/src/locales/zh-CN/index.ts");
+  // The guide must say DEVELOPMENT USE and mention the public callback need.
+  assert.match(en, /feishuTestGuide: "Test-app credentials.*DEVELOPMENT ONLY/s);
+  assert.match(en, /webhook mode, your local port must be reachable/);
+  assert.match(zh, /feishuTestGuide: "测试号凭证.*仅用于开发调试/s);
+  assert.match(zh, /内网穿透/);
+});

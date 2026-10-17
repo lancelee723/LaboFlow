@@ -1657,6 +1657,8 @@ export const tr = {
     assistant: {
     feishuTitle: "Feishu botu",
     feishuHelp: "Kurumsal özel uygulama — App ID + App Secret yapıştırın. Kılavuz: open.feishu.cn, im:message.* izni gerekir.",
+    testAccountTitle: "Feishu TEST uygulaması kullanma (yalnızca geliştirme)",
+    feishuTestGuide: "Test uygulaması kimlik bilgileri (Feishu test şirketi / geliştirici özel uygulaması) aynı şekilde girilir: App ID + App Secret yapıştırın. Varsayılan WSS modunu tercih edin — herkese açık geri çağrı gerekmez. webhook modunda yerel bağlantı noktasının internetten erişilebilir olması gerekir (ngrok/frp tüneli kurup geri çağrı URL sini verification token / encrypt key ile yapılandırın). Test uygulamaları YALNIZCA GELİŞTİRME içindir: API kotaları sınırlıdır, üretim kanalı olarak kullanmayın.",
     wecomTitle: "WeCom botu",
     wecomHelp: "WeCom akıllı botu (API modu) — BotID + Secret yapıştırın.",
     wechatTitle: "WeChat MP (aktarıcı)",

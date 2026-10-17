@@ -33,6 +33,12 @@ const PROVIDER_HELP_KEYS: Record<ChannelProvider, string> = {
   wechat_mp: "settings.assistant.wechatHelp",
 };
 
+/** FR-IM-13: providers with a test-account path get an explicit dev-use
+ * guidance block (callback tunneling, non-production scope). */
+const PROVIDER_TEST_GUIDE_KEYS: Partial<Record<ChannelProvider, string>> = {
+  feishu: "settings.assistant.feishuTestGuide",
+};
+
 const STATE_LABEL_KEYS: Record<ChannelState, string> = {
   disconnected: "settings.assistant.stateDisconnected",
   connecting: "settings.assistant.stateConnecting",
@@ -353,6 +359,16 @@ export function AssistantChannelsPage() {
               </p>
             ) : null}
             <p className="mt-2 text-xs opacity-60">{t(PROVIDER_HELP_KEYS[provider])}</p>
+            {PROVIDER_TEST_GUIDE_KEYS[provider] ? (
+              <details className="mt-2 text-xs" data-test-guide={provider}>
+                <summary className="cursor-pointer select-none opacity-70">
+                  {t("settings.assistant.testAccountTitle")}
+                </summary>
+                <p className="mt-1 whitespace-pre-line opacity-60">
+                  {t(PROVIDER_TEST_GUIDE_KEYS[provider] as string)}
+                </p>
+              </details>
+            ) : null}
 
             <div className="mt-3 grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1 text-xs">

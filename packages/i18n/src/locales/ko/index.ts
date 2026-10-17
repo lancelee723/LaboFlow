@@ -1657,6 +1657,8 @@ export const ko = {
     assistant: {
     feishuTitle: "Feishu 봇",
     feishuHelp: "기업 자체 앱 — App ID + App Secret을 붙여넣으세요. 가이드: open.feishu.cn, im:message.* 권한 필요.",
+    testAccountTitle: "Feishu 테스트 앱 사용(개발용)",
+    feishuTestGuide: "테스트 앱 자격 증명(Feishu 테스트 기업/개발용 커스텀 앱)도 동일하게 입력합니다: App ID + App Secret 붙여넣기. 기본 WSS 장기 연결 모드를 권장합니다 — 공개 콜백이 필요 없습니다. webhook 모드에서는 로컬 포트가 인터넷에서 접근 가능해야 합니다(ngrok/frp 등 터널링 후 콜백 URL과 verification token / encrypt key 설정). 테스트 앱은 개발 전용입니다: 메시지 API 할당량이 제한되며 프로덕션 채널로 사용하지 마세요.",
     wecomTitle: "WeCom 봇",
     wecomHelp: "WeCom 스마트 봇(API 모드) — BotID + Secret을 붙여넣으세요.",
     wechatTitle: "WeChat MP (릴레이)",

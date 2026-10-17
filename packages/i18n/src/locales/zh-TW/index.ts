@@ -1657,6 +1657,8 @@ export const zhTW = {
     assistant: {
     feishuTitle: "飛書機器人",
     feishuHelp: "企業自建應用，貼上 App ID + App Secret。指引：open.feishu.cn 建應用並開通 im:message.* 權限。",
+    testAccountTitle: "使用飛書測試號（開發用途）",
+    feishuTestGuide: "測試號憑證（飛書測試企業／開發版自建應用）填寫方式相同：貼上 App ID + App Secret。建議使用預設的 WSS 長連線模式——無需公開回呼。若切換 webhook 模式，本機埠需可被公網存取（用內網穿透如 ngrok/frp 映射後在開放平台設定回呼位址與 verification token / encrypt key）。測試號僅用於開發除錯：訊息 API 配額受限，請勿作為生產通道。",
     wecomTitle: "企業微信機器人",
     wecomHelp: "企業微信智慧機器人（API 模式），貼上 BotID + Secret。",
     wechatTitle: "微信公眾號（中繼）",

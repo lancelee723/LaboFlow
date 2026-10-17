@@ -1657,6 +1657,8 @@ export const es = {
     assistant: {
     feishuTitle: "Bot de Feishu",
     feishuHelp: "App empresarial propia; pega App ID + App Secret. Guía: open.feishu.cn, permiso im:message.* requerido.",
+    testAccountTitle: "Usar una app de PRUEBA de Feishu (solo desarrollo)",
+    feishuTestGuide: "Las credenciales de app de prueba (empresa de prueba de Feishu / app personalizada de desarrollo) se pegan igual: App ID + App Secret. Usa el modo WSS por defecto — no necesita callback público. En modo webhook, el puerto local debe ser accesible desde internet (túnel con ngrok/frp y configura la URL de callback con el verification token / encrypt key). Las apps de prueba son SOLO PARA DESARROLLO: cuotas de API limitadas, no las uses como canal de producción.",
     wecomTitle: "Bot de WeCom",
     wecomHelp: "Bot inteligente de WeCom (modo API); pega BotID + Secret.",
     wechatTitle: "WeChat MP (repetidor)",
