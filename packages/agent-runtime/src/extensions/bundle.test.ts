@@ -120,10 +120,7 @@ describe("packaged sidecar extension loader", () => {
     return value ? { PI_BUNDLED_NODE: value } : {};
   }
 
-  // T-B residue: the packaged-install fix expects the sidecar bundle split
-  // (upstream a339630b4) that externalizes typebox into the loader env. Until
-  // that split is ported, the tmp-dir bundle cannot resolve typebox.
-  it.skip("loads a typebox-importing extension from a bundle outside the repo", async () => {
+  it("loads a typebox-importing extension from a bundle outside the repo", async () => {
     expect(existsSync(extensionLoader)).toBe(true);
     expect(bundleDefines()).toEqual({ PI_BUNDLED_NODE: "true" });
     const entry = join(work, "entry.mjs");

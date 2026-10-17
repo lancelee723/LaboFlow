@@ -78,11 +78,7 @@ test("the bundle manifest helper produces a package.json Node treats as ESM", as
   }
 });
 
-// T-B residue: this guards the sidecar bundle SPLIT (upstream a339630b4 —
-// native session chunks loaded on demand). The split is part of the remaining
-// sync surface; until ported, our single-bundle sidecar cannot match the
-// asserted chunk layout. Chunking is a perf property, not correctness.
-test.skip(
+test(
   "split sidecar starts outside node_modules and loads native session chunks on demand",
   { timeout: 60_000 },
   async () => {
