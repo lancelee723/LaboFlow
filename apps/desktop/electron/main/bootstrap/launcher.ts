@@ -13,6 +13,7 @@ import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { WindowLifecycleState } from "./window";
 import { suppressLinuxFramelessSystemMenu } from "../frameless-system-menu";
+import { resolveDevRendererOrigin, resolveRendererLoadTarget } from "./dev-renderer";
 
 export type LauncherState = {
   creationPromise: Promise<BrowserWindow> | null;
@@ -124,7 +125,10 @@ export function createLauncher({
         return { action: "deny" };
       });
       window.webContents.on("will-navigate", (event, url) => {
-        const devOrigin = process.env.ELECTRON_RENDERER_URL;
+        const devOrigin = resolveDevRendererOrigin({
+          isPackaged: app.isPackaged,
+          env: process.env,
+        });
         if (devOrigin && url.startsWith(devOrigin)) return;
         event.preventDefault();
       });
@@ -138,12 +142,17 @@ export function createLauncher({
       });
 
       try {
-        if (process.env.ELECTRON_RENDERER_URL) {
-          const url = new URL(process.env.ELECTRON_RENDERER_URL);
+        const loadTarget = resolveRendererLoadTarget({
+          isPackaged: app.isPackaged,
+          env: process.env,
+          rendererFile: join(__dirname, "../renderer/index.html"),
+        });
+        if (loadTarget.kind === "url") {
+          const url = new URL(loadTarget.url);
           url.searchParams.set("surface", "plugin-launcher");
           await window.loadURL(url.toString());
         } else {
-          await window.loadFile(join(__dirname, "../renderer/index.html"), {
+          await window.loadFile(loadTarget.file, {
             query: { surface: "plugin-launcher" },
           });
         }

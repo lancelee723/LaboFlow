@@ -36,6 +36,7 @@ import { suppressLinuxFramelessSystemMenu } from "../frameless-system-menu";
 import { isWindowFullScreen } from "../window-fullscreen";
 import { installWindowShape } from "../window-shape";
 import { recoverRendererAfterGone } from "../renderer-recovery";
+import { resolveDevRendererOrigin, resolveRendererLoadTarget } from "./dev-renderer";
 
 function windowsIconPath(): string | undefined {
   if (process.platform !== "win32") return undefined;
@@ -738,7 +739,10 @@ export async function createWindow({
 
   // Block navigation away from the app shell (dev server origin or local file).
   window.webContents.on("will-navigate", (event, url) => {
-    const devOrigin = process.env.ELECTRON_RENDERER_URL;
+    const devOrigin = resolveDevRendererOrigin({
+      isPackaged: app.isPackaged,
+      env: process.env,
+    });
     if (devOrigin && url.startsWith(devOrigin)) return;
     event.preventDefault();
     logger.app("diagnostics", "warn", "blocked navigation attempt", { data: { url } });
@@ -2057,12 +2061,34 @@ export async function createWindow({
     }
   });
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    await window.loadURL(process.env.ELECTRON_RENDERER_URL);
-    if (process.env.PI_DESKTOP_DEVTOOLS === "1") {
-      window.webContents.openDevTools({ mode: "detach" });
+  const loadTarget = resolveRendererLoadTarget({
+    isPackaged: app.isPackaged,
+    env: process.env,
+    rendererFile: join(__dirname, "../renderer/index.html"),
+  });
+  if (loadTarget.kind === "file" && loadTarget.ignoredDevUrl) {
+    logger.app("runtime", "warn", "ignoring ELECTRON_RENDERER_URL in a packaged build", {
+      event: "dev.renderer.url.ignored",
+      data: { value: loadTarget.ignoredDevUrl },
+    });
+  }
+  try {
+    if (loadTarget.kind === "url") {
+      await window.loadURL(loadTarget.url);
+      if (process.env.PI_DESKTOP_DEVTOOLS === "1") {
+        window.webContents.openDevTools({ mode: "detach" });
+      }
+    } else {
+      await window.loadFile(loadTarget.file);
     }
-  } else {
-    await window.loadFile(join(__dirname, "../renderer/index.html"));
+  } catch (error) {
+    logger.app("runtime", "error", "renderer page load failed", {
+      event: "renderer.load.failed",
+      data: {
+        target: loadTarget.kind === "url" ? loadTarget.url : loadTarget.file,
+        error: String(error),
+      },
+    });
+    throw error;
   }
 }

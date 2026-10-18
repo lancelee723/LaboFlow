@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { dialog, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
+import { app, dialog, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import { err, ErrorCodes, IPC, ok, type Result } from "@pi-desktop/shared";
 import type { AgentHostBridge } from "../agent-host-bridge";
 import type { AgentSidecar } from "../agent-sidecar";
@@ -468,7 +468,12 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     registerVoiceIpc({ registrar, voiceService });
   }
   if (liveCallService) {
-    registerLiveVoiceIpc({ registrar, service: liveCallService, getMainWindow });
+    registerLiveVoiceIpc({
+      registrar,
+      service: liveCallService,
+      getMainWindow,
+      isPackaged: app.isPackaged,
+    });
   }
 
   registerRemoteHostIpc({ registrar });

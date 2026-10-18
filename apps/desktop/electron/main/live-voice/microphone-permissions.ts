@@ -1,5 +1,5 @@
 import type { BrowserWindow, Session, WebContents } from "electron";
-import { liveOwnerFromWebContents, isTrustedRendererUrl } from "./owner";
+import { liveOwnerFromWebContents, isTrustedRendererUrl, type RendererBuild } from "./owner";
 import type { LiveOwner } from "./call-service";
 
 type PermissionDecision = {
@@ -23,9 +23,12 @@ export function installLiveMicrophonePermissionHandlers(input: {
   targetSession: Session;
   getMainWindow: () => BrowserWindow | null;
   hasReservation: (owner: LiveOwner) => boolean;
+  /** `app.isPackaged`; a packaged build trusts only the bundled renderer page. */
+  isPackaged: boolean;
 }): void {
+  const build: RendererBuild = { isPackaged: input.isPackaged };
   input.targetSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    const owner = requestOwner(input.getMainWindow(), contents, details.requestingUrl, details.isMainFrame);
+    const owner = requestOwner(input.getMainWindow(), contents, details.requestingUrl, details.isMainFrame, build);
     const allowed = allowsLiveMicrophonePermission({
       permission,
       ownerValid: owner !== null,
@@ -37,7 +40,7 @@ export function installLiveMicrophonePermissionHandlers(input: {
   });
 
   input.targetSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
-    const owner = contents ? checkOwner(input.getMainWindow(), contents, requestingOrigin) : null;
+    const owner = contents ? checkOwner(input.getMainWindow(), contents, requestingOrigin, build) : null;
     return allowsLiveMicrophonePermission({
       permission,
       ownerValid: owner !== null,
@@ -53,15 +56,21 @@ function requestOwner(
   contents: WebContents,
   requestingUrl: string,
   isMainFrame: boolean,
+  build: RendererBuild,
 ): LiveOwner | null {
   if (!isMainFrame) return null;
-  const owner = liveOwnerFromWebContents(window, contents);
+  const owner = liveOwnerFromWebContents(window, contents, build);
   return owner && owner.url === requestingUrl ? owner : null;
 }
 
-function checkOwner(window: BrowserWindow | null, contents: WebContents, requestingOrigin: string): LiveOwner | null {
-  const owner = liveOwnerFromWebContents(window, contents);
-  if (!owner || !isTrustedRendererUrl(owner.url)) return null;
+function checkOwner(
+  window: BrowserWindow | null,
+  contents: WebContents,
+  requestingOrigin: string,
+  build: RendererBuild,
+): LiveOwner | null {
+  const owner = liveOwnerFromWebContents(window, contents, build);
+  if (!owner || !isTrustedRendererUrl(owner.url, build)) return null;
   let protocol: string;
   let origin: string;
   try {

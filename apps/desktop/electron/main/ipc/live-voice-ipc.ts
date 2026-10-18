@@ -14,11 +14,13 @@ export function registerLiveVoiceIpc(input: {
   registrar: IpcRegistrar;
   service: LiveCallServiceImpl;
   getMainWindow: () => BrowserWindow | null;
+  /** `app.isPackaged`; a packaged build trusts only the bundled renderer page. */
+  isPackaged: boolean;
 }): void {
-  const { registrar, service, getMainWindow } = input;
+  const { registrar, service, getMainWindow, isPackaged } = input;
   const owner = (event: IpcMainInvokeEvent): LiveOwner => {
     registrar.assertMainWindowSender(event);
-    return liveOwnerFromInvoke(event, getMainWindow());
+    return liveOwnerFromInvoke(event, getMainWindow(), { isPackaged });
   };
 
   registrar.handleWithEvent(IPC.invoke.liveVoiceStatus, async (event) => {

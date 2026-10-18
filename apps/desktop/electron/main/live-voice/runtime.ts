@@ -9,7 +9,7 @@ import { createLivePcmBridge } from "./audio-port";
 import { createCodexAdapter } from "./codex-adapter";
 import { createGeminiAdapter } from "./gemini-adapter";
 import { createOpenAIRealtimeAdapter } from "./openai-realtime-adapter";
-import { liveOwnerFrame } from "./owner";
+import { liveOwnerFrame, type RendererBuild } from "./owner";
 import { assertLiveHttpsEndpoint } from "./websocket-transport";
 import type { MicrophoneLeaseRegistry } from "./microphone-lease";
 import type { LiveOwner } from "./call-service";
@@ -22,6 +22,8 @@ type BackgroundLease = { webContents: WebContents; previous: boolean; count: num
 export function createLiveCallService(input: {
   getHost: () => HostProcess | null;
   getMainWindow: () => BrowserWindow | null;
+  /** `app.isPackaged`; a packaged build trusts only the bundled renderer page. */
+  isPackaged: boolean;
   getAgentHostBridge: () => AgentHostBridge | null;
   vendorOAuth: Pick<VendorOAuth, "resolveAuth">;
   microphoneLeases: MicrophoneLeaseRegistry;
@@ -35,6 +37,7 @@ export function createLiveCallService(input: {
     sidecarParams: { provider: import("@pi-desktop/agent-runtime").RuntimeProviderConfig };
   }>;
 }): LiveCallService {
+  const build: RendererBuild = { isPackaged: input.isPackaged };
   const backgroundLeases = new Map<number, BackgroundLease>();
   const authorizedWorkspaces = new WeakMap<object, string | null>();
   const authResolver = new LiveAuthResolver({
@@ -128,17 +131,17 @@ export function createLiveCallService(input: {
       }
     },
     createPcmBridge: (bridgeInput) => {
-      const frame = liveOwnerFrame(input.getMainWindow(), bridgeInput.owner);
+      const frame = liveOwnerFrame(input.getMainWindow(), bridgeInput.owner, build);
       if (!frame) throw Object.assign(new Error("Live Voice owner frame is unavailable"), { errorCode: "LIVE_INVALID_OWNER" });
       return createLivePcmBridge({
         ...bridgeInput,
         ownerFrame: frame,
       });
     },
-    sendView: (owner, view) => sendToOwner(input.getMainWindow(), owner, IPC.event.liveVoiceChanged, view),
-    sendControl: (owner, event) => sendToOwner(input.getMainWindow(), owner, IPC.event.liveVoiceControl, event),
-    sendTranscript: (owner, event) => sendToOwner(input.getMainWindow(), owner, IPC.event.liveVoiceTranscript, event),
-    ownerAlive: (owner) => liveOwnerFrame(input.getMainWindow(), owner) !== null,
+    sendView: (owner, view) => sendToOwner(input.getMainWindow(), owner, IPC.event.liveVoiceChanged, view, build),
+    sendControl: (owner, event) => sendToOwner(input.getMainWindow(), owner, IPC.event.liveVoiceControl, event, build),
+    sendTranscript: (owner, event) => sendToOwner(input.getMainWindow(), owner, IPC.event.liveVoiceTranscript, event, build),
+    ownerAlive: (owner) => liveOwnerFrame(input.getMainWindow(), owner, build) !== null,
     acquireMicrophone: (callId) => input.microphoneLeases.acquire("live", callId),
     acquireBackgroundThrottlingLease: (callId) => acquireBackgroundLease(input.getMainWindow(), callId, backgroundLeases),
   });
@@ -153,8 +156,14 @@ function formatWorkSessionLabel(projectPath: unknown, title: unknown): string {
   return [projectLabel, sessionLabel].filter((part): part is string => Boolean(part)).join(" / ");
 }
 
-function sendToOwner(window: BrowserWindow | null, owner: LiveOwner, channel: string, payload: unknown): void {
-  const frame = liveOwnerFrame(window, owner);
+function sendToOwner(
+  window: BrowserWindow | null,
+  owner: LiveOwner,
+  channel: string,
+  payload: unknown,
+  build: RendererBuild,
+): void {
+  const frame = liveOwnerFrame(window, owner, build);
   if (!frame || !window || window.isDestroyed()) return;
   frame.send(channel, payload);
 }

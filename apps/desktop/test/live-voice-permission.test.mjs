@@ -37,6 +37,7 @@ test("Live Voice media permission requires the trusted main frame and an active 
     },
     getMainWindow: () => window,
     hasReservation: () => leaseActive,
+    isPackaged: false,
   });
 
   const requestDecision = (details, permission = "media", requester = contents) => {
@@ -59,4 +60,28 @@ test("Live Voice media permission requires the trusted main frame and an active 
   leaseActive = false;
   assert.equal(requestDecision({ requestingUrl: trustedUrl, isMainFrame: true, mediaTypes: ["audio"] }), false);
   assert.equal(checkDecision({ mediaType: "audio" }), false);
+
+  // A packaged build trusts only the bundled page: the very same dev-server
+  // frame that a development host accepts above is refused, lease or not,
+  // even though ELECTRON_RENDERER_URL still names it.
+  leaseActive = true;
+  const packagedHandlers = {};
+  installLiveMicrophonePermissionHandlers({
+    targetSession: {
+      setPermissionRequestHandler: (handler) => { packagedHandlers.request = handler; },
+      setPermissionCheckHandler: (handler) => { packagedHandlers.check = handler; },
+    },
+    getMainWindow: () => window,
+    hasReservation: () => leaseActive,
+    isPackaged: true,
+  });
+  let packagedRequest = true;
+  packagedHandlers.request(
+    contents,
+    "media",
+    (value) => { packagedRequest = value; },
+    { requestingUrl: trustedUrl, isMainFrame: true, mediaTypes: ["audio"] },
+  );
+  assert.equal(packagedRequest, false);
+  assert.equal(packagedHandlers.check(contents, "media", "http://localhost:5173", { mediaType: "audio" }), false);
 });

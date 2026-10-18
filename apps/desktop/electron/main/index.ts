@@ -873,6 +873,7 @@ voiceServiceReference = voiceService;
 const liveCallService = createLiveCallService({
   getHost,
   getMainWindow,
+  isPackaged: app.isPackaged,
   getAgentHostBridge: () => mainState.agentHostBridge,
   vendorOAuth,
   microphoneLeases,
@@ -1090,6 +1091,7 @@ app.once("ready", () => {
     targetSession: session.defaultSession,
     getMainWindow,
     hasReservation: (owner) => liveCallService.hasMicrophoneReservation(owner),
+    isPackaged: app.isPackaged,
   });
   powerMonitor.on("suspend", () => void liveCallService.endForLifecycle("app-suspended"));
   powerMonitor.on("lock-screen", () => void liveCallService.endForLifecycle("app-suspended"));
