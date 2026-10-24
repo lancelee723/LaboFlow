@@ -70,3 +70,7 @@
 - **Phase 5 各模块 PRD**：[phase5/](phase5/)（M 级已全部落地，S/C 级部分开放）
 - **Phase 6 README**：[phase6/README.md](phase6/README.md)（上游同步 + T6.0-T6.4 执行记录）
 - **实机验收报告**：[acceptance/](acceptance/) 目录
+
+### 2026-10-24：Phase 7 GUI 走查通过 + 两项新发现
+
+- [ACCEPTANCE.md](laboflow/phase7-ppt-master/ACCEPTANCE.md) §GUI 走查：8/8 通过（自动打开修复 8621b5dcf 后）；登记 F-2（模型回合顺从度）、F-3（导出门 Bash 旁路）、F-4（权限门摩擦）。
