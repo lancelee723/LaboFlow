@@ -129,3 +129,28 @@ cd "/Users/lance/LaboFlow Desktop" && pnpm build:js
    已确认按设计暂缓）。
 4. **整树 sha256 暂缓**：当前为 manifest 级哈希；整树哈希按 DESIGN §8.1
    后续增强。
+
+---
+
+## GUI 走查执行记录（2026-10-24，自动 CDP 驱动 + 用户协作）
+
+**结论：8 项清单全部通过**；同时登记 3 项新发现（见下）。走查档案：`/tmp/ppt-walkthrough/`（截图 01–17）。
+
+| # | 清单项 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | 插件加载（构建期拉取副本） | ✅ | 启动日志 `plugin.load.success` ×2 次启动 |
+| 2 | `/` 菜单唯一入口 + `/newPresentation` | ✅ | 菜单抓取：仅 `laboflow.ppt-master/ppt-master`，旧 `laboflow.slides/*` 消失 |
+| 3 | 工作台自动打开（首个管线工具调用） | ✅（修复后） | 截图 12：标签自动亮起。修复提交 8621b5dcf（pluginViewActivate 事件链） |
+| 4 | Stage-1 工作台确认 | ✅ | 状态机 submitted(estimate 20000)→confirmed；用户在英雄区点确认 |
+| 5 | Stage-2 方向卡选择 | ✅ | 三方向卡渲染（★预选）；点卡即确认；result.json 落盘 |
+| 6 | 无 asktool | ✅ | 两会话转录 0 次 |
+| 7 | 导出 PPTX | ✅ | `maoming_chantou_20261024_173232.pptx`（3 页/3 备注/46.7KB，final 质检 0 阻塞） |
+| 8 | 无 daemon | ✅ | 全程 + 终检 `ps` 0 个 flask/confirm_ui/preview 进程；Agent 明文援引硬规则 9 拒启预览服务（转录 [121]） |
+
+**跨会话续跑（规则 8，计划外验证）**：会话 scratch 被回收后，Agent 在显式委托下正确重建项目并走完全程。
+
+### 走查发现（登记，待立项处理）
+
+- **F-2（模型顺从度）**：glm-5.3-flash 在确认门与阶段推进点反复"宣布计划即结束回合"，不执行前言的"停下轮询"；单动作外科指令可驱动，但全程需 8+ 次人工推动。候选修复：`ppt.confirmStage` 成功后由插件经 `pi.agent.complete` 注入续跑指令。
+- **F-3（导出硬门旁路，Important）**：前言规则 3 教 Bash 直跑脚本（合法路径），而 Stage-2 确认硬门与工件登记（FR-PPT-06）只在 `ppt_script` 工具路径生效——本轮导出全程走 Bash，门未触发、工件未登记（artifacts 表空）。候选修复：前言将 finalize/total_md_split/svg_to_pptx 三个门禁脚本改为**必须走 `ppt_script`**（其余脚本维持 Bash 规则）。
+- **F-4（测试环境摩擦，Minor）**：智能体模式下"每次询问"权限门 + 消息队列（立即发送）使外部驱动复杂化；技能前言规则 6 已提示切换 accept-edits，属预期。
