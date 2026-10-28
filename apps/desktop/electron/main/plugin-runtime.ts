@@ -113,6 +113,7 @@ import {
 } from "./plugin-shortcut-registry";
 import { repairImportedExtensionWrapper } from "./imported-plugin-wrapper";
 import { resolveOwnPluginView } from "./plugin-view-request";
+import { admitSessionContinue } from "./plugin-session-continue";
 
 export type RegisteredCommand = {
   id: string;
@@ -499,6 +500,11 @@ export type PluginHostServices = {
     importBatch: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     rename: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
     delete: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
+    /** F-2: resume a session turn with a plugin-authored continuation. */
+    continueFromPlugin: (
+      pluginId: string,
+      input: { sessionId: string; text: string; reason?: string },
+    ) => Promise<{ queued: boolean }>;
   };
   project?: {
     create: (pluginId: string, input: Record<string, unknown>) => Promise<unknown>;
@@ -588,6 +594,7 @@ const HOST_API_ALLOWLIST = new Set([
   "session.importBatch",
   "session.rename",
   "session.delete",
+  "session.continueFromPlugin",
   "usage.listTurns",
   "agent.complete",
   "keyboard.registerGlobalShortcut",
@@ -1387,6 +1394,8 @@ export class PluginRuntime {
   private reloading = new Set<string>();
   private watcher: DevPluginWatcher;
 
+  /** F-2 throttle state: (plugin\u0000session) -> accepted timestamps. */
+  private readonly sessionContinueHits = new Map<string, number[]>();
   constructor(
     services?: Partial<PluginHostServices>,
     watcherOptions?: Pick<DevPluginWatcherDeps, "watch" | "debounceMs" | "max">,
@@ -2849,6 +2858,43 @@ export class PluginRuntime {
           throw apiError("UNSUPPORTED", "host api not available: session.delete");
         }
         return this.services.session.delete(loaded.manifest.id, input);
+      }
+      case "session.continueFromPlugin": {
+        // F-2 (docs/laboflow/phase7-ppt-master/F-2-SESSION-CONTINUE-PROPOSAL.md):
+        // a plugin may resume a session turn only after an explicit user
+        // action in its own surface; the sliding-window cap keeps a buggy
+        // loop from storming the agent.
+        this.assertPermission(loaded, "session.continue");
+        const raw = (args[0] ?? {}) as { sessionId?: unknown; text?: unknown; reason?: unknown };
+        const sessionId = String(raw.sessionId ?? "");
+        const text = String(raw.text ?? "");
+        if (!sessionId || !text.trim()) {
+          throw apiError("INVALID_PARAMS", "sessionId and text are required");
+        }
+        if (text.length > 2000) {
+          throw apiError("INVALID_PARAMS", "text exceeds 2000 chars");
+        }
+        const key = `${loaded.manifest.id}\u0000${sessionId}`;
+        const hits = this.sessionContinueHits.get(key) ?? [];
+        if (!admitSessionContinue(hits, Date.now())) {
+          this.services.audit?.({
+            pluginId,
+            api: "session.continueFromPlugin",
+            ok: false,
+            message: "throttled",
+            ts: Date.now(),
+          });
+          return { queued: false };
+        }
+        this.sessionContinueHits.set(key, hits);
+        if (!this.services.session?.continueFromPlugin) {
+          throw apiError("UNSUPPORTED", "host api not available: session.continueFromPlugin");
+        }
+        return this.services.session.continueFromPlugin(loaded.manifest.id, {
+          sessionId,
+          text,
+          reason: typeof raw.reason === "string" ? raw.reason : undefined,
+        });
       }
       case "usage.listTurns": {
         // Read-only completed-turn facts (spec 07-plugins/03 §usage): flat

@@ -365,6 +365,18 @@ export function createPluginServices({
         callPluginSessionHost("plugin.session.importBatch", pluginId, input),
       rename: (pluginId, input) => callPluginSessionHost("plugin.session.rename", pluginId, input),
       delete: (pluginId, input) => callPluginSessionHost("plugin.session.delete", pluginId, input),
+      // F-2: not a host-core concern — the renderer owns the agent prompt
+      // transport, so the resume rides an event the app shell turns into
+      // the same api.prompt call the composer uses.
+      continueFromPlugin: async (pluginId, input) => {
+        sendToRenderer(IPC.event.pluginSessionContinue, {
+          pluginId,
+          sessionId: input.sessionId,
+          text: input.text,
+          ...(input.reason ? { reason: input.reason } : {}),
+        });
+        return { queued: true };
+      },
     },
     project: {
       create: (pluginId, input) => callPluginProjectHost(pluginId, input),

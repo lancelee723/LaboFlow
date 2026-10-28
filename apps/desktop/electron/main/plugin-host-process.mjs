@@ -315,6 +315,7 @@ function buildApi() {
       importBatch: (input) => call("session.importBatch", [input ?? {}]),
       rename: (input) => call("session.rename", [input ?? {}]),
       delete: (input) => call("session.delete", [input ?? {}]),
+      continueFromPlugin: (input) => call("session.continueFromPlugin", [input ?? {}]),
     },
     // Read-only usage facts (`usage.read`). The main-process dispatch owns
     // the permission check and parameter bounds; the host returns per-turn

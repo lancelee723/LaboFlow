@@ -1850,6 +1850,27 @@ export const api = {
       listener((payload ?? {}) as { pluginId: string; viewId: string }),
     );
   },
+
+  onPluginSessionContinue: (
+    listener: (event: {
+      pluginId: string;
+      sessionId: string;
+      text: string;
+      reason?: string;
+    }) => void,
+  ) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.pluginSessionContinue, (payload) =>
+      listener(
+        (payload ?? {}) as {
+          pluginId: string;
+          sessionId: string;
+          text: string;
+          reason?: string;
+        },
+      ),
+    );
+  },
   onSettingsChanged: (listener: (patch: Record<string, unknown>) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.settingsChanged, (payload) =>

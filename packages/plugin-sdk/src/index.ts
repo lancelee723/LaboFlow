@@ -1175,6 +1175,14 @@ export type PluginHostApi = {
     import: (input: PluginSessionImportInput) => Promise<PluginSessionImportResult>;
     importBatch: (input: PluginSessionBatchImportInput) => Promise<PluginSessionBatchImportResult>;
     rename: (input: { sessionId: string; title: string }) => Promise<{ updated: boolean }>;
+    /** Ask the host to resume the session's agent turn with a plugin-authored
+     * continuation instruction (`session.continue` permission; throttled per
+     * session+plugin). The message is visible in the transcript. */
+    continueFromPlugin: (input: {
+      sessionId: string;
+      text: string;
+      reason?: string;
+    }) => Promise<{ queued: boolean }>;
     delete: (input: {
       sessionId: string;
       mode?: "trash" | "purge";
@@ -1328,6 +1336,8 @@ export const PLUGIN_PERMISSIONS = [
   "session.import",
   "session.read.own",
   "session.update.own",
+  // Resume a session turn with a plugin-authored continuation (F-2).
+  "session.continue",
   "session.delete.own",
   // Read-only usage facts (pi.usage.listTurns):
   // completed-turn counters and session titles, never message bodies.

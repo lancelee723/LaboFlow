@@ -27,7 +27,7 @@ import {
   MAIN_PANE_MIN_WIDTH,
   workPanelWidthForSidebarReopen,
 } from "../../lib/work-panel-resize";
-import { browserPluginTab, browserPluginTabForReveal } from "../../lib/work-panel-tabs";
+import { browserPluginTab, browserPluginTabForReveal, pluginWorkPanelTab } from "../../lib/work-panel-tabs";
 import { useAppStore } from "../../stores/app-store";
 import { useSidebarTransition } from "./useSidebarTransition";
 import { useStartupWatchdog } from "./useStartupWatchdog";
@@ -604,6 +604,32 @@ export function useAppShellRuntime() {
     // Agent-driven HTML preview: surface the browser tab when the agent
     // opens a workspace file in the embedded browser (BrowserPreview tool).
     const offBrowserState = api.onBrowserState((event) => useAppStore.getState().updateBrowserWorkPanelTab(event));
+    // Plugin-initiated view opens (pi.ui.openView, e.g. the ppt-master
+    // workbench auto-open): the main process created the surface; reveal its
+    // tab in the active session's work panel. (Restored after a rebase
+    // dropped the original consumer half of c34fb2aa2's fix.)
+    const offPluginViewActivate = api.onPluginViewActivate((event) => {
+      const sessionId = useAppStore.getState().activeSessionId;
+      if (!sessionId) return;
+      useAppStore
+        .getState()
+        .openWorkPanelTabForSession(sessionId, pluginWorkPanelTab(event.pluginId, event.viewId));
+    });
+    // F-2: a plugin asked to resume a session turn after an explicit user
+    // action in its own surface (e.g. a stage confirmed in the PPT workbench).
+    // The continuation rides the same agentPrompt transport the composer
+    // uses, prefixed with the plugin origin so it can never masquerade as
+    // the user's own typing.
+    const offPluginSessionContinue = api.onPluginSessionContinue((event) => {
+      if (!event.sessionId || !event.text?.trim()) return;
+      if (event.sessionId.startsWith("native-pi:")) return;
+      void api
+        .prompt({
+          sessionId: event.sessionId,
+          content: `[plugin:${event.pluginId}${event.reason ? ` · ${event.reason}` : ""}] ${event.text}`,
+        })
+        .catch(() => undefined);
+    });
     const offBrowserPreview = api.onBrowserPreview((event) => {
       const state = useAppStore.getState();
       if (event.revealOnly) {
@@ -823,6 +849,8 @@ export function useAppShellRuntime() {
       offNotificationSound();
       offInsecureEndpoint();
       offBrowserPreview();
+      offPluginViewActivate();
+      offPluginSessionContinue();
       offBrowserState();
       offHostStatus();
       offNotificationChanged();

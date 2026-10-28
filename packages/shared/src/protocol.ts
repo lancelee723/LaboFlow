@@ -476,6 +476,8 @@ export const IPC = {
     extensionsStatus: "pi-desktop/extensions/event/status",
     /** Main -> renderer: a plugin opened one of its own views (pi.ui.openView). */
     pluginViewActivate: "pi-desktop/plugin/event/viewActivate",
+    /** Main -> renderer: a plugin asked to resume a session turn (pi.session.continueFromPlugin). */
+    pluginSessionContinue: "pi-desktop/plugin/event/sessionContinue",
     pluginLauncherShown: "pi-desktop/pluginLauncher/event/shown",
     agentMessage: "pi-desktop/agent/event/message",
     agentQueueChanged: "pi-desktop/agent/event/queueChanged",
