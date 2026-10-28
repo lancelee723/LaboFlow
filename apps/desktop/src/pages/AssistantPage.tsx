@@ -100,7 +100,7 @@ export function AssistantPage() {
         {channels.map((channel) => (
           <span
             key={channel.id}
-            className="rounded-full px-2 py-0.5 text-[10px]"
+            className="rounded-full px-2 py-0.5 text-3xs"
             style={{ background: "var(--ds-bg-subtle)" }}
           >
             {channel.name || channel.provider}·
