@@ -65,6 +65,8 @@ Each ADR includes:
 | 0038 | Bridge plugin-declared MCP servers in Electron main | Accepted |
 | 0039 | Activate plugin skills and ship plugin authoring as a first-party devkit | Accepted (skill delivery revised by D174) |
 | 0040 | Resident plugin services and the inter-plugin message bus | Accepted |
+| 0040 (ppt) | [PPT 助手单引擎——只保留 vendored PPT-Master](0040-ppt-single-engine-ppt-master.md) | Accepted |
+| 0041 (ppt) | [PPT-Master 独立插件仓库与构建期 pinned 分发](0041-ppt-master-standalone-plugin-repo.md) | Implemented candidate |
 | 0041 | Bound host runtime resources and decouple message persistence | Accepted |
 | 0042 | Message-scoped inline review cards | Superseded by 0043 |
 | 0043 | Message-owned review snapshots and guarded rollback | Accepted |

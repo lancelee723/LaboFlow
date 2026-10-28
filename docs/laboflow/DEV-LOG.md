@@ -44,7 +44,7 @@
   `docs/laboflow/phase7-ppt-master/DESIGN.md`；决策记录 ADR 0041）
 - 插件抽为独立仓库 `/Users/lance/laboflow-ppt-master`（`laboflow.ppt-master` v4.0.0，
   subtree 30 提交历史保留），工作台成为唯一确认面、自动打开、预览 daemon 禁令。
-- 自动化门全绿（插件 78 测试 + PPT_IT 4/4 + S10 13/13；宿主 3513 tests fail=0 +
+- 自动化门全绿（插件 78 测试 + PPT_IT 4/4 + S10 13/13；宿主测试 fail=0（裸仓库 3513 / 拉取后 3516） +
   ppt-host 7/7 + 打包冒烟）；实机 GUI 走查 8 项清单待用户运行。
 
 ## 已归档的 PLAN / SPEC 完成情况
