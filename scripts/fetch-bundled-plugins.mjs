@@ -10,7 +10,6 @@ import { createHash } from "node:crypto";
 import { arch, platform } from "node:os";
 import { join, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const lockPath = join(repoRoot, "apps/desktop/plugins.bundle.json");
@@ -36,7 +35,9 @@ function makeCopyFilter(src) {
 export async function applyBundle({ lock, pluginsDir: dir, expectedId }) {
   const entry = lock[expectedId];
   if (!entry) throw new Error(`bundle lock has no entry for ${expectedId}`);
-  const src = resolve(entry.source);
+  // Relative sources resolve against the repo root (the lock file's home),
+  // never the invoking process CWD.
+  const src = resolve(repoRoot, entry.source);
   if (!existsSync(src) || !statSync(src).isDirectory()) throw new Error(`source missing: ${src}`);
   const manifest = JSON.parse(readFileSync(join(src, "manifest.json"), "utf8"));
   if (manifest.id !== expectedId) throw new Error(`manifest id ${manifest.id} != ${expectedId}`);
@@ -66,15 +67,11 @@ const BUNDLE_SIZE_CEILING = 75 * 1024 * 1024;
 
 function dirSizeSync(dir) {
   let total = 0;
-  const stack = [dir];
-  while (stack.length) {
-    const p = stack.pop();
-    const st = statSync(p);
-    if (st.isDirectory()) {
-      for (const name of readdirSync(p)) stack.push(join(p, name));
-    } else {
-      total += st.size;
-    }
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) total += dirSizeSync(full);
+    else total += statSync(full).size;
   }
   return total;
 }
