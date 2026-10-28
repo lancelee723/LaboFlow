@@ -1,6 +1,6 @@
 # F-2 后续提案：插件触发的会话续跑（session continue-from-plugin）
 
-- 状态：提案（待批准后立项；本文档不是已生效的 ADR）
+- 状态：**已批准并实施（2026-10-28）**——宿主 `pi.session.continueFromPlugin`（权限 `session.continue`，高频风险档，滑动窗口节流）+ 插件 v4.1.0 confirmStage 触发。本文档保留为设计记录
 - 背景：ACCEPTANCE.md 走查发现 F-2；2026-10-27 已落地过渡缓解（工具返回文案要求模型"保持回合存活并轮询"，实机生效：确认后模型轮询 21 次自主续进，零人工推动）
 - 关联：ADR 0041（独立插件仓库）、phase7 DESIGN §5.1
 
