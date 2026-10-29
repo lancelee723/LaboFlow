@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PPT 工作台模式 — 交互原型 v1（评审用）</title>
+<style>
+  /* ── 原型样式：贴近 LaboFlow 深色主题 ───────────────────────── */
+  :root {
+    --bg: #0d0f12; --bg2: #14171c; --bg3: #1b1f26; --line: #2a2f38;
+    --fg: #e8eaed; --muted: #8a919c; --accent: #4c8dff; --accent2: #2da44e;
+    --warn: #d29922; --err: #f85149; --chip: #232830;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; min-height: 100vh; }
+  .screen { display: none; min-height: 100vh; }
+  .screen.on { display: block; }
+  .tabs { position: fixed; top: 12px; right: 16px; z-index: 99; display: flex; gap: 8px; }
+  .tabs button { background: var(--bg3); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 14px; cursor: pointer; font-size: 12px; }
+  .tabs button.on { color: var(--fg); border-color: var(--accent); }
+  .note { position: fixed; bottom: 10px; left: 16px; z-index: 99; color: var(--muted); font-size: 11px; max-width: 46ch; }
+  .note b { color: var(--accent); }
+
+  /* ── 屏 1：新建任务（入口所在） ── */
+  .home { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 18px; }
+  .home h1 { font-size: 26px; font-weight: 600; }
+  .composer { width: 640px; background: var(--bg2); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px 10px; }
+  .composer .ph { color: var(--muted); min-height: 44px; font-size: 15px; }
+  .composer .bar { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 9px; }
+  .caps { display: flex; gap: 10px; margin-top: 2px; flex-wrap: wrap; }
+  .cap {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 18px; border-radius: 999px; cursor: pointer;
+    background: linear-gradient(135deg, #1d3f77, #16324f);
+    border: 1px solid #2f5ea8; color: #dbe8ff; font-size: 13.5px; font-weight: 500;
+    transition: transform .12s, box-shadow .12s;
+  }
+  .cap:hover { transform: translateY(-1px); box-shadow: 0 3px 14px #0a2b5c66; border-color: #4c8dff; }
+  .cap .ico { font-size: 15px; }
+  .cap.ghost { background: var(--chip); border-color: var(--line); color: var(--muted); font-weight: 400; }
+  .cap.ghost:hover { color: var(--fg); box-shadow: none; }
+
+  /* ── 屏 2：PPT 工作台模式（主窗口内） ── */
+  .ws { display: grid; grid-template-columns: 1fr 380px; min-height: 100vh; }
+  .ws-left { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-height: 100vh; }
+  .ws-top { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--line); }
+  .ws-top .mode-badge { background: #1d3f77; border: 1px solid #2f5ea8; color: #dbe8ff; border-radius: 8px; padding: 2px 10px; font-size: 12.5px; }
+  .ws-top .title { font-weight: 600; }
+  .ws-top .exit { margin-left: auto; color: var(--muted); cursor: pointer; font-size: 12.5px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 10px; background: none; }
+  .chat { flex: 1; padding: 20px 26px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; max-height: calc(100vh - 170px); }
+  .msg.user { align-self: flex-end; background: var(--chip); border-radius: 12px 12px 2px 12px; padding: 10px 14px; max-width: 78%; white-space: pre-wrap; }
+  .msg.ai { align-self: flex-start; max-width: 88%; }
+  .msg.ai .head { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .gatecard { background: var(--bg2); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; padding: 14px 16px; max-width: 88%; }
+  .gatecard.pending { border-left-color: var(--warn); }
+  .gatecard .g-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; }
+  .gatecard .g-tag { background: var(--warn); color: #1a1a1a; font-size: 11px; border-radius: 5px; padding: 1px 8px; font-weight: 500; }
+  .gatecard .g-tag.ok { background: var(--accent2); color: #04120a; }
+  .gatecard .fld { display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px; font-size: 13px; }
+  .gatecard .fld .k { color: var(--muted); }
+  .gatecard textarea, .gatecard input[type=text] { width: 100%; background: var(--bg3); border: 1px solid var(--line); color: var(--fg); border-radius: 7px; padding: 6px 9px; font: 13px/1.5 inherit; resize: vertical; }
+  .gatecard .dirs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+  .gatecard .dir { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; cursor: pointer; background: var(--bg3); }
+  .gatecard .dir.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .gatecard .dir b { font-size: 13px; }
+  .sw { display: inline-flex; width: 15px; height: 15px; border-radius: 4px; margin-right: 3px; vertical-align: -3px; border: 1px solid #ffffff22; }
+  .gatecard .params { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 9px; display: flex; flex-wrap: wrap; gap: 7px 16px; font-size: 12.5px; color: var(--muted); }
+  .gatecard .params label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .gatecard .g-actions { margin-top: 11px; display: flex; gap: 9px; }
+  .gatecard .g-actions button { border-radius: 8px; padding: 6px 18px; cursor: pointer; font-size: 13px; border: 1px solid var(--line); background: var(--bg3); color: var(--fg); }
+  .gatecard .g-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+  .gatecard .g-actions button.quick { background: #233024; border-color: #2da44e66; color: #9fe0b3; }
+  .composer.bottom { width: auto; margin: 0 18px 16px; }
+  .ws-right { padding: 16px 18px; background: var(--bg2); }
+  .ws-right h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 12px; letter-spacing: .5px; }
+  .steps { position: relative; padding-left: 20px; }
+  .steps::before { content: ""; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 1px; background: var(--line); }
+  .step { position: relative; padding: 0 0 18px 14px; font-size: 13px; }
+  .step::before { content: ""; position: absolute; left: -19px; top: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--line); }
+  .step.done::before { background: var(--accent2); border-color: var(--accent2); }
+  .step.active::before { border-color: var(--accent); box-shadow: 0 0 0 3px #4c8dff33; }
+  .step .t { color: var(--muted); font-size: 11.5px; }
+  .step .badge { font-size: 11px; color: var(--muted); }
+  .step .qchip { font-size: 11px; border-radius: 5px; padding: 1px 7px; margin-left: 6px; }
+  .qchip.warn { background: #3a2c10; color: var(--warn); }
+  .qchip.err { background: #3a1414; color: var(--err); }
+  .mini { font-size: 12px; color: var(--muted); }
+  .mini b { color: var(--fg); font-weight: 500; }
+  .hint-strip { background: var(--bg3); border: 1px dashed var(--line); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; color: var(--muted); margin-top: 14px; }
+  .hint-strip b { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="tabs">
+  <button class="on" onclick="show(0)">① 新建任务（入口）</button>
+  <button onclick="show(1)">② PPT 工作台模式（主窗口）</button>
+</div>
+<div class="note">原型仅示意布局与信息结构；样式将按 LaboFlow 设计令牌重做。<b>评审点已用编号标注</b>（见各屏说明条）。</div>
+
+<!-- ═══════════ 屏 1：新建任务（入口胶囊） ═══════════ -->
+<div class="screen on">
+  <div class="home">
+    <h1>临时聊点什么？</h1>
+    <div class="composer">
+      <div class="ph">随便问问</div>
+      <div class="bar">
+        <span>＋</span><span>🎙</span><span>🛡 智能体</span><span>全自动 ▾</span>
+        <span style="margin-left:auto">⚙ glm-5.3-flash · max ▾</span><span>↑</span>
+      </div>
+    </div>
+    <!-- ▼ 用户设想 1：占位文案下方的胶囊入口行 -->
+    <div class="caps">
+      <span class="cap" onclick="show(1)" title="进入 PPT 工作台模式">
+        <span class="ico">🖼</span> PPT 工作台
+      </span>
+      <span class="cap ghost">（后续可扩展：报告工作台 / 长文工作台…）</span>
+    </div>
+    <div class="mini">评审点 ①：胶囊位置与样式（占位文案正下方，唯一强入口，替代「/ 菜单发现」）</div>
+  </div>
+</div>
+
+<!-- ═══════════ 屏 2：PPT 工作台模式 ═══════════ -->
+<div class="screen">
+  <div class="ws">
+    <!-- 左：主窗口对话（全部管线互动在此） -->
+    <div class="ws-left">
+      <div class="ws-top">
+        <span class="mode-badge">PPT 工作台模式</span>
+        <span class="title">茂名市产投汇报 · 2 页</span>
+        <span class="mini">maoming_chanyetouzi_20261029</span>
+        <button class="exit">退出工作台</button>
+      </div>
+      <div class="chat">
+        <div class="msg user">用 PPT-Master 把这份 2 页脚本稿做成麦肯锡风格 PPT（附件：script.md）</div>
+
+        <div class="msg ai">
+          <div class="head">PPT-Master · 规划完成</div>
+          <!-- ▼ Gate 1 卡片：主窗口内可编辑表单（用户设想 2：不再依赖右侧弹窗） -->
+          <div class="gatecard">
+            <div class="g-head">⛔ Stage 1 · 沟通契约与模板选择 <span class="g-tag ok">已确认 · 14:21</span></div>
+            <div class="fld">
+              <span class="k">受众</span><span>茂名市发展集团及市级主管部门…【验收修改:受众已编辑】</span>
+              <span class="k">核心信息</span><span>以"小总部+专业化子公司"模式高效运转，资产结构健康</span>
+              <span class="k">画布</span><span>16:9（ppt169）· 自由设计</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ▼ Gate 2 卡片：待确认态，字段在对话流内直接操作 -->
+        <div class="gatecard pending">
+          <div class="g-head">⛔ Stage 2 · 最终方案与生产参数 <span class="g-tag">待你确认</span></div>
+          <div class="dirs">
+            <div class="dir"><b>★ 经典咨询蓝</b><div class="mini">白底精确栅格 + 深海军蓝</div>
+              <span class="sw" style="background:#051C2C"></span><span class="sw" style="background:#2251FF"></span><span class="sw" style="background:#F4F6F9"></span></div>
+            <div class="dir sel"><b>蓝灰编辑刊式</b><div class="mini">季刊印刷内页 · 衬线标题</div>
+              <span class="sw" style="background:#C41E3A"></span><span class="sw" style="background:#222831"></span><span class="sw" style="background:#FFFFFF"></span></div>
+            <div class="dir"><b>深空董事会</b><div class="mini">墨蓝大屏 · 发光数据磁贴</div>
+              <span class="sw" style="background:#0E1F33"></span><span class="sw" style="background:#D9A441"></span><span class="sw" style="background:#E6EDF5"></span></div>
+          </div>
+          <div class="fld">
+            <span class="k">页数</span><input type="text" value="2（按脚本既定）">
+            <span class="k">字体方案</span><span>思源宋体标题 · 霞鹜文楷正文 · 22pt</span>
+            <span class="k">图像策略</span><span>编辑式证据图 · 严谨书卷气质 · 线条轮廓优先</span>
+          </div>
+          <div class="params">
+            <label><input type="checkbox"> 演讲备注</label>
+            <label><input type="checkbox"> 自定义动画</label>
+            <label><input type="checkbox"> 旁白音频</label>
+            <label>生成方式 <b>连续生成</b></label>
+            <label>规格深度 <b>brief</b></label>
+            <label><input type="checkbox"> 规格复审</label>
+          </div>
+          <div class="g-actions">
+            <button class="primary">确认方案</button>
+            <button class="quick">快速模式（跳过剩余确认）</button>
+          </div>
+          <div class="mini" style="margin-top:8px;color:var(--warn)">评审点 ②：Gate 卡片直接嵌入对话流（交互组件在聊天内，非右侧停靠区）——确认后 Agent 自动续跑</div>
+        </div>
+
+        <div class="msg ai">
+          <div class="head">PPT-Master · 绘制中</div>
+          <div class="mini">P01 基本情况 ✅ → P02 发展基础 ✏ 撰写中…（分块写入，详见右侧时间线）</div>
+        </div>
+      </div>
+      <div class="composer bottom">
+        <div class="ph">对 PPT-Master 说点什么（/ 命令可用）</div>
+        <div class="bar"><span>＋</span><span>🎙</span><span>全自动 ▾</span><span style="margin-left:auto">⚙ glm-5.3-flash · max ▾</span><span>↑</span></div>
+      </div>
+    </div>
+
+    <!-- 右：管线时间线（只读伴随面板；不再是操作面） -->
+    <div class="ws-right">
+      <h3>管线状态</h3>
+      <div class="steps">
+        <div class="step done">Stage 1 沟通契约 <span class="t">14:21 · 含 1 处修改</span></div>
+        <div class="step done">Stage 2 设计方案 <span class="t">14:29 · 方向 2 · 备注 off</span></div>
+        <div class="step active">页面绘制 <span class="badge">1 / 2 页</span><div class="t">P02 撰写中…</div></div>
+        <div class="step">质检 <span class="qchip warn">2 警告</span></div>
+        <div class="step">导出 PPTX</div>
+      </div>
+      <div class="hint-strip">
+        <b>评审点 ③：</b>右侧降级为只读伴随（时间线 + 质检摘要 + 导出列表）；
+        所有需要用户操作的组件（Gate 表单/方向卡/生产参数/快速模式）全部移入主窗口对话流。
+      </div>
+      <div class="hint-strip" style="margin-top:10px">
+        <b>评审点 ④：</b>入口行为——点击胶囊即创建「工作台模式会话」：自动携带技能指令前缀、
+        自动选附件位、新建项目命名引导（可后置）；退出工作台 = 普通会话。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(i) {
+  document.querySelectorAll(".screen").forEach((s, j) => s.classList.toggle("on", j === i));
+  document.querySelectorAll(".tabs button").forEach((b, j) => b.classList.toggle("on", j === i));
+}
+</script>
+</body>
+</html>
