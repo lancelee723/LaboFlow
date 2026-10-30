@@ -286,22 +286,31 @@ export function createRuntimeLifecycle({
       // the de-plugin-ization. A missing or broken copy is a build defect
       // that must not block boot.
       try {
-        const pptMasterDir = join(__dirname, "../../../resources/ppt-master");
-        if (existsSync(join(pptMasterDir, "manifest.json"))) {
-          await plugins.loadFromPath(pptMasterDir, [
-            "agent.tool.register",
-            "agent.prompt.inject",
-            "workspace.read",
-            "fs.write",
-            "ui.view",
-            "notify",
-            "session.read",
-            "session.continue",
-          ]);
-          logger.app("plugin", "info", "ppt-master integrated module loaded", {
-            pluginId: "laboflow.ppt-master",
-          });
-        }
+        // Dev build: out/main → ../../.. lands at apps/desktop; packaged:
+        // resourcesPath/../.. → app root. Mirror resolveBuiltinPluginsDir's
+        // candidate walk instead of guessing one depth.
+        const pptMasterCandidates = [
+          join(process.resourcesPath || "", "ppt-master"),
+          join(__dirname, "../../resources/ppt-master"),
+          join(__dirname, "../../../resources/ppt-master"),
+        ];
+        const pptMasterDir = pptMasterCandidates.find((c) =>
+          c && existsSync(join(c, "manifest.json")),
+        );
+        if (!pptMasterDir) return;
+        await plugins.loadFromPath(pptMasterDir, [
+          "agent.tool.register",
+          "agent.prompt.inject",
+          "workspace.read",
+          "fs.write",
+          "ui.view",
+          "notify",
+          "session.read",
+          "session.continue",
+        ]);
+        logger.app("plugin", "info", "ppt-master integrated module loaded", {
+          pluginId: "laboflow.ppt-master",
+        });
       } catch (error) {
         logger.app("plugin", "error", "ppt-master integrated module load failed", {
           data: String(error),

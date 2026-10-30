@@ -46,6 +46,7 @@ import {
 } from "./slices/initial-state";
 import { createSessionSlice } from "./slices/session-slice";
 import { createQueueSlice } from "./slices/queue-slice";
+import type { ComposerPrefill } from "../lib/composer-smart-stop";
 import { createTranscriptSlice } from "./slices/transcript-slice";
 import { createProjectSlice } from "./slices/project-slice";
 import { createCatalogSlice } from "./slices/catalog-slice";
@@ -468,6 +469,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
 
   clearComposerPrefill: () => set({ composerPrefill: null }),
+  setComposerPrefill: (prefill: ComposerPrefill) => set({ composerPrefill: prefill }),
   };
 });
 

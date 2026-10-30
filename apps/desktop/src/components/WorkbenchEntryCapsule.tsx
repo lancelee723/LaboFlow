@@ -7,19 +7,19 @@ import { useTranslation } from "react-i18next";
  * Workbench-mode entry capsule (WorkBuddy-style segmented control), rendered
  * under the rotating home placeholder: 通用对话 / PPT 工作台.
  *
- * Picking PPT 工作台 starts a workbench-mode session immediately: sendPrompt
- * creates the session with the ppt-master skill instruction as the first
- * user turn (the composer then behaves like any session — the user appends
- * their real request, attachments, model/thinking as usual). Switching back
- * to 通用对话 simply returns; nothing is sent until the user sends.
+ * Picking PPT 工作台 does NOT send anything to the agent — it pre-fills the
+ * composer with the ppt-master skill invocation and swaps the placeholder,
+ * leaving the session in a wait-for-prompt state: the user types their real
+ * request and attaches files, then sends (the skill path expands host-side).
+ * 通用对话 clears the prefill again.
  */
 const WORKBENCH_SKILL_PREFIX = `/laboflow.ppt-master/ppt-master`;
 
 export function WorkbenchEntryCapsule() {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"chat" | "ppt">("chat");
-  const firedRef = useRef(false);
-  const sendPrompt = useAppStore((s) => s.sendPrompt);
+  const setComposerPrefill = useAppStore((s) => s.setComposerPrefill);
+  const clearComposerPrefill = useAppStore((s) => s.clearComposerPrefill);
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const segRef = useRef<HTMLDivElement | null>(null);
 
@@ -38,14 +38,17 @@ export function WorkbenchEntryCapsule() {
 
   const pick = (next: "chat" | "ppt") => {
     setMode(next);
-    if (next !== "ppt" || firedRef.current) return;
-    firedRef.current = true;
-    void sendPrompt(
-      `${WORKBENCH_SKILL_PREFIX}\n${t("workbench.entryPrompt", {
-        defaultValue:
-          "进入 PPT 工作台模式。请加载 ppt-master 技能并按其规程与我逐步协作完成一份演示文稿；先向我确认本次的素材与受众，再开始。",
-      })}`,
-    ).catch(() => undefined);
+    if (next === "ppt") {
+      // Skill invocation sits in the draft as prompt text — nothing is sent
+      // until the user completes their request and submits.
+      setComposerPrefill({
+        text: WORKBENCH_SKILL_PREFIX,
+        sessionId: useAppStore.getState().activeSessionId ?? "",
+        fileReferences: [],
+      });
+    } else {
+      clearComposerPrefill();
+    }
   };
 
   return (

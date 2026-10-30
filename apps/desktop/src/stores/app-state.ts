@@ -355,6 +355,7 @@ export type AppState = {
   dismissToast: (id: number) => void;
   composerPrefill: ComposerPrefill | null;
   clearComposerPrefill: () => void;
+  setComposerPrefill: (prefill: ComposerPrefill) => void;
   workPanelOpen: boolean;
   workPanelTabs: WorkPanelTab[];
   activeWorkPanelTabId: string | null;
