@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   APP_NAME,
@@ -276,6 +276,36 @@ export function createRuntimeLifecycle({
             });
           }
         }
+      }
+
+      // The PPT-Master integration is NOT a plugin (ADR 0041 v3 revision): it
+      // ships at `resources/ppt-master`, outside host-core's bundled-plugin
+      // registry — no market row, no permission dialog, no enable/disable. It
+      // loads here with an explicit grant set so the tool namespace
+      // (plugin_laboflow_ppt_master_*) and the skill id stay stable through
+      // the de-plugin-ization. A missing or broken copy is a build defect
+      // that must not block boot.
+      try {
+        const pptMasterDir = join(__dirname, "../../../resources/ppt-master");
+        if (existsSync(join(pptMasterDir, "manifest.json"))) {
+          await plugins.loadFromPath(pptMasterDir, [
+            "agent.tool.register",
+            "agent.prompt.inject",
+            "workspace.read",
+            "fs.write",
+            "ui.view",
+            "notify",
+            "session.read",
+            "session.continue",
+          ]);
+          logger.app("plugin", "info", "ppt-master integrated module loaded", {
+            pluginId: "laboflow.ppt-master",
+          });
+        }
+      } catch (error) {
+        logger.app("plugin", "error", "ppt-master integrated module load failed", {
+          data: String(error),
+        });
       }
     } catch (error) {
       logger.app("plugin", "error", "plugin list failed", {

@@ -69,4 +69,4 @@ __pycache__/
 worktrees
 apps/desktop/public/pdfjs/
 # Bundled plugin fetched at packaging time by scripts/fetch-bundled-plugins.mjs (ADR 0041)
-apps/desktop/resources/plugins/laboflow.ppt-master/
+apps/desktop/resources/ppt-master/

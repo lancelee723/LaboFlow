@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const lockPath = join(repoRoot, "apps/desktop/plugins.bundle.json");
 const pluginsDir = join(repoRoot, "apps/desktop/resources/plugins");
+const integratedDir = join(repoRoot, "apps/desktop/resources/ppt-master");
 
 // Repo-hygiene files at a plugin source root that must never ship in a bundle.
 const NONSHIPPED_TOP_LEVEL_FILES = new Set(["AGENTS.md", "README.md", "PROVENANCE.md"]);
@@ -32,7 +33,7 @@ function makeCopyFilter(src) {
   };
 }
 
-export async function applyBundle({ lock, pluginsDir: dir, expectedId }) {
+export async function applyBundle({ lock, pluginsDir: dir, expectedId, flattenToRoot = false }) {
   const entry = lock[expectedId];
   if (!entry) throw new Error(`bundle lock has no entry for ${expectedId}`);
   // Relative sources resolve against the repo root (the lock file's home),
@@ -54,9 +55,9 @@ export async function applyBundle({ lock, pluginsDir: dir, expectedId }) {
       `wheelhouse missing for ${platform()}-${arch()} — run 'npm run build:wheelhouse' in the plugin repo`,
     );
   }
-  const dest = join(dir, expectedId);
+  const dest = flattenToRoot ? dir : join(dir, expectedId);
   rmSync(dest, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dest, { recursive: true });
   cpSync(src, dest, { recursive: true, filter: makeCopyFilter(src) });
   return { copied: true, id: expectedId, version: entry.version, dest };
 }
@@ -80,10 +81,24 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const lock = JSON.parse(readFileSync(lockPath, "utf8"));
   mkdirSync(pluginsDir, { recursive: true });
   for (const id of Object.keys(lock)) {
+    // The ppt-master integration lives OUTSIDE the plugins dir (ADR 0041 v3:
+    // loaded by lifecycle as an integrated module, not registered by
+    // host-core) — its destination is resources/ppt-master.
+    if (id === "laboflow.ppt-master") {
+      // Integrated module: content lands DIRECTLY at resources/ppt-master
+      // (repo-root-of-plugin), not a nested <id> subdir.
+      const report = await applyBundle({ lock, pluginsDir: integratedDir, expectedId: id, flattenToRoot: true });
+      console.log(`bundled ${report.id}@${report.version} -> ${report.dest}`);
+      continue;
+    }
     const report = await applyBundle({ lock, pluginsDir, expectedId: id });
     console.log(`bundled ${report.id}@${report.version} -> ${report.dest}`);
   }
-  const total = Object.keys(lock).reduce((sum, id) => sum + dirSizeSync(join(pluginsDir, id)), 0);
+  // Ceiling covers every fetched tree (integrated + any future bundled ids).
+  const total = Object.keys(lock).reduce(
+    (sum, id) => sum + dirSizeSync(id === "laboflow.ppt-master" ? integratedDir : join(pluginsDir, id)),
+    0,
+  );
   if (total > BUNDLE_SIZE_CEILING) {
     console.error(
       `bundled plugin footprint is ${(total / 1048576).toFixed(1)} MiB — exceeds the ` +
