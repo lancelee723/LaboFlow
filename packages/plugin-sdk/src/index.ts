@@ -403,6 +403,12 @@ export type PluginSettingContrib = {
   command?: string;
   /** Reserved for the future; only plugin-local shortcuts are accepted today. */
   scope?: "plugin";
+  /**
+   * Only render this setting in the host sheet while the named sibling
+   * setting's draft value is one of `equals`. Hidden settings keep their
+   * stored values; they are hidden controls, not disabled features.
+   */
+  visibleWhen?: { key: string; equals: string[] };
 };
 
 export type PluginSkillContrib = {
@@ -1596,6 +1602,21 @@ export function validateContributions(
     }
     if (setting.secret === true) {
       return `setting "${setting.key}" cannot be secret in this release`;
+    }
+    if (setting.visibleWhen !== undefined) {
+      const gate = setting.visibleWhen;
+      if (!gate || typeof gate !== "object" || Array.isArray(gate)) {
+        return `setting "${setting.key}" visibleWhen must be an object`;
+      }
+      if (typeof gate.key !== "string" || !gate.key) {
+        return `setting "${setting.key}" visibleWhen.key must be a setting key`;
+      }
+      if (gate.key === setting.key) {
+        return `setting "${setting.key}" visibleWhen.key must reference a sibling setting`;
+      }
+      if (!Array.isArray(gate.equals) || gate.equals.length === 0 || gate.equals.some((v) => typeof v !== "string")) {
+        return `setting "${setting.key}" visibleWhen.equals must be a non-empty string array`;
+      }
     }
     if (setting.type === "shortcut") {
       if (setting.scope !== undefined && setting.scope !== "plugin") {

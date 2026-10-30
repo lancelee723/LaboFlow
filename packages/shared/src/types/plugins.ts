@@ -255,6 +255,8 @@ export type PluginSettingDefinition = {
   command?: string;
   /** The first shortcut scope; global registration is intentionally not supported. */
   scope?: "plugin";
+  /** Render this row only while the named sibling setting holds one of these values. */
+  visibleWhen?: { key: string; equals: string[] };
   /** Resolved private value, returned only to the owning plugin settings UI. */
   value?: unknown;
 };

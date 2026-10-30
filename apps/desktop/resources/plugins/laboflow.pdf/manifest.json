@@ -12,7 +12,9 @@
         "name": "read",
         "description": "Read a PDF document page by page. Digital pages return their text layer; image-only (scanned) pages return a model-visible page image when the current model has vision. `path` follows the Read rules (workspace-relative, absolute inside the session scratch, or an attachments reference). `pages` selects a 1-based window such as 5-12,30; defaults to the first window of a large document, so read the opening pages for structure and then pull targeted ranges instead of the whole file. `password` is needed only when the tool reports the document is encrypted - ask the user for it and retry. Scanned pages that cannot be imaged are parsed through the configured MinerU endpoint, if any. Always pass action: \"read\".",
         "risk": "low",
-        "planSafeActions": ["read"],
+        "planSafeActions": [
+          "read"
+        ],
         "schema": {
           "type": "object",
           "properties": {
@@ -34,22 +36,58 @@
               "description": "Password for an encrypted PDF; supply on retry when the tool reports encryption."
             }
           },
-          "required": ["path"]
+          "required": [
+            "path"
+          ]
         }
       }
     ],
     "settings": [
       {
-        "key": "mineruEndpoint",
-        "type": "string",
-        "title": "MinerU endpoint",
-        "description": "Base URL only, for example https://mineru.net (the tool appends its own /api/v4 paths — do not paste a full endpoint URL). A self-hosted deployment must expose the same v4 API. Leave empty to keep every document on this machine."
+        "key": "mineruMode",
+        "type": "select",
+        "title": "解析通道 / Parsing backend",
+        "default": "precision",
+        "enum": [
+          {
+            "value": "precision",
+            "label": "MinerU 精准解析（官方云，需 Token）/ Precision (official cloud, token)"
+          },
+          {
+            "value": "agent",
+            "label": "MinerU Agent 轻量解析（官方云，免 Token）/ Agent lightweight (official cloud, no token)"
+          },
+          {
+            "value": "custom",
+            "label": "自定义 / 自建部署（手动填写）/ Custom endpoint (manual)"
+          }
+        ],
+        "description": "精准解析：表格/公式识别最全，需 Token，官方每日 1000 页高优先级额度。Agent 轻量解析：免 Token（按 IP 限速），速度最快，仅输出 Markdown。自定义：指向自建或其他部署，需暴露与官方 v4 相同的接口。/ Precision: richest tables & formulas, token required, 1000 priority pages/day. Agent lightweight: no token (IP rate-limited), fastest, Markdown only. Custom: your own deployment exposing the same v4 API."
       },
       {
         "key": "mineruApiKey",
         "type": "string",
-        "title": "MinerU API token",
-        "description": "Bearer token created in the MinerU console. Documents sent to a cloud endpoint leave this machine; configure it only for material you are allowed to upload."
+        "title": "MinerU Token",
+        "description": "精准解析：登录 mineru.net → 「API」页创建 Token 后原样粘贴；自定义部署填对应 Token。Agent 轻量解析无需填写。/ Precision: create a token at mineru.net → API page and paste it; custom: your deployment's token. Not needed for Agent lightweight.",
+        "visibleWhen": {
+          "key": "mineruMode",
+          "equals": [
+            "precision",
+            "custom"
+          ]
+        }
+      },
+      {
+        "key": "mineruEndpoint",
+        "type": "string",
+        "title": "服务基地址 / Base URL",
+        "description": "只填基地址，例如 https://mineru.example.com——工具会自动追加 /api/v4/... 路径，不要粘贴完整接口 URL。/ Base URL only, e.g. https://mineru.example.com — the tool appends /api/v4/... itself; never paste a full endpoint URL.",
+        "visibleWhen": {
+          "key": "mineruMode",
+          "equals": [
+            "custom"
+          ]
+        }
       }
     ]
   },

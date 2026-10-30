@@ -82,7 +82,73 @@ function readEntry(zip, localOffset, method, compressedSize, decoder) {
 }
 
 /**
- * Submit a PDF to MinerU and return the extracted markdown.
+ * Agent lightweight flow (official v1, no token — IP rate-limited, Markdown
+ * only): POST /api/v1/agent/parse/file returns a signed upload URL, the raw
+ * bytes are PUT onto it, GET /api/v1/agent/parse/{task_id} polls to done,
+ * and `markdown_url` is a plain .md link fetched as text.
+ */
+export async function parseWithMineruAgent(config, input) {
+  const base = config.endpoint.replace(/\/+$/, "");
+  const deadline = Date.now() + (input.deadlineMs ?? DEFAULT_DEADLINE_MS);
+  const pollIntervalMs = input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+
+  const submitResponse = await input.fetchImpl({
+    url: `${base}/api/v1/agent/parse/file`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_name: input.fileName,
+      language: "ch",
+      is_ocr: true,
+    }),
+  });
+  const submit = JSON.parse(submitResponse.bodyText ?? "{}");
+  const taskId = submit?.data?.task_id;
+  const uploadUrl = submit?.data?.file_url;
+  if (submit.code !== 0 || !taskId || !uploadUrl) {
+    throw new MineruError(`MinerU agent upload rejected: ${submit.msg ?? `code ${submit.code}`}`);
+  }
+  const upload = await input.fetchImpl({
+    url: uploadUrl,
+    method: "PUT",
+    bodyBase64: Buffer.from(input.data).toString("base64"),
+  });
+  if (upload.status >= 300) {
+    throw new MineruError(`MinerU agent file upload failed with HTTP ${upload.status}`);
+  }
+
+  for (;;) {
+    if (input.signal?.aborted) throw new MineruError("MinerU parse aborted");
+    if (Date.now() > deadline) {
+      throw new MineruError(
+        `MinerU parse did not finish within ${Math.round((input.deadlineMs ?? DEFAULT_DEADLINE_MS) / 1000)}s`,
+      );
+    }
+    const pollResponse = await input.fetchImpl({
+      url: `${base}/api/v1/agent/parse/${taskId}`,
+    });
+    const payload = JSON.parse(pollResponse.bodyText ?? "{}");
+    if (payload.code !== 0) {
+      throw new MineruError(`MinerU agent poll failed: ${payload.msg ?? `code ${payload.code}`}`);
+    }
+    const result = payload?.data;
+    if (result?.state === "done" && result.markdown_url) {
+      const mdResponse = await input.fetchImpl({ url: result.markdown_url });
+      if (mdResponse.bodyText === undefined) {
+        throw new MineruError("MinerU agent result download returned no body");
+      }
+      return mdResponse.bodyText;
+    }
+    if (result?.state === "failed") {
+      throw new MineruError(`MinerU parsing failed: ${result.err_msg ?? "unknown error"}`);
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, pollIntervalMs));
+  }
+}
+
+/**
+ * Precision flow (official v4, token required): submit a PDF to MinerU and
+ * return the extracted markdown.
  *
  * `fetchImpl` adapts the host `pi.net.fetch`: `{ url, method, headers, body,
  * responseFormat }` → `{ status, headers, bodyText?, bodyBase64? }`.

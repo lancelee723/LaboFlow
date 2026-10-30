@@ -19,7 +19,7 @@ import {
   PdfInvalidError,
   readPdf,
 } from "./lib/engine.js";
-import { parseWithMineru } from "./lib/mineru.js";
+import { parseWithMineru, parseWithMineruAgent } from "./lib/mineru.js";
 import { dataDirFromPluginDataPath, resolvePdfPath } from "./lib/paths.js";
 
 /** Aligned with MinerU's own hard ceiling; refused earlier to keep errors local. */
@@ -29,21 +29,52 @@ const MINERU_MARKDOWN_CHAR_LIMIT = 80000;
 
 const ENDPOINT_PATTERN = /^https?:\/\/[^\s/]+(:\d+)?(\/[^\s]*)?$/;
 
-function normalizeMineruSettings(settings) {
-  let endpoint =
-    typeof settings?.mineruEndpoint === "string"
-      ? settings.mineruEndpoint.trim().replace(/\/+$/, "")
-      : "";
+/** Official bases for the two hosted modes; the docs' endpoints ride these. */
+const OFFICIAL_MINERU_BASE = "https://mineru.net";
+
+/**
+ * Resolve the configured parsing backend into a client config.
+ *
+ * `mineruMode` picks the flow: "precision" (official cloud, token) and
+ * "agent" (official cloud, tokenless) both run against the official base;
+ * "custom" points at a user-hosted deployment exposing the same v4 API.
+ * Stored settings from before modes existed carry only endpoint+key — they
+ * migrate by what they contain: an official-or-empty endpoint keeps the
+ * precision flow, anything else is custom.
+ */
+export function normalizeMineruSettings(settings) {
+  const endpoint = stripApiSuffix(settings?.mineruEndpoint);
+  const apiKey =
+    typeof settings?.mineruApiKey === "string" ? settings.mineruApiKey.trim() : "";
+  const mode = settings?.mineruMode;
+  if (mode === "agent") {
+    return { mode, endpoint: OFFICIAL_MINERU_BASE, apiKey: "" };
+  }
+  if (mode === "precision") {
+    if (!apiKey) return undefined;
+    return { mode, endpoint: OFFICIAL_MINERU_BASE, apiKey };
+  }
+  if (mode === "custom") {
+    if (!ENDPOINT_PATTERN.test(endpoint)) return undefined;
+    return { mode, endpoint, apiKey };
+  }
+  // Legacy stored state (no mode): infer so an upgrade keeps working.
+  if (!endpoint || endpoint === OFFICIAL_MINERU_BASE) {
+    return apiKey ? { mode: "precision", endpoint: OFFICIAL_MINERU_BASE, apiKey } : undefined;
+  }
+  if (!ENDPOINT_PATTERN.test(endpoint)) return undefined;
+  return { mode: "custom", endpoint, apiKey };
+}
+
+function stripApiSuffix(value) {
+  const endpoint =
+    typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";
   // A pasted full endpoint (e.g. https://mineru.net/api/v4/extract/task) is a
   // common slip: the client appends its own /api/v4/... paths, so only the
   // base origin is meaningful. The extract/task endpoint also cannot upload
   // local files, so the paste never works as-is.
   const apiAt = endpoint.indexOf("/api/v");
-  if (apiAt > 0) endpoint = endpoint.slice(0, apiAt);
-  const apiKey =
-    typeof settings?.mineruApiKey === "string" ? settings.mineruApiKey.trim() : "";
-  if (!ENDPOINT_PATTERN.test(endpoint)) return undefined;
-  return { endpoint, apiKey };
+  return apiAt > 0 ? endpoint.slice(0, apiAt) : endpoint;
 }
 
 let toolsRegistered = false;
@@ -193,13 +224,20 @@ export async function onLoad() {
           );
         } else {
           try {
-            const markdown = await parseWithMineru(mineru, {
-              fileName: name,
-              // Fresh bytes: the shared buffer was detached by the probes above.
-              data: await readBytes(),
-              signal: ctx?.signal,
-              fetchImpl: mineruFetch,
-            });
+            const markdown = mineru.mode === "agent"
+              ? await parseWithMineruAgent(mineru, {
+                  fileName: name,
+                  // Fresh bytes: the shared buffer was detached by the probes above.
+                  data: await readBytes(),
+                  signal: ctx?.signal,
+                  fetchImpl: mineruFetch,
+                })
+              : await parseWithMineru(mineru, {
+                  fileName: name,
+                  data: await readBytes(),
+                  signal: ctx?.signal,
+                  fetchImpl: mineruFetch,
+                });
             const clipped = markdown.slice(0, MINERU_MARKDOWN_CHAR_LIMIT);
             textParts.push(
               `\n--- MinerU extraction (scanned pages ${needsMineru.join(", ")}) ---\n${clipped}` +

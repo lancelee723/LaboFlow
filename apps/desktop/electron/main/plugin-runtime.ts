@@ -1712,6 +1712,7 @@ export class PluginRuntime {
       ...(setting.default === undefined ? {} : { default: setting.default }),
       ...(setting.enum ? { enum: setting.enum } : {}),
       ...(setting.command ? { command: setting.command } : {}),
+      ...(setting.visibleWhen ? { visibleWhen: setting.visibleWhen } : {}),
       scope: "plugin",
       value: values[setting.key] ?? setting.default,
     }));

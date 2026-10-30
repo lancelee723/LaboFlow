@@ -110,6 +110,14 @@ export function PluginSettingsSheet({ plugin, platform, onClose, onSaved }: Prop
     setError(null);
   };
 
+  // A gated row renders only while its sibling control currently holds one
+  // of the admitted values; hidden rows keep their stored values.
+  const visibleSettings = settings.filter((setting) => {
+    const gate = setting.visibleWhen;
+    if (!gate) return true;
+    return gate.equals.some((value) => Object.is(draft[gate.key], value));
+  });
+
   const resetValue = (setting: PluginSettingDefinition) => {
     setValue(setting.key, initialValue({ ...setting, value: undefined }));
   };
@@ -186,7 +194,7 @@ export function PluginSettingsSheet({ plugin, platform, onClose, onSaved }: Prop
         </header>
 
         <div className="plugins-settings-body">
-          {settings.map((setting) => {
+          {visibleSettings.map((setting) => {
             const value = draft[setting.key];
             const isShortcut = setting.type === "shortcut";
             const shortcutError = isShortcut && shortcutConflict === setting.key;

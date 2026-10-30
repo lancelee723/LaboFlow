@@ -21,12 +21,15 @@ import {
 import { downscale, encodePng } from "../resources/plugins/laboflow.pdf/lib/png.js";
 import {
   parseWithMineru,
+  parseWithMineruAgent,
   readMarkdownFromZip,
 } from "../resources/plugins/laboflow.pdf/lib/mineru.js";
 import {
   dataDirFromPluginDataPath,
   resolvePdfPath,
 } from "../resources/plugins/laboflow.pdf/lib/paths.js";
+// From the plugin entry: mode resolution incl. the legacy-settings migration.
+import { normalizeMineruSettings } from "../resources/plugins/laboflow.pdf/main.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name) =>
@@ -302,6 +305,102 @@ test("parseWithMineru follows the official v4 signed-upload flow", async () => {
   assert.ok(calls[0].includes("file-urls/batch"));
 });
 
+test("parseWithMineruAgent follows the official v1 tokenless flow", async () => {
+  const fetchCalls = [];
+  const fetchImpl = async (input) => {
+    fetchCalls.push(`${input.method ?? "GET"} ${input.url}`);
+    if (input.url.endsWith("/api/v1/agent/parse/file")) {
+      // Tokenless: no Authorization header may be sent.
+      assert.equal(input.headers?.Authorization, undefined);
+      assert.deepEqual(JSON.parse(input.body), {
+        file_name: "scan.pdf",
+        language: "ch",
+        is_ocr: true,
+      });
+      return {
+        status: 200,
+        bodyText: JSON.stringify({
+          code: 0,
+          data: { task_id: "a1", file_url: "https://oss/put" },
+        }),
+      };
+    }
+    if (input.url === "https://oss/put") {
+      assert.equal(input.method, "PUT");
+      assert.equal(Buffer.from(input.bodyBase64, "base64")[0], 9);
+      return { status: 200 };
+    }
+    if (input.url === "https://mineru.net/api/v1/agent/parse/a1") {
+      return {
+        status: 200,
+        bodyText: JSON.stringify({
+          code: 0,
+          data: { state: "done", markdown_url: "https://cdn/full.md" },
+        }),
+      };
+    }
+    if (input.url === "https://cdn/full.md") {
+      return { status: 200, bodyText: "# Scanned\n\nOCR body." };
+    }
+    throw new Error(`unexpected fetch ${input.url}`);
+  };
+  const result = await parseWithMineruAgent(
+    { endpoint: "https://mineru.net", apiKey: "" },
+    { fileName: "scan.pdf", data: new Uint8Array([9]), fetchImpl, pollIntervalMs: 1 },
+  );
+  assert.equal(result, "# Scanned\n\nOCR body.");
+  assert.ok(fetchCalls[0].includes("/api/v1/agent/parse/file"));
+});
+
+test("parseWithMineruAgent surfaces rejection and failure states", async () => {
+  await assert.rejects(
+    () =>
+      parseWithMineruAgent(
+        { endpoint: "https://mineru.net", apiKey: "" },
+        {
+          fileName: "r.pdf",
+          data: new Uint8Array([1]),
+          fetchImpl: async () => ({
+            status: 200,
+            bodyText: JSON.stringify({ code: -1, msg: "ip rate limited" }),
+          }),
+        },
+      ),
+    /ip rate limited/,
+  );
+  await assert.rejects(
+    () =>
+      parseWithMineruAgent(
+        { endpoint: "https://mineru.net", apiKey: "" },
+        {
+          fileName: "r.pdf",
+          data: new Uint8Array([1]),
+          pollIntervalMs: 1,
+          fetchImpl: async (input) => {
+            if (input.url.endsWith("/api/v1/agent/parse/file")) {
+              return {
+                status: 200,
+                bodyText: JSON.stringify({
+                  code: 0,
+                  data: { task_id: "a2", file_url: "https://oss/put" },
+                }),
+              };
+            }
+            if (input.url === "https://oss/put") return { status: 200 };
+            return {
+              status: 200,
+              bodyText: JSON.stringify({
+                code: 0,
+                data: { state: "failed", err_msg: "page limit exceeded" },
+              }),
+            };
+          },
+        },
+      ),
+    /page limit exceeded/,
+  );
+});
+
 test("parseWithMineru surfaces upload and parse failures", async () => {
   await assert.rejects(
     () =>
@@ -353,6 +452,49 @@ test("parseWithMineru surfaces upload and parse failures", async () => {
       ),
     /page limit exceeded/,
   );
+});
+
+test("normalizeMineruSettings routes modes and migrates legacy stored state", () => {
+  // Official modes pin the base and (for agent) drop the token.
+  assert.deepEqual(normalizeMineruSettings({ mineruMode: "agent" }), {
+    mode: "agent",
+    endpoint: "https://mineru.net",
+    apiKey: "",
+  });
+  assert.deepEqual(
+    normalizeMineruSettings({ mineruMode: "precision", mineruApiKey: " tok " }),
+    { mode: "precision", endpoint: "https://mineru.net", apiKey: "tok" },
+  );
+  // Precision without a token is unconfigured — the tool reports it.
+  assert.equal(normalizeMineruSettings({ mineruMode: "precision" }), undefined);
+  // Custom keeps the user base (api/vN suffix stripped) and token.
+  assert.deepEqual(
+    normalizeMineruSettings({
+      mineruMode: "custom",
+      mineruEndpoint: "https://pdf.corp.cn/api/v4/extract/task/",
+      mineruApiKey: "k",
+    }),
+    { mode: "custom", endpoint: "https://pdf.corp.cn", apiKey: "k" },
+  );
+  assert.equal(
+    normalizeMineruSettings({ mineruMode: "custom", mineruEndpoint: "notaurl" }),
+    undefined,
+  );
+  // Legacy state (no mode): official/empty endpoint + token -> precision;
+  // foreign endpoint -> custom; nothing -> unconfigured.
+  assert.deepEqual(
+    normalizeMineruSettings({
+      mineruEndpoint: "https://mineru.net/api/v4/extract/task",
+      mineruApiKey: "tok",
+    }),
+    { mode: "precision", endpoint: "https://mineru.net", apiKey: "tok" },
+  );
+  assert.deepEqual(
+    normalizeMineruSettings({ mineruEndpoint: "https://pdf.corp.cn", mineruApiKey: "k" }),
+    { mode: "custom", endpoint: "https://pdf.corp.cn", apiKey: "k" },
+  );
+  assert.equal(normalizeMineruSettings({}), undefined);
+  assert.equal(normalizeMineruSettings(undefined), undefined);
 });
 
 test("resolvePdfPath confines reads to the session roots", async () => {
