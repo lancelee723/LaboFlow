@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { IconChat, IconPresentation } from "./icons";
 import { useAppStore } from "../stores/app-store";
+import { api } from "../lib/api";
 import { useTranslation } from "react-i18next";
 
 /**
