@@ -1102,9 +1102,9 @@
 .wb-entry-seg {
   position: relative;
   display: inline-flex;
-  background: var(--bg-3, #1b1f26);
-  border: 1px solid var(--border-1, #2a2f38);
-  border-radius: 999px;
+  background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border-default);
+  border-radius: var(--radius-full);
   padding: 3px;
   margin: 2px 0 6px;
 }
@@ -1112,9 +1112,10 @@
   position: absolute;
   top: 3px;
   bottom: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent, #4c8dff) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent, #4c8dff) 45%, transparent);
+  border-radius: var(--radius-full);
+  background: var(--ds-bg-primary);
+  border: 1px solid var(--ds-border-default);
+  box-shadow: var(--ds-elevation-prominent, 0 1px 4px rgb(0 0 0 / 0.14));
   transition: left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .wb-entry-seg button {
@@ -1125,12 +1126,12 @@
   gap: 6px;
   background: none;
   border: none;
-  color: var(--text-2, #8a919c);
+  color: var(--ds-text-muted);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   padding: 6px 18px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   cursor: pointer;
 }
-.wb-entry-seg button.on { color: var(--text-1, #e8eaed); }
-.wb-entry-ico { font-size: 13.5px; }
+.wb-entry-seg button.on { color: var(--ds-text-primary); }
+.wb-entry-ico { flex: none; opacity: 0.9; }

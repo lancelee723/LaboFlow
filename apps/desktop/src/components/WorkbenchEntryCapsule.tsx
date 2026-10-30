@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { IconChat, IconPresentation } from "./icons";
 import { useAppStore } from "../stores/app-store";
 import { useTranslation } from "react-i18next";
 
@@ -57,7 +58,7 @@ export function WorkbenchEntryCapsule() {
         className={mode === "chat" ? "on" : ""}
         onClick={() => pick("chat")}
       >
-        <span className="wb-entry-ico" aria-hidden>💬</span>
+        <IconChat className="wb-entry-ico" size={14} />
         {t("workbench.tabChat", { defaultValue: "通用对话" })}
       </button>
       <button
@@ -67,7 +68,7 @@ export function WorkbenchEntryCapsule() {
         className={mode === "ppt" ? "on" : ""}
         onClick={() => pick("ppt")}
       >
-        <span className="wb-entry-ico" aria-hidden>🖼</span>
+        <IconPresentation className="wb-entry-ico" size={14} />
         {t("workbench.tabPpt", { defaultValue: "PPT 工作台" })}
       </button>
     </div>
