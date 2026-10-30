@@ -18,7 +18,7 @@ const WORKBENCH_SKILL_PREFIX = `/laboflow.ppt-master/ppt-master`;
 export function WorkbenchEntryCapsule() {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"chat" | "ppt">("chat");
-  const setComposerPrefill = useAppStore((s) => s.setComposerPrefill);
+  const setWorkbenchHomePrefill = useAppStore((s) => s.setWorkbenchHomePrefill);
   const clearComposerPrefill = useAppStore((s) => s.clearComposerPrefill);
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const segRef = useRef<HTMLDivElement | null>(null);
@@ -41,11 +41,7 @@ export function WorkbenchEntryCapsule() {
     if (next === "ppt") {
       // Skill invocation sits in the draft as prompt text — nothing is sent
       // until the user completes their request and submits.
-      setComposerPrefill({
-        text: WORKBENCH_SKILL_PREFIX,
-        sessionId: useAppStore.getState().activeSessionId ?? "",
-        fileReferences: [],
-      });
+      setWorkbenchHomePrefill({ text: WORKBENCH_SKILL_PREFIX });
     } else {
       clearComposerPrefill();
     }

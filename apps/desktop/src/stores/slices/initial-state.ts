@@ -82,6 +82,7 @@ export function createInitialState(): AppStateData {
     notifications: [],
     unreadNotificationCount: 0,
     composerPrefill: null,
+    workbenchHomePrefill: null,
     error: null,
     errorCode: null,
     errorRetriable: null,

@@ -355,6 +355,9 @@ export type AppState = {
   dismissToast: (id: number) => void;
   composerPrefill: ComposerPrefill | null;
   clearComposerPrefill: () => void;
+  /** Workbench capsule (home): skill prefix waiting in the composer. */
+  workbenchHomePrefill: { text: string } | null;
+  setWorkbenchHomePrefill: (prefill: { text: string } | null) => void;
   setComposerPrefill: (prefill: ComposerPrefill) => void;
   workPanelOpen: boolean;
   workPanelTabs: WorkPanelTab[];
