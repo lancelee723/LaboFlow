@@ -95,3 +95,22 @@
 
 ## 规模与顺序
 T1→T12 串行（T4–T8 内部可两两并行审查）；预估 4–6 个工作日；M4（元素级批注/视觉复审入口/模板安装链）验收后另立项。
+
+---
+
+## V5 验收记录（2026-10-31，CDP 驱动 + 用户实测对话双轨）
+
+**V5 修复项全部实机验证通过**（会话 4ca6dc9a = 用户实测对话；V5 验收会话走完整管线）：
+
+| # | 项 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | svg_editor project_dir 透传（T1） | ✅ | Agent 首次调用即成功（`--live --daemon <dir>`），live_preview/lock.json 落盘，无键名猜测 |
+| 2 | 会话↔项目绑定 + 空区折叠（T2） | ✅ | 新项目绑定后选择器跟随；大纲/备份空区隐藏 |
+| 3 | 技能 chip 化（T3） | ✅ | "/"补全列表含 ppt-master chip；manifest.renderer 入布 |
+| 4 | 胶囊→全自动（T4） | ✅ | 点击胶囊后权限模式 chip 显示「全自动」 |
+| 5 | U3 指引 + 设计参数确认后继续 | ✅ | 用户回复后模型继续绘制（分块写入 P01/P02） |
+| 6 | 导出走 ppt_script 门禁 | ✅ | 11 次 ppt_script（含 finalize/svg_to_pptx×4），Bash 门禁旁路 0 次；工件登记（exports op=export） |
+| 7 | live-preview 批注回流 | ✅ | 编辑器 API 批注 → save-all → svg_output 带 data-edit-annotation + annotations.jsonl 追加 |
+| 8 | 无 asktool / 无裸 daemon | ✅ | 全程 0 次；编辑器服务以 --live --daemon 托管启动且存活 |
+
+**残余**：模型在"设计参数确认"输出后仍结束回合（需用户一句"继续"，U3 指引已使恢复路径明确）；RPC 宿主修复仍待立项。
