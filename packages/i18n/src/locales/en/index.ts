@@ -252,6 +252,12 @@ export const en = {
     emptyTitleTemporary: "What would you like to explore temporarily?",
     placeholder: "Ask LaboFlow to help with anything",
     placeholderHome: "Ask anything",
+    workbench: {
+      tabChat: "General chat",
+      tabPpt: "PPT workbench",
+      entryAria: "Workbench mode",
+      entryPrompt: "Enter PPT workbench mode. Load the ppt-master skill and collaborate step by step on a presentation; confirm the material and audience with me before starting.",
+    },
     placeholderHint: "Type / for commands · @ for files",
     placeholderHomeHint: "Type / for commands · @ for files",
     placeholderShortcut: "Shift+Enter for newline · Use Send to submit",

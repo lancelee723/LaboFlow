@@ -10,6 +10,7 @@ import { HomeProjectSwitcher } from "./HomeProjectSwitcher";
 import { IconX } from "./icons";
 import { TooltipButton } from "./ui";
 import { OnboardingChecklist } from "./OnboardingChecklist";
+import { WorkbenchEntryCapsule } from "./WorkbenchEntryCapsule";
 import { SessionPane } from "./SessionPane";
 import { ConversationWidthHandles } from "./ConversationWidthHandles";
 import { useAppStore } from "../stores/app-store";
@@ -184,6 +185,7 @@ export const ChatSurface = memo(function ChatSurface({
                   )}
                 </h1>
               </div>
+              <WorkbenchEntryCapsule />
               <OnboardingChecklist />
             </div>
           </div>

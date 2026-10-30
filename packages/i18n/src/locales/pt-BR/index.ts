@@ -254,6 +254,12 @@ export const ptBR = {
     emptyTitleTemporary: "O que você gostaria de explorar temporariamente?",
     placeholder: "Peça ajuda ao LaboFlow para qualquer tarefa",
     placeholderHome: "Pergunte qualquer coisa",
+    workbench: {
+      tabChat: "Conversa geral",
+      tabPpt: "Mesa de trabalho PPT",
+      entryAria: "Modo mesa de trabalho",
+      entryPrompt: "Ative o modo mesa de trabalho PPT. Carregue a skill ppt-master e colabore passo a passo numa apresentação; confirme antes o material e o público.",
+    },
     placeholderHint: "Digite / para comandos · @ para arquivos",
     placeholderHomeHint: "Digite / para comandos · @ para arquivos",
     placeholderShortcut: "Shift+Enter para inserir uma quebra de linha · Use Enviar para enviar",

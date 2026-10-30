@@ -254,6 +254,12 @@ export const ko = {
     emptyTitleTemporary: "무엇을 임시로 탐색해 볼까요?",
     placeholder: "LaboFlow에 무엇이든 도움을 요청하세요",
     placeholderHome: "무엇이든 물어보세요",
+    workbench: {
+      tabChat: "일반 대화",
+      tabPpt: "PPT 워크벤치",
+      entryAria: "워크벤치 모드",
+      entryPrompt: "PPT 워크벤치 모드로 전환합니다. ppt-master 스킬을 로드하고 프레젠테이션 작업을 단계별로 진행합니다. 먼저 자료와 청중을 확인하세요.",
+    },
     placeholderHint: "명령은 / · 파일은 @ 입력",
     placeholderHomeHint: "명령은 / · 파일은 @ 입력",
     placeholderShortcut: "줄바꿈은 Shift+Enter · 보내기를 눌러 제출",

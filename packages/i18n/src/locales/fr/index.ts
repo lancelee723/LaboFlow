@@ -254,6 +254,12 @@ export const fr = {
     emptyTitleTemporary: "Qu'aimeriez-vous explorer temporairement ?",
     placeholder: "Demandez à LaboFlow de vous aider pour tout",
     placeholderHome: "Demandez n'importe quoi",
+    workbench: {
+      tabChat: "Discussion générale",
+      tabPpt: "Atelier PPT",
+      entryAria: "Mode atelier",
+      entryPrompt: "Active le mode atelier PPT. Charge la skill ppt-master et collabore étape par étape à une présentation ; confirme d'abord le support et l'audience.",
+    },
     placeholderHint: "Tapez / pour les commandes · @ pour les fichiers",
     placeholderHomeHint: "Tapez / pour les commandes · @ pour les fichiers",
     placeholderShortcut: "Maj+Entrée pour une nouvelle ligne · Utilisez Envoyer pour soumettre",

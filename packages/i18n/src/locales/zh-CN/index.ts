@@ -254,6 +254,12 @@ export const zhCN = {
     emptyTitleTemporary: "临时聊点什么？",
     placeholder: "让 LaboFlow 帮你做任何事",
     placeholderHome: "随便问问",
+    workbench: {
+      tabChat: "通用对话",
+      tabPpt: "PPT 工作台",
+      entryAria: "工作台模式",
+      entryPrompt: "进入 PPT 工作台模式。请加载 ppt-master 技能并按其规程与我逐步协作完成一份演示文稿；先向我确认本次的素材与受众，再开始。",
+    },
     placeholderHint: "输入 / 使用命令 · @ 引用文件",
     placeholderHomeHint: "输入 / 使用命令 · @ 引用文件",
     placeholderShortcut: "Shift+Enter 换行 · 点击发送提交",

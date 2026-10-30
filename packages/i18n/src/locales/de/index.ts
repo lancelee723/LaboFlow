@@ -254,6 +254,12 @@ export const de = {
     emptyTitleTemporary: "Was würden Sie gerne vorübergehend erkunden?",
     placeholder: "Bitten Sie LaboFlow um Hilfe bei allem",
     placeholderHome: "Fragen Sie alles",
+    workbench: {
+      tabChat: "Allgemeiner Chat",
+      tabPpt: "PPT-Werkbank",
+      entryAria: "Werkbankmodus",
+      entryPrompt: "PPT-Werkbankmodus aktivieren. Lade die ppt-master-Fähigkeit und arbeite Schritt für Schritt mit mir an einer Präsentation; bestätige zuerst Material und Zielgruppe.",
+    },
     placeholderHint: "Geben Sie / für Befehle · @ für Dateien ein",
     placeholderHomeHint: "Geben Sie / für Befehle · @ für Dateien ein",
     placeholderShortcut: "Umschalt+Eingabetaste für Zeilenumbruch · Verwenden Sie Senden, um zu senden",

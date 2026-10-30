@@ -254,6 +254,12 @@ export const tr = {
     emptyTitleTemporary: "Geçici olarak neyi keşfetmek istersiniz?",
     placeholder: "LaboFlow’tan herhangi bir konuda yardım isteyin",
     placeholderHome: "Bir şey sorun",
+    workbench: {
+      tabChat: "Genel sohbet",
+      tabPpt: "PPT workbench",
+      entryAria: "Workbench modu",
+      entryPrompt: "PPT workbench moduna geç. ppt-master skill'ini yükle ve bir sunum için adım adım birlikte çalış; önce materyal ve hedef kitleyi doğrula.",
+    },
     placeholderHint: "Komutlar için / · dosyalar için @ yazın",
     placeholderHomeHint: "Komutlar için / · dosyalar için @ yazın",
     placeholderShortcut: "Yeni satır için Shift+Enter · göndermek için Gönder",

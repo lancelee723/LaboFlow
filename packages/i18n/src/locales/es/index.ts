@@ -254,6 +254,12 @@ export const es = {
     emptyTitleTemporary: "¿Qué te gustaría explorar temporalmente?",
     placeholder: "Pídale ayuda a LaboFlow con cualquier cosa",
     placeholderHome: "Pregunte cualquier cosa",
+    workbench: {
+      tabChat: "Chat general",
+      tabPpt: "Mesa de trabajo PPT",
+      entryAria: "Modo mesa de trabajo",
+      entryPrompt: "Activa el modo mesa de trabajo PPT. Carga la skill ppt-master y colabora paso a paso en una presentación; confirma primero el material y la audiencia.",
+    },
     placeholderHint: "Escriba / para comandos · @ para archivos",
     placeholderHomeHint: "Escriba / para comandos · @ para archivos",
     placeholderShortcut: "Mayús+Entrar para nueva línea · Utilice Enviar para enviar",
