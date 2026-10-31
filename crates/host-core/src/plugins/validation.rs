@@ -37,12 +37,17 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                 bail!("PLUGIN_INVALID: duplicate setting key {key}");
             }
             seen.push(key);
-            if obj
-                .get("title")
-                .and_then(Value::as_str)
-                .map(|title| title.trim().is_empty())
-                .unwrap_or(true)
-            {
+            // A title may be a plain string or a { en, "zh-CN" } object
+            // (ADR 0280 as amended); the per-locale completeness check belongs
+            // to the SDK validator. Here we only require something rendered.
+            let has_title = match obj.get("title") {
+                Some(Value::String(title)) => !title.trim().is_empty(),
+                Some(Value::Object(map)) => map
+                    .values()
+                    .any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)),
+                _ => false,
+            };
+            if !has_title {
                 bail!("PLUGIN_INVALID: setting {key} requires a title");
             }
             let setting_type = obj
@@ -101,7 +106,14 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                     let option = option.as_object().ok_or_else(|| {
                         anyhow!("PLUGIN_INVALID: select setting {key} has an invalid enum option")
                     })?;
-                    if option.get("label").and_then(Value::as_str).is_none()
+                    let has_label = match option.get("label") {
+                        Some(Value::String(label)) => !label.trim().is_empty(),
+                        Some(Value::Object(map)) => map
+                            .values()
+                            .any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)),
+                        _ => false,
+                    };
+                    if !has_label
                         || !option
                             .get("value")
                             .map(|value| {

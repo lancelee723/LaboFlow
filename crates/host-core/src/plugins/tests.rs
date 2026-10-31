@@ -710,6 +710,63 @@ fn capability_manifest(contributes: Value, permissions: Value) -> Value {
     })
 }
 
+#[test]
+fn settings_accept_localized_titles_and_derive_passes_them_through() {
+    let dir = tempdir().unwrap();
+    let settings = json!({ "settings": [
+        {
+            "key": "mode",
+            "type": "select",
+            "title": { "en": "Backend", "zh-CN": "解析通道" },
+            "enum": [
+                { "value": "a", "label": { "en": "Alpha", "zh-CN": "甲" } },
+                { "value": "b", "label": "Plain" }
+            ]
+        },
+        {
+            "key": "key2",
+            "type": "string",
+            "title": { "en": "Token", "zh-CN": "令牌" },
+            "description": { "en": "Help", "zh-CN": "帮助" }
+        }
+    ] });
+    let root = dir.path().join("localized");
+    write_plugin(
+        &root,
+        capability_manifest(settings, json!(["agent.tool.register"])),
+        &[],
+    );
+    let manifest = PluginManager::read_manifest(&root).expect("localized settings must validate");
+    let derived = derive_settings(&manifest);
+    assert_eq!(derived.len(), 2);
+    // Objects pass through untouched; the main process resolves the locale.
+    assert_eq!(
+        derived[0].title,
+        json!({ "en": "Backend", "zh-CN": "解析通道" })
+    );
+    assert_eq!(
+        derived[0].enum_values[0].label,
+        json!({ "en": "Alpha", "zh-CN": "甲" })
+    );
+    assert_eq!(derived[0].enum_values[1].label, json!("Plain"));
+    assert_eq!(
+        derived[1].description,
+        Some(json!({ "en": "Help", "zh-CN": "帮助" }))
+    );
+
+    // Nothing renderable is still rejected.
+    let empty = dir.path().join("empty-title");
+    write_plugin(
+        &empty,
+        capability_manifest(
+            json!({ "settings": [{ "key": "k", "type": "string", "title": { "en": "  ", "zh-CN": "  " } }] }),
+            json!([]),
+        ),
+        &[],
+    );
+    assert!(read_manifest_err(&empty).contains("requires a title"));
+}
+
 fn read_manifest_err(root: &Path) -> String {
     PluginManager::read_manifest(root)
         .expect_err("manifest should be rejected")

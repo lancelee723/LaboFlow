@@ -411,6 +411,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     rememberPluginScopes,
     sendToRenderer,
     logger,
+    getUpdaterLocale,
   });
 
 

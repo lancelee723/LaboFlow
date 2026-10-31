@@ -3,7 +3,10 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSettingOption {
-    pub label: String,
+    /// Plain string (author-language) or a `{ en, "zh-CN" }` object passed
+    /// through; the main process resolves it against the UI locale (ADR 0280
+    /// as amended), so host-core never needs a locale.
+    pub label: Value,
     pub value: Value,
 }
 
@@ -11,9 +14,11 @@ pub struct PluginSettingOption {
 #[serde(rename_all = "camelCase")]
 pub struct PluginSettingDefinition {
     pub key: String,
-    pub title: String,
+    /// Plain string (author-language) or a `{ en, "zh-CN" }` object; see
+    /// [`PluginSettingOption::label`].
+    pub title: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    pub description: Option<Value>,
     #[serde(rename = "type")]
     pub setting_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -16,11 +16,8 @@ pub(crate) fn derive_settings(manifest: &PluginManifest) -> Vec<PluginSettingDef
             let obj = entry.as_object()?;
             Some(PluginSettingDefinition {
                 key: obj.get("key")?.as_str()?.to_string(),
-                title: obj.get("title")?.as_str()?.to_string(),
-                description: obj
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                title: obj.get("title").cloned().unwrap_or(Value::Null),
+                description: obj.get("description").cloned(),
                 setting_type: obj.get("type")?.as_str()?.to_string(),
                 default: obj.get("default").cloned(),
                 enum_values: obj
@@ -32,7 +29,7 @@ pub(crate) fn derive_settings(manifest: &PluginManifest) -> Vec<PluginSettingDef
                             .filter_map(|value| {
                                 let option = value.as_object()?;
                                 Some(PluginSettingOption {
-                                    label: option.get("label")?.as_str()?.to_string(),
+                                    label: option.get("label").cloned().unwrap_or(Value::Null),
                                     value: option.get("value")?.clone(),
                                 })
                             })

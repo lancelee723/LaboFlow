@@ -28,6 +28,49 @@ export type PluginIpcDependencies = {
   logger: Pick<Logger, "app">;
 };
 
+/**
+ * Localized definitions straight from host-core may still carry
+ * `{ en, "zh-CN" }` objects (host-core passes them through untouched);
+ * the renderer contract is plain strings, resolved against the UI locale —
+ * the same resolution the running-plugin settings view applies (ADR 0280
+ * as amended).
+ */
+function localizeSettingsDefinitions(
+  settings: Array<Record<string, unknown>>,
+  locale: string | undefined,
+): Array<Record<string, unknown>> {
+  const resolve = (value: unknown): unknown => {
+    if (typeof value === "string" || value === undefined) return value;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const localized = value as { en?: unknown; "zh-CN"?: unknown };
+      const zh = typeof localized["zh-CN"] === "string" ? localized["zh-CN"] : undefined;
+      const en = typeof localized.en === "string" ? localized.en : undefined;
+      const normalized = locale?.replaceAll("_", "-").toLowerCase();
+      const simplified =
+        normalized === "zh" || normalized === "zh-cn" || normalized?.startsWith("zh-cn-") ||
+        normalized === "zh-hans" || normalized?.startsWith("zh-hans-") ||
+        normalized === "zh-sg" || normalized?.startsWith("zh-sg-");
+      return (simplified ? zh ?? en : en ?? zh) ?? value;
+    }
+    return value;
+  };
+  return settings.map((setting) => ({
+    ...setting,
+    title: resolve(setting.title),
+    ...(setting.description !== undefined
+      ? { description: resolve(setting.description) }
+      : {}),
+    ...(Array.isArray(setting.enum)
+      ? {
+          enum: setting.enum.map((option: Record<string, unknown>) => ({
+            ...option,
+            label: resolve(option.label),
+          })),
+        }
+      : {}),
+  }));
+}
+
 /** Register plugin lifecycle, settings and installation channels. */
 export function registerPluginIpc({
   registrar,
@@ -40,7 +83,8 @@ export function registerPluginIpc({
   rememberPluginScopes,
   sendToRenderer,
   logger,
-}: PluginIpcDependencies): void {
+  getUpdaterLocale,
+}: PluginIpcDependencies & { getUpdaterLocale: () => string }): void {
   let host: HostProcess | null = null;
   const handle = (channel: string, fn: (...args: any[]) => Promise<any>) => {
     registrar.handle(channel, async (...args) => {
@@ -130,7 +174,14 @@ export function registerPluginIpc({
         // row: a plugin that is not running has nothing to load.
         const renderer = plugin?.id ? plugins.rendererDescriptor(plugin.id) : undefined;
         const withRenderer = renderer ? { ...withExtension, renderer } : withExtension;
-        if (!plugin?.settings?.length || !plugins.getLoaded(plugin.id)) return withRenderer;
+        if (!plugin?.settings?.length || !plugins.getLoaded(plugin.id)) {
+          // Not running: host-core passed the raw definitions through, so the
+          // same locale resolution applies before the sheet ever sees them.
+          return {
+            ...withRenderer,
+            settings: localizeSettingsDefinitions(plugin.settings, getUpdaterLocale()),
+          };
+        }
         try {
           const settings = await plugins.getPluginSettings(plugin.id);
           return { ...withRenderer, settings };
