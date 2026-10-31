@@ -825,3 +825,34 @@
 .composer-directory-drop-action:hover {
   background: var(--ds-tile-hover);
 }
+
+
+/* ── Workbench-mode chip (PPT 工作台 capsule) ─────────────────────────── */
+.workbench-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 0 0 6px 4px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--ds-bg-chip);
+  border: 1px solid var(--ds-border-default);
+  color: var(--ds-text-secondary);
+  font-size: var(--text-sm);
+}
+.workbench-mode-chip span { font-weight: 500; }
+.workbench-mode-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: none;
+  color: var(--ds-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.workbench-mode-chip-x:hover { color: var(--ds-text-primary); background: var(--ds-bg-hover); }

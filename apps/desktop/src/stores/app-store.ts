@@ -470,9 +470,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
   clearComposerPrefill: () => {
     set({ composerPrefill: null });
-    set({ workbenchHomePrefill: null });
   },
-  setWorkbenchHomePrefill: (prefill) => set({ workbenchHomePrefill: prefill }),
+  setWorkbenchMode: (on) => set({ workbenchMode: on }),
   setComposerPrefill: (prefill: ComposerPrefill) => set({ composerPrefill: prefill }),
   };
 });

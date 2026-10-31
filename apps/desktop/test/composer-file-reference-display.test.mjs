@@ -83,7 +83,7 @@ test("composer renders atomic inline chips and serializes paths on send", () => 
   );
   assert.match(
     composer,
-    /sendPrompt\(\s*inlineContent,\s*submittedDraft,\s*activeSessionId \?\? undefined,\s*captureAcceptedSession,\s*\)/,
+    /sendPrompt\(\s*(workbenchContent|inlineContent),\s*submittedDraft,\s*activeSessionId \?\? undefined,\s*captureAcceptedSession,\s*\)/,
   );
   assert.match(composer, /serializeInlineComposerFileReferences\(/);
   assert.match(composer, /current\.filter\(/);

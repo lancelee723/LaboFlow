@@ -355,9 +355,10 @@ export type AppState = {
   dismissToast: (id: number) => void;
   composerPrefill: ComposerPrefill | null;
   clearComposerPrefill: () => void;
-  /** Workbench capsule (home): skill prefix waiting in the composer. */
-  workbenchHomePrefill: { text: string } | null;
-  setWorkbenchHomePrefill: (prefill: { text: string } | null) => void;
+  /** Workbench capsule (home): composer is in workbench mode — the skill
+   * invocation is prepended invisibly at submit. */
+  workbenchMode: boolean;
+  setWorkbenchMode: (on: boolean) => void;
   setComposerPrefill: (prefill: ComposerPrefill) => void;
   workPanelOpen: boolean;
   workPanelTabs: WorkPanelTab[];

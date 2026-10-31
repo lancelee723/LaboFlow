@@ -23,6 +23,8 @@ import type { ComposerDraftController } from "./useComposerDraft";
 
 type UseComposerSubmitOptions = {
   value: string;
+  /** Workbench capsule: prepend the ppt-master skill invocation invisibly. */
+  workbenchMode?: boolean;
   draftKey: string;
   activeSessionId: string | null | undefined;
   providerId?: string;
@@ -35,6 +37,8 @@ type UseComposerSubmitOptions = {
   t: TFunction;
   sendPrompt: AppState["sendPrompt"];
   steerPrompt: AppState["steerPrompt"];
+  /** Clear the workbench flag after the first send consumed it. */
+  setWorkbenchModeOff?: () => void;
   showToast: AppState["showToast"];
   /** Record an accepted submission for ArrowUp recall. */
   recordHistory?: (snapshot: ComposerDraftSnapshot, sessionId: string) => void;
@@ -67,6 +71,7 @@ export type ComposerSubmitController = {
  * draft clearing remain independent from editor rendering.
  */
 export function useComposerSubmit({
+  workbenchMode,
   value,
   draftKey,
   activeSessionId,
@@ -82,6 +87,7 @@ export function useComposerSubmit({
   steerPrompt,
   showToast,
   recordHistory,
+  setWorkbenchModeOff,
   draft,
 }: UseComposerSubmitOptions): ComposerSubmitController {
   const [enhancingPrompt, setEnhancingPrompt] = useState(false);
@@ -308,14 +314,22 @@ export function useComposerSubmit({
       return;
     }
     draft.clearDraftForKey(submittedDraftKey, submittedDraftRevision, submittedDraft);
+    // Workbench capsule (V5-T4b): the first send from workbench mode carries
+    // the skill invocation invisibly — it never appeared in the composer, so
+    // it must not appear in the user's recall history either.
+    const workbenchContent =
+      workbenchMode && !steering
+        ? `/laboflow.ppt-master/ppt-master\n${inlineContent}`
+        : inlineContent;
     const accepted = steering
       ? await steerPrompt(inlineContent, submittedDraft)
       : await sendPrompt(
-          inlineContent,
+          workbenchContent,
           submittedDraft,
           activeSessionId ?? undefined,
           captureAcceptedSession,
         );
+    if (workbenchMode && !steering) setWorkbenchModeOff?.();
     if (!accepted) draft.restoreDraftForKey(submittedDraftKey, submittedDraft);
     else remember();
   };

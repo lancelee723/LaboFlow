@@ -19,8 +19,7 @@ const WORKBENCH_SKILL_PREFIX = `/laboflow.ppt-master/ppt-master`;
 export function WorkbenchEntryCapsule() {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"chat" | "ppt">("chat");
-  const setWorkbenchHomePrefill = useAppStore((s) => s.setWorkbenchHomePrefill);
-  const clearComposerPrefill = useAppStore((s) => s.clearComposerPrefill);
+  const setWorkbenchMode = useAppStore((s) => s.setWorkbenchMode);
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const segRef = useRef<HTMLDivElement | null>(null);
 
@@ -40,9 +39,9 @@ export function WorkbenchEntryCapsule() {
   const pick = (next: "chat" | "ppt") => {
     setMode(next);
     if (next === "ppt") {
-      // Skill invocation sits in the draft as prompt text — nothing is sent
-      // until the user completes their request and submits.
-      setWorkbenchHomePrefill({ text: WORKBENCH_SKILL_PREFIX });
+      // No draft text, no popup (user review): the composer shows a mode
+      // chip; the skill invocation is prepended invisibly at submit time.
+      setWorkbenchMode(true);
       // V5-T4: the pipeline fires dozens of tool calls; per-call approval
       // breaks the flow. Persist full-auto as the default permission mode
       // through the same settings API the settings page uses.
@@ -58,7 +57,7 @@ export function WorkbenchEntryCapsule() {
         }
       })();
     } else {
-      clearComposerPrefill();
+      setWorkbenchMode(false);
     }
   };
 

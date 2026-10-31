@@ -62,6 +62,7 @@ import { useComposerModelMenu } from "../features/chat/composer/hooks/useCompose
 import { useVoiceInput } from "../features/voice/useVoiceInput";
 import { ComposerToolbar } from "../features/chat/composer/ComposerToolbar";
 import { ComposerStatus } from "../features/chat/composer/ComposerStatus";
+import { IconClose, IconPresentation } from "./icons";
 
 const EMPTY_QUEUED_PROMPTS: QueuedPrompt[] = [];
 
@@ -126,6 +127,8 @@ export function Composer({
   const configureActiveSession = useAppStore((s) => s.configureActiveSession);
   const showToast = useAppStore((s) => s.showToast);
   const composerPrefill = useAppStore((s) => s.composerPrefill);
+  const workbenchMode = useAppStore((s) => s.workbenchMode);
+  const setWorkbenchMode = useAppStore((s) => s.setWorkbenchMode);
   const clearComposerPrefill = useAppStore((s) => s.clearComposerPrefill);
   const planCheckpoint = useAppStore((s) =>
     s.activeSessionId ? s.planCheckpoints[s.activeSessionId] : undefined,
@@ -253,7 +256,10 @@ export function Composer({
   const placeholderKeys = PLACEHOLDER_KEYS[variant];
   const placeholderKey =
     placeholderKeys[placeholderIndex % placeholderKeys.length] ?? placeholderKeys[0];
-  const placeholderText = t(placeholderKey);
+  // Workbench capsule: the composer waits for the user's demo request.
+  const placeholderText = workbenchMode
+    ? t("chat.workbenchPlaceholder", { defaultValue: "描述你的演示任务，或粘贴脚本稿…" })
+    : t(placeholderKey);
 
   const textareaMetricsRef = useRef<{ lineHeight: number; verticalChrome: number } | null>(null);
   const appliedHeightRef = useRef<number | null>(null);
@@ -415,6 +421,8 @@ export function Composer({
   }, [controlsBlocked]);
 
   const submitController = useComposerSubmit({
+    setWorkbenchModeOff: () => setWorkbenchMode(false),
+    workbenchMode,
     value,
     draftKey,
     activeSessionId,
@@ -612,6 +620,20 @@ export function Composer({
       data-composer-dock={variant}
     >
       <div className="composer-stack">
+        {workbenchMode ? (
+          <div className="workbench-mode-chip" data-testid="workbench-mode-chip">
+            <IconPresentation size={13} />
+            <span>PPT 工作台</span>
+            <button
+              type="button"
+              className="workbench-mode-chip-x"
+              aria-label="退出工作台模式"
+              onClick={() => setWorkbenchMode(false)}
+            >
+              <IconClose size={11} />
+            </button>
+          </div>
+        ) : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />
         ) : null}

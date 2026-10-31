@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   messageHasTranscriptContent,
@@ -142,12 +142,6 @@ export const ChatSurface = memo(function ChatSurface({
     : showVendorModelError
       ? "MODEL_NOT_CONFIGURED"
       : null;
-  // Workbench capsule (home): skill prefix waiting in the composer draft.
-  const homeWorkbenchPrefill = useAppStore((state) => state.workbenchHomePrefill);
-  const [homeWorkbenchPrefillToken, setHomeWorkbenchPrefillToken] = useState(0);
-  useEffect(() => {
-    if (homeWorkbenchPrefill) setHomeWorkbenchPrefillToken(Date.now());
-  }, [homeWorkbenchPrefill]);
   return (
     <div
       className={`chat-surface route-surface${sessionSwitching ? " session-switching" : ""}`}
@@ -196,10 +190,7 @@ export const ChatSurface = memo(function ChatSurface({
             </div>
           </div>
           <div className="home-composer-wrap">
-            <StableComposer
-              variant="home"
-              prefill={homeWorkbenchPrefill ? { text: homeWorkbenchPrefill.text, token: homeWorkbenchPrefillToken } : null}
-            />
+            <StableComposer variant="home" />
           </div>
         </div>
       ) : (
