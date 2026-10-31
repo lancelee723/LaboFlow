@@ -1656,10 +1656,19 @@ export function validateContributions(
         return `select setting "${setting.key}" requires enum options`;
       }
       for (const option of setting.enum) {
+        // Label accepts a plain string or a { en, "zh-CN" } object, matching
+        // the contribution validator above (ADR 0280 as amended).
+        const label = option?.label;
+        const labelOk =
+          typeof label === "string" ||
+          (typeof label === "object" &&
+            label !== null &&
+            !Array.isArray(label) &&
+            (typeof label.en === "string" || typeof label["zh-CN"] === "string"));
         if (
           !option ||
           typeof option !== "object" ||
-          typeof option.label !== "string" ||
+          !labelOk ||
           !["string", "number", "boolean"].includes(typeof option.value)
         ) {
           return `select setting "${setting.key}" has an invalid enum option`;
