@@ -80,6 +80,24 @@
         }
       },
       {
+        "key": "mineruEndpoint",
+        "type": "string",
+        "title": {
+          "en": "Base URL",
+          "zh-CN": "服务基地址"
+        },
+        "description": {
+          "en": "Base URL only, e.g. https://mineru.example.com — the tool appends /api/v4/... itself; never paste a full endpoint URL.",
+          "zh-CN": "只填基地址，例如 https://mineru.example.com——工具自动追加 /api/v4/... 路径，勿粘贴完整接口 URL。"
+        },
+        "visibleWhen": {
+          "key": "mineruMode",
+          "equals": [
+            "custom"
+          ]
+        }
+      },
+      {
         "key": "mineruApiKey",
         "type": "string",
         "title": {
@@ -94,24 +112,6 @@
           "key": "mineruMode",
           "equals": [
             "precision",
-            "custom"
-          ]
-        }
-      },
-      {
-        "key": "mineruEndpoint",
-        "type": "string",
-        "title": {
-          "en": "Base URL",
-          "zh-CN": "服务基地址"
-        },
-        "description": {
-          "en": "Base URL only, e.g. https://mineru.example.com — the tool appends /api/v4/... itself; never paste a full endpoint URL.",
-          "zh-CN": "只填基地址，例如 https://mineru.example.com——工具自动追加 /api/v4/... 路径，勿粘贴完整接口 URL。"
-        },
-        "visibleWhen": {
-          "key": "mineruMode",
-          "equals": [
             "custom"
           ]
         }
