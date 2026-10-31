@@ -26,12 +26,18 @@ test("plugin settings expose generated fields and plugin-local shortcut metadata
   assert.match(sheet, /api\.setPluginSettings/);
 });
 
-test("generated settings localize in the host settings view; the sheet stays string-only (ADR 0280 as amended)", () => {
+test("generated settings localize in the host settings view; the sheet stays string-only (ADR 0280 as amended)", async () => {
   // The manifest may declare { en, "zh-CN" } on title/description/enum labels.
   assert.match(sdk, /export type PluginSettingContrib = \{[\s\S]*?title: string \| PluginLocalizedString/);
   // The host resolves them to plain strings before the sheet renders, so the
   // renderer never parses a manifest (ADR 0267).
   assert.match(runtime, /resolvePluginLocalizedString\(value, locale\)/);
+  // The list handler's fallback path must guard absent settings — a plugin
+  // without settings contributions crashed the whole boot chain once.
+  assert.match(
+    await read("../electron/main/ipc/plugin-ipc.ts"),
+    /Array\.isArray\(plugin\.settings\)\s*\?\s*localizeSettingsDefinitions/,
+  );
   assert.doesNotMatch(sheet, /resolvePluginLocalizedString/);
   assert.match(main, /plugins\.broadcastEvent\("appearance:changed"/);
   assert.match(sdk, /getLocale: \(\) => Promise<string>/);

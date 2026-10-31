@@ -174,12 +174,15 @@ export function registerPluginIpc({
         // row: a plugin that is not running has nothing to load.
         const renderer = plugin?.id ? plugins.rendererDescriptor(plugin.id) : undefined;
         const withRenderer = renderer ? { ...withExtension, renderer } : withExtension;
-        if (!plugin?.settings?.length || !plugins.getLoaded(plugin.id)) {
+        if (!plugins.getLoaded(plugin.id)) {
           // Not running: host-core passed the raw definitions through, so the
           // same locale resolution applies before the sheet ever sees them.
+          // Settings may be absent entirely — the array check guards the map.
           return {
             ...withRenderer,
-            settings: localizeSettingsDefinitions(plugin.settings, getUpdaterLocale()),
+            settings: Array.isArray(plugin.settings)
+              ? localizeSettingsDefinitions(plugin.settings, getUpdaterLocale())
+              : undefined,
           };
         }
         try {
