@@ -172,7 +172,7 @@ export function ComposerToolbar({
   } | null>(null);
   const [contextQuery, setContextQuery] = useState("");
   const [plusSkills, setPlusSkills] = useState<
-    Array<{ name: string; title?: string; description?: string }> | null
+    Array<{ id: string; name: string; title?: string; description?: string }> | null
   >(null);
   const [plusExperts, setPlusExperts] = useState<ExpertListItem[] | null>(null);
   const [plusTeams, setPlusTeams] = useState<ExpertTeamListItem[] | null>(null);
@@ -221,10 +221,22 @@ export function ComposerToolbar({
   useEffect(() => {
     if (!plusMenuOpen || !plusSkillMode || plusSkills) return;
     let cancelled = false;
+    // Same merged source the "/" menu uses (builtin + plugin + user skills,
+    // project-filtered), so every surface lists the same skill set; only the
+    // insertion format differs ($name here, /name on slash accept).
     api
-      .listUserSkills({ level: "global" })
+      .composerCommands()
       .then((result) => {
-        if (!cancelled) setPlusSkills(result.skills ?? []);
+        if (cancelled) return;
+        const skills = (result.commands ?? [])
+          .filter((command) => command.kind === "skill")
+          .map((command) => ({
+            id: command.skillId ?? command.name,
+            name: command.name,
+            title: command.title,
+            description: command.description,
+          }));
+        setPlusSkills(skills);
       })
       .catch(() => {
         if (!cancelled) setPlusSkills([]);
@@ -459,22 +471,24 @@ export function ComposerToolbar({
                 </>
               ) : plusSkillMode ? (
                 <>
-                  {(plusSkills ?? []).map((skill: { name: string; title?: string; description?: string }) => (
-                    <button
-                      key={skill.name}
-                      type="button"
-                      role="menuitem"
-                      className="composer-plus-item"
-                      title={skill.description || undefined}
-                      onClick={() => {
-                        closePlusMenu();
-                        insertComposerText(`$${skill.name} `);
-                      }}
-                    >
-                      <IconPlug size={14} />
-                      <span>{skill.title || skill.name}</span>
-                    </button>
-                  ))}
+                  {(plusSkills ?? []).map(
+                    (skill: { id: string; name: string; title?: string; description?: string }) => (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        role="menuitem"
+                        className="composer-plus-item"
+                        title={skill.description || undefined}
+                        onClick={() => {
+                          closePlusMenu();
+                          insertComposerText(`$${skill.id} `);
+                        }}
+                      >
+                        <IconPlug size={14} />
+                        <span>{skill.title || skill.name}</span>
+                      </button>
+                    ),
+                  )}
                   {plusSkills && !plusSkills.length ? (
                     <div className="composer-plus-empty">{t("chat.noSkillsYet")}</div>
                   ) : null}

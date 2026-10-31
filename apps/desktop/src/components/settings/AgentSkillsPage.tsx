@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   GLOBAL_SCOPE,
@@ -39,6 +39,7 @@ import {
   IconFileText,
   IconFolderOpen,
   IconPencil,
+  IconPlug,
   IconPlus,
   IconTrash,
 } from "../icons";
@@ -105,6 +106,36 @@ export function AgentSkillsPage() {
   const [view, setView] = useState<"skills" | "market">("skills");
   const [saving, setSaving] = useState(false);
   const { armed, setArmed } = useArmedDelete();
+
+  // Read-only catalog of plugin-contributed and builtin skills — the same
+  // merged source the composer menus use, so the settings page shows every
+  // skill a session can reach, not only the user-owned ones.
+  const [catalogSkills, setCatalogSkills] = useState<
+    Array<{ id: string; name: string; description?: string }> | null
+  >(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .composerCommands()
+      .then((result) => {
+        if (cancelled) return;
+        setCatalogSkills(
+          (result.commands ?? [])
+            .filter((command) => command.kind === "skill")
+            .map((command) => ({
+              id: command.skillId ?? command.name,
+              name: command.title || command.name,
+              description: command.description,
+            })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rowKey = (level: AgentCapabilityLevel, id: string) => `${level}:${id}`;
 
@@ -669,6 +700,46 @@ export function AgentSkillsPage() {
                 )}
               </>
             ) : null}
+            {(() => {
+              // Plugin/builtin skills, minus the user-owned rows already
+              // listed above. Read-only: they are managed by their plugin.
+              const userSkillIds = new Set(
+                [...globalSkills, ...projectSkills].map((skill) => skill.id),
+              );
+              const needle = search.trim().toLowerCase();
+              const rows = (catalogSkills ?? [])
+                .filter((skill) => !userSkillIds.has(skill.id))
+                .filter(
+                  (skill) =>
+                    !needle ||
+                    skill.name.toLowerCase().includes(needle) ||
+                    skill.id.toLowerCase().includes(needle) ||
+                    (skill.description ?? "").toLowerCase().includes(needle),
+                );
+              if (!rows.length) return null;
+              return (
+                <>
+                  <CapabilityGroupHeader
+                    label={t("settings.pluginSkillsGroup")}
+                    count={rows.length}
+                  />
+                  {rows.map((skill) => (
+                    <CapabilityRow
+                      key={`catalog:${skill.id}`}
+                      glyph={<IconPlug size={16} />}
+                      name={skill.name}
+                      description={skill.description || t("settings.noCapabilityDescription")}
+                      badges={
+                        <span className="agent-capability-badge">
+                          {t("settings.pluginSkillsBadge")}
+                        </span>
+                      }
+                      actions={<></>}
+                    />
+                  ))}
+                </>
+              );
+            })()}
           </>
         )}
       </CapabilityPanel>

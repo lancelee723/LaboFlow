@@ -152,9 +152,18 @@ test("composer opens an insert menu from the plus button with attach, @ context,
   assert.match(composer, /composerAttachSession/);
   assert.match(composer, /attachSessionContext/);
   assert.match(composer, /plusContextMode/);
-  // Skills land in the prompt as a $name token.
-  assert.match(composer, /insertComposerText\(`\$\$\{skill\.name\} `\)/);
-  assert.match(composer, /listUserSkills/);
+  // Skills land in the prompt as a $id token. The plus menu lists the SAME
+  // merged skill source as the "/" menu (builtin + plugin + user,
+  // project-filtered) — entry unification, not a second skill list.
+  assert.match(composer, /insertComposerText\(`\$\$\{skill\.id\} `\)/);
+  assert.match(
+    composer,
+    /api\s*\.\s*composerCommands\(\)[\s\S]*?kind === "skill"/,
+  );
+  assert.doesNotMatch(
+    composer,
+    /listUserSkills\(\{ level: "global" \}\)\.then[\s\S]*?setPlusSkills/,
+  );
 });
 
 test("composer ignores repeated picker clicks while selection is in flight", () => {
