@@ -384,16 +384,20 @@ export type PluginSettingType =
   | "shortcut";
 
 export type PluginSettingOption = {
-  label: string;
+  label: string | PluginLocalizedString;
   value: string | number | boolean;
 };
 
 export type PluginSettingContrib = {
   key: string;
-  /** Author-language label for the generated sheet. Not a locale map (ADR 0280). */
-  title: string;
-  /** Author-language help text for the generated sheet. */
-  description?: string;
+  /**
+   * Row label. A plain string stays author-language (ADR 0280); a
+   * `{ en, "zh-CN" }` object is resolved against the host UI locale by the
+   * settings view before the sheet ever sees it.
+   */
+  title: string | PluginLocalizedString;
+  /** Help text for the "?" mark; localized like `title`. */
+  description?: string | PluginLocalizedString;
   type: PluginSettingType;
   default?: unknown;
   enum?: PluginSettingOption[];
@@ -1588,7 +1592,9 @@ export function validateContributions(
     }
     settingKeys.add(setting.key);
     if (typeof setting.title !== "string" || !setting.title.trim()) {
-      return `setting "${setting.key}" requires a title`;
+      const objectTitle =
+        setting.title && typeof setting.title === "object" && !Array.isArray(setting.title);
+      if (!objectTitle) return `setting "${setting.key}" requires a title`;
     }
     if (
       setting.type !== "string" &&
@@ -1602,6 +1608,19 @@ export function validateContributions(
     }
     if (setting.secret === true) {
       return `setting "${setting.key}" cannot be secret in this release`;
+    }
+    const titleLocalizedError = localizedStringError(setting.title, `setting "${setting.key}" title`);
+    if (titleLocalizedError) return titleLocalizedError;
+    if (setting.description !== undefined) {
+      const descriptionError = localizedStringError(
+        setting.description,
+        `setting "${setting.key}" description`,
+      );
+      if (descriptionError) return descriptionError;
+    }
+    for (const option of setting.enum ?? []) {
+      const labelError = localizedStringError(option.label, `setting "${setting.key}" enum label`);
+      if (labelError) return labelError;
     }
     if (setting.visibleWhen !== undefined) {
       const gate = setting.visibleWhen;

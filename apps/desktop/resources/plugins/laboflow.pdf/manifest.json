@@ -46,29 +46,50 @@
       {
         "key": "mineruMode",
         "type": "select",
-        "title": "解析通道 / Parsing backend",
+        "title": {
+          "en": "Parsing backend",
+          "zh-CN": "解析通道"
+        },
         "default": "precision",
         "enum": [
           {
             "value": "precision",
-            "label": "MinerU 精准解析（官方云，需 Token）/ Precision (official cloud, token)"
+            "label": {
+              "en": "Precision (token)",
+              "zh-CN": "精准（官方，需 Token）"
+            }
           },
           {
             "value": "agent",
-            "label": "MinerU Agent 轻量解析（官方云，免 Token）/ Agent lightweight (official cloud, no token)"
+            "label": {
+              "en": "Lightweight (no token)",
+              "zh-CN": "轻量（官方，无需 Token）"
+            }
           },
           {
             "value": "custom",
-            "label": "自定义 / 自建部署（手动填写）/ Custom endpoint (manual)"
+            "label": {
+              "en": "Custom",
+              "zh-CN": "自定义"
+            }
           }
         ],
-        "description": "精准解析：表格/公式识别最全，需 Token，官方每日 1000 页高优先级额度。Agent 轻量解析：免 Token（按 IP 限速），速度最快，仅输出 Markdown。自定义：指向自建或其他部署，需暴露与官方 v4 相同的接口。/ Precision: richest tables & formulas, token required, 1000 priority pages/day. Agent lightweight: no token (IP rate-limited), fastest, Markdown only. Custom: your own deployment exposing the same v4 API."
+        "description": {
+          "en": "Precision: richest tables/formulas, token required. Lightweight: tokenless and fastest, Markdown only. Custom: your own v4-compatible deployment.",
+          "zh-CN": "精准：表格/公式最全，需 Token；轻量：免 Token、最快，仅 Markdown；自定义：自建或其他 v4 兼容部署。"
+        }
       },
       {
         "key": "mineruApiKey",
         "type": "string",
-        "title": "MinerU Token",
-        "description": "精准解析：登录 mineru.net → 「API」页创建 Token 后原样粘贴；自定义部署填对应 Token。Agent 轻量解析无需填写。/ Precision: create a token at mineru.net → API page and paste it; custom: your deployment's token. Not needed for Agent lightweight.",
+        "title": {
+          "en": "MinerU token",
+          "zh-CN": "MinerU Token"
+        },
+        "description": {
+          "en": "Precision: create a token at mineru.net → API page and paste it. Custom: your deployment's token. Not needed for Lightweight.",
+          "zh-CN": "精准解析：登录 mineru.net →「API」页创建 Token 后原样粘贴；自定义：填对应 Token；轻量无需填写。"
+        },
         "visibleWhen": {
           "key": "mineruMode",
           "equals": [
@@ -80,8 +101,14 @@
       {
         "key": "mineruEndpoint",
         "type": "string",
-        "title": "服务基地址 / Base URL",
-        "description": "只填基地址，例如 https://mineru.example.com——工具会自动追加 /api/v4/... 路径，不要粘贴完整接口 URL。/ Base URL only, e.g. https://mineru.example.com — the tool appends /api/v4/... itself; never paste a full endpoint URL.",
+        "title": {
+          "en": "Base URL",
+          "zh-CN": "服务基地址"
+        },
+        "description": {
+          "en": "Base URL only, e.g. https://mineru.example.com — the tool appends /api/v4/... itself; never paste a full endpoint URL.",
+          "zh-CN": "只填基地址，例如 https://mineru.example.com——工具自动追加 /api/v4/... 路径，勿粘贴完整接口 URL。"
+        },
         "visibleWhen": {
           "key": "mineruMode",
           "equals": [

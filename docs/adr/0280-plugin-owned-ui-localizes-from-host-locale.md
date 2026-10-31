@@ -1,6 +1,7 @@
 # ADR 0280: Plugin-Owned UI Localizes from the Host Locale
 
-- **Status**: Accepted
+- **Status**: Accepted (Amended 2026-10-16: host-rendered generated settings
+  may declare `{ en, "zh-CN" }`, resolved by the host — see Decision 3a)
 - **Date**: 2026-09-17
 - **Related**: [ADR 0009](0009-english-first-globalization.md) ·
   [ADR 0082](0082-localized-plugin-panel-chrome.md) ·
@@ -37,6 +38,14 @@ A plugin process can already read the app language (`pi.app.getLocale`,
    Generated `contributes.settings` `title` / `description` / `enum[].label`
    stay author-language plain strings. A plugin that needs a localized
    settings surface ships `settingsDestinations`.
+   3a. **Amendment (2026-10-16)**: the generated settings sheet is the one
+   exception. Its `title` / `description` / `enum[].label` may declare
+   `{ en, "zh-CN" }`; the host resolves them against the active UI locale in
+   the settings view, so the sheet still renders plain strings and the
+   renderer stays manifest-free (per ADR 0267). Plain strings remain valid
+   author-language fallbacks, and plugin-owned UI localization in (2) is
+   unchanged. Product decision: settings are the host's own dialog, unlike
+   panels a plugin fully controls.
 4. Host-owned surfaces that render without plugin code keep the contracts
    they already have: `manifest.i18n` (ADR 0267) and the shipped chrome
    labels in (2) of the Context.

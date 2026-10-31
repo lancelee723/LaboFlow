@@ -26,13 +26,13 @@ test("plugin settings expose generated fields and plugin-local shortcut metadata
   assert.match(sheet, /api\.setPluginSettings/);
 });
 
-test("generated plugin settings stay author-language; plugins localize from the host locale", () => {
-  assert.match(sdk, /export type PluginSettingContrib = \{[\s\S]*?title: string;/);
-  assert.doesNotMatch(
-    sdk,
-    /export type PluginSettingContrib = \{[\s\S]*?title: string \| PluginLocalizedString/,
-  );
-  assert.doesNotMatch(runtime, /resolvePluginLocalizedString\(setting\.title/);
+test("generated settings localize in the host settings view; the sheet stays string-only (ADR 0280 as amended)", () => {
+  // The manifest may declare { en, "zh-CN" } on title/description/enum labels.
+  assert.match(sdk, /export type PluginSettingContrib = \{[\s\S]*?title: string \| PluginLocalizedString/);
+  // The host resolves them to plain strings before the sheet renders, so the
+  // renderer never parses a manifest (ADR 0267).
+  assert.match(runtime, /resolvePluginLocalizedString\(value, locale\)/);
+  assert.doesNotMatch(sheet, /resolvePluginLocalizedString/);
   assert.match(main, /plugins\.broadcastEvent\("appearance:changed"/);
   assert.match(sdk, /getLocale: \(\) => Promise<string>/);
 });

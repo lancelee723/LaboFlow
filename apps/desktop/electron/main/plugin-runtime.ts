@@ -61,6 +61,7 @@ import {
   type PluginNotificationPermission,
   type PluginNetEgressGrant,
   type PluginServiceContrib,
+  type PluginLocalizedString,
   type PluginSettingContrib,
   type PluginSkillContrib,
   type PluginThemeVariableContrib,
@@ -1664,7 +1665,7 @@ export class PluginRuntime {
     await this.hostApi(loaded).themes.setVariables(themeId, { "--nexus-backdrop-blur": blur });
   }
 
-  /** Manifest settings as the installed-plugin sheet reads them. Titles stay the author's language; plugin-owned UI localizes via `app.getLocale` / `appearance:changed` (ADR 0280). */
+  /** Manifest settings as the installed-plugin sheet reads them, with localized titles resolved to the host UI locale (plain strings stay author-language per ADR 0280). */
   async getPluginSettings(pluginId: string): Promise<PluginSettingDefinition[]> {
     const loaded = this.loaded.get(pluginId);
     if (!loaded) throw apiError("NOT_FOUND", `plugin not loaded: ${pluginId}`);
@@ -1704,13 +1705,30 @@ export class PluginRuntime {
     loaded: LoadedPlugin,
     values: Record<string, unknown>,
   ): PluginSettingDefinition[] {
+    // Localized titles/descriptions/enum labels resolve against the host UI
+    // locale here, so the sheet keeps rendering plain strings; plain strings
+    // stay author-language (ADR 0280's fallback).
+    const locale = this.services.getLocale?.();
+    const localize = (value: string | PluginLocalizedString | undefined): string | undefined => {
+      if (value === undefined) return undefined;
+      return resolvePluginLocalizedString(value, locale);
+    };
     return (loaded.manifest.contributes?.settings ?? []).map((setting) => ({
       key: setting.key,
-      title: setting.title,
-      ...(setting.description ? { description: setting.description } : {}),
+      title: localize(setting.title) ?? "",
+      ...(localize(setting.description)
+        ? { description: localize(setting.description) }
+        : {}),
       type: setting.type as PluginSettingDefinition["type"],
       ...(setting.default === undefined ? {} : { default: setting.default }),
-      ...(setting.enum ? { enum: setting.enum } : {}),
+      ...(setting.enum
+        ? {
+            enum: setting.enum.map((option) => ({
+              value: option.value,
+              label: localize(option.label) ?? String(option.value),
+            })),
+          }
+        : {}),
       ...(setting.command ? { command: setting.command } : {}),
       ...(setting.visibleWhen ? { visibleWhen: setting.visibleWhen } : {}),
       scope: "plugin",
