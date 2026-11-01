@@ -26,6 +26,7 @@ import {
   IconInfo,
   IconKeyboard,
   IconPalette,
+  IconPlug,
   IconSearch,
   IconServer,
   IconSliders,
@@ -49,6 +50,7 @@ import { ThemeRow } from "../../components/settings/ThemeRow";
 import { NetworkProxySection } from "../../components/settings/NetworkProxySection";
 import { ProjectsPage } from "../../pages/ProjectsPage";
 import { AgentSkillsPage } from "../../components/settings/AgentSkillsPage";
+import { AgentExtensionsPage } from "../../components/settings/AgentExtensionsPage";
 import { AgentExpertsPage } from "../../components/settings/AgentExpertsPage";
 import { AssistantChannelsPage } from "../../components/settings/AssistantChannelsPage";
 import { OrgSettingsPage } from "../../components/settings/OrgSettingsPage";
@@ -246,6 +248,7 @@ export function SettingsPage() {
       instructions: <IconFileText size={14} />,
       agent: <IconBot size={14} />,
       skills: <IconBookOpen size={14} />,
+      extensions: <IconPlug size={14} />,
       mcp: <IconServer size={14} />,
       subagents: <IconBot size={14} />,
       assistant: <IconMessages size={14} />,
@@ -574,6 +577,8 @@ export function SettingsPage() {
           {tab === "agent" && <ModelConfigPage />}
 
           {tab === "skills" && <AgentSkillsPage />}
+
+          {tab === "extensions" && <AgentExtensionsPage />}
 
           {tab === "mcp" && <AgentMcpPage />}
 

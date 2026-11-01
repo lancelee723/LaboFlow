@@ -51,19 +51,22 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   4. **Instructions / 指令** — Lucide `FileText` (global and project instruction files)
   5. **Models / 模型** — Lucide `Bot` (providers and default model)
   6. **Skills / 技能** — Lucide `BookOpen` (reusable agent instructions)
-  7. **MCP** — Lucide `Server` (agent connections)
-  8. **Subagents / 子智能体** — Lucide `Bot` (built-in and personal parallel agents)
-  9. **Import / 导入** — Lucide `Download` (bring sessions and model configuration in from other tools)
-  10. **Projects / 项目** — Lucide `Archive` (durable project index)
-  11. **Cloud sync / 云同步** — Lucide `CloudDownload` (encrypted portable configuration backup and bidirectional sync; developer mode only)
-  12. **Remote Hosts / 远程主机** — Lucide `Globe` (SSH bootstrap and pairing inventory; developer mode only)
-  13. **Info / 信息** — Lucide `Info` (versions, logs, updates, developer)
+  7. **Extensions / 扩展插件** — Lucide `Plug` (the plugins workbench — installed
+     plugins and the marketplace — hosted as a settings destination; the same
+     surface as the sidebar Plugins page)
+  8. **MCP** — Lucide `Server` (agent connections)
+  9. **Subagents / 子智能体** — Lucide `Bot` (built-in and personal parallel agents)
+  10. **Import / 导入** — Lucide `Download` (bring sessions and model configuration in from other tools)
+  11. **Projects / 项目** — Lucide `Archive` (durable project index)
+  12. **Cloud sync / 云同步** — Lucide `CloudDownload` (encrypted portable configuration backup and bidirectional sync; developer mode only)
+  13. **Remote Hosts / 远程主机** — Lucide `Globe` (SSH bootstrap and pairing inventory; developer mode only)
+  14. **Info / 信息** — Lucide `Info` (versions, logs, updates, developer)
   Icons are decorative (`aria-hidden` via the SVG default) and stay monochrome
   with the rail label; do not reuse refresh/rotate glyphs here.
 - The directory remains a flat searchable list in the same exact order. For
   scanability, the destinations are shown in four titled visual clusters:
   `Preferences` / `偏好` (General, AI, Shortcuts), `Agent` / `智能体`
-  (Instructions, Models, Skills, MCP, Subagents), `Workspace` / `工作区`
+  (Instructions, Models, Skills, Extensions, MCP, Subagents), `Workspace` / `工作区`
   (Import, Projects), and `System` / `系统` (Cloud sync, Remote Hosts, Info;
   Cloud sync and Remote Hosts are developer-only). Headings are
   muted, non-interactive labels and use whitespace for separation; no divider

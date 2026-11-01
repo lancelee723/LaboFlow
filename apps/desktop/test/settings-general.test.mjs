@@ -428,7 +428,16 @@ test("settings nav keeps a flat searchable index with titled visual groups", () 
     assert.match(zhTWLocaleSource, new RegExp(`${key.split(".")[1]}:`));
     assert.match(trLocaleSource, new RegExp(`${key.split(".")[1]}:`));
   }
-  assert.doesNotMatch(settingsSearchSource, /id: "extensions"/);
+  // ADR 0215 removed the standalone extensions tab; the plugins workbench is
+  // hosted back as a destination since the settings extensions entrance
+  // returned — pinned here with its Skills/MCP neighbors.
+  assert.match(settingsSearchSource, /id: "extensions"/);
+  assert.ok(
+    settingsSearchSource.indexOf('id: "skills"') <
+      settingsSearchSource.indexOf('id: "extensions"') &&
+      settingsSearchSource.indexOf('id: "extensions"') <
+        settingsSearchSource.indexOf('id: "mcp"'),
+  );
   const navOrder = [
     "general",
     "ai",
@@ -499,7 +508,9 @@ test("marketplace source settings live inside the Plugins marketplace surface", 
   assert.match(marketplaceSettingsSource, /<SettingsMenuSelect/);
   assert.doesNotMatch(marketplaceSettingsSource, /<Select/);
   assert.doesNotMatch(settingsPageSource, /ExtensionMarketSection/);
-  assert.doesNotMatch(settingsPageSource, /tab === "extensions"/);
+  // The settings extensions destination reuses the marketplace surface (and
+  // therefore its source settings) instead of a second implementation.
+  assert.match(settingsPageSource, /tab === "extensions" && <AgentExtensionsPage/);
 });
 
 test("settings compact pickers hug the current label on the shared menu select", () => {
