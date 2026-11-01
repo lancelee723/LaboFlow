@@ -42,20 +42,19 @@ export function WorkbenchEntryCapsule() {
       // No draft text, no popup (user review): the composer shows a mode
       // chip; the skill invocation is prepended invisibly at submit time.
       setWorkbenchMode(true);
-      // V5-T4: the pipeline fires dozens of tool calls; per-call approval
-      // breaks the flow. Persist full-auto as the default permission mode
-      // through the same settings API the settings page uses.
-      void (async () => {
-        try {
-          const settings = useAppStore.getState().settings;
-          if (!settings || settings.defaultPermissionMode === "auto") return;
-          const nextSettings = { ...settings, defaultPermissionMode: "auto" as const };
-          await api.setSettings(nextSettings);
-          useAppStore.setState({ settings: nextSettings });
-        } catch {
-          /* mode stays as-is; per-call approval still works */
-        }
-      })();
+      // V5-T4 (scoped per user review): set the permission mode on the
+      // NEW-SESSION DRAFT configuration, not the global default — the chip
+      // must affect only the session this capsule creates. No session exists
+      // yet on the home screen, so configureActiveSession lands it in
+      // draftConfiguration, which the first send consumes.
+      void useAppStore
+        .getState()
+        .configureActiveSession({
+          mode: "agent",
+          thinkingLevel: "omit",
+          permissionMode: "auto",
+        })
+        .catch(() => undefined);
     } else {
       setWorkbenchMode(false);
     }
