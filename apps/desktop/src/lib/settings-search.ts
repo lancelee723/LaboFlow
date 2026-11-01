@@ -12,7 +12,6 @@ export type SettingsTabId =
   | "instructions"
   | "agent"
   | "skills"
-  | "extensions"
   | "mcp"
   | "assistant"
   | "subagents"
@@ -207,21 +206,6 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "extensions.skills.edit",
       "extensions.skills.remove",
       "extensions.skills.reveal",
-    ],
-  },
-  {
-    id: "extensions",
-    labelKey: "settings.nav.extensions",
-    titleKey: "settings.extensions",
-    group: "agent",
-    keywordKeys: [
-      "plugins.title",
-      "plugins.tabInstalled",
-      "plugins.tabMarket",
-      "plugins.searchInstalled",
-      "plugins.browseMarket",
-      "plugins.empty",
-      "plugins.refreshMarket",
     ],
   },
   {
