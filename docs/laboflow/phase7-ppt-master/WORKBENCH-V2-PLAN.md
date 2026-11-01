@@ -114,3 +114,9 @@ T1→T12 串行（T4–T8 内部可两两并行审查）；预估 4–6 个工�
 | 8 | 无 asktool / 无裸 daemon | ✅ | 全程 0 次；编辑器服务以 --live --daemon 托管启动且存活 |
 
 **残余**：模型在"设计参数确认"输出后仍结束回合（需用户一句"继续"，U3 指引已使恢复路径明确）；RPC 宿主修复仍待立项。
+
+## V6 补充（2026-11-01）：全自动改为会话级作用域
+
+用户复审发现胶囊把**全局** defaultPermissionMode 改成 auto，泄漏到所有其他会话。
+修复（v4.4.5，1ad39d2）：胶囊改调 configureActiveSession——home 屏无活动会话，store
+落入 draftConfiguration，仅被本次胶囊创建的会话消费；全局 kv 不变（实测 ask / 会话 auto）。
