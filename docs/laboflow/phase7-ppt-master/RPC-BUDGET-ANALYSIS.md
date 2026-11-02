@@ -123,11 +123,11 @@ daemon 尝试）零 HOST_RPC_TIMEOUT 为通过标准。
 
 **结果：3 轮全部 PASS**（每轮独立 scratch 配置）：
 
-| 轮次 | budgetKills | 探针延迟 | 重调用时长 | 权限上限 |
+| 轮次 | budgetKills | 探针延迟（6 发） | 重调用时长 | 权限上限 |
 |---|---|---|---|---|
-| 1 | 0 | 20–22ms | 126s（并发） | PERMISSION_TIMEOUT @120.0s，pending=0 |
-| 2 | 0 | 20–22ms | ~126s | 同上 |
-| 3 | 0 | 20–22ms | ~126s | 同上 |
+| 1 | 0 | 20–24ms | 126.2s（并发） | PERMISSION_TIMEOUT @120.004s，pending=0 |
+| 2 | 0 | 11–15ms | 126.1s（并发） | PERMISSION_TIMEOUT @120.003s，pending=0 |
+| 3 | 0 | 18–24ms | 126.1s（并发） | PERMISSION_TIMEOUT @120.005s，pending=0 |
 
 对比基线：修复前同型负载下轻 `echo` 被预算在 270s 处杀死（§一）。
 排队门等待日志（≥2s）三轮均未触发——scrath 直驱下全局锁无竞争热点，
