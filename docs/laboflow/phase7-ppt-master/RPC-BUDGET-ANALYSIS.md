@@ -59,3 +59,53 @@ Bash(60s/120s 请求超时) + 120s + 90s。
 
 验证口径：以 PPT-Master 全管线跑 3 轮（10-08 复现配方：双并发重 Python +
 daemon 尝试）零 HOST_RPC_TIMEOUT 为通过标准。
+
+## 五、宿主侧修复落地记录（2026-11-02，分支 fix/rpc-budget-dispatch）
+
+### 5.1 实施前补充取证
+
+- RPC 层全部 ~200 个 `state.lock()` 临界区均为**纯同步**（脚本扫描：守卫
+  存活期间无任何 `.await`；DB 是单 rusqlite Connection，本就要求经全局锁
+  访问）——不存在"锁内长等待"的处理器。排队长的现实来源是**同步临界区
+  在写入压力下变慢**（WAL checkpoint、大 transcript 写入）与 32 个请求槽
+  被长工具执行全程占用的叠加。
+- 权限等待 `pending_rx` **没有自己的超时**：`RPC_PERMISSION_WAIT_CAP_MS`
+  (120s) 只是预算余量，不是强制上限。无人应答的 ask 提示会烧满整个工具
+  预算（echo=270s），且预算杀死 handler future 时**泄漏已注册的待审批
+  权限**（清理代码永远不执行）。
+- 工具执行准入（`tool_budget.rs`）已按 Read/Mutation/Shell/Plugin 分类，
+  排队上限 30s——提案 ③ 的"执行层分槽"已存在；缺的是**请求槽层**的分类。
+
+### 5.2 已实施（rpc/mod.rs）
+
+1. **两阶段预算（提案 ①）**：`handle_request` 拆为调度门（entry 锁 +
+   handshake 检查，`RPC_QUEUE_BUDGET_MS` 135s，超时报 "queue wait …
+   never dispatched"）与处理阶段（`with_request_budget`，从 dispatch 起算）。
+   固定预算方法保持"排队+处理 ≤135s"的 #1071 总量保证（排队时间从处理
+   预算中扣除）；tools.execute 不扣——排队不计入正是本次修复的意义。
+   门等待 ≥2s 打 warn 日志（`queue_wait_ms`），实机可证伪锁竞争假设。
+2. **强制权限等待上限（提案 ① 的饥饿保护）**：权限 select 增加
+   `RPC_PERMISSION_WAIT_CAP_MS` (120s) 超时臂——取消待审批、结构化拒绝
+   （共享错误码 `PERMISSION_TIMEOUT`，RACP 映射 `APPROVAL_EXPIRED`），
+   不再假手预算杀死请求。规范已同步
+   （docs/spec/03-runtime/08-error-codes.md）。
+3. **请求槽分池（提案 ③）**：长工具（tools.execute 有效超时 ≥60s，
+   `is_long_tool_request`）从专用池（20 槽）取槽；其余请求保持 32 槽
+   通用池。长调用不再挤占短调用的入口。执行层并发仍由 ToolBudget 约束。
+4. **提案 ②（锁临界区收窄）**：取证结论为 RPC 层无锁内长 IO（见 5.1），
+   无需收窄；唯一确认的锁内长 IO 在 config_sync `domains::capture`
+   （文件+加密，调度器节拍内），与本次故障路径无关，**不改**，留观。
+   替代交付：门等待日志（上 1）使锁竞争在实机可观测。
+
+### 5.3 测试与验证
+
+- `cargo test -p host-core --locked`：707 通过（新增：长/短池分类、
+  queue budget 超时/直通两测；既有 #1071 预算行为测试全数保持）。
+- `cargo fmt --check` / `cargo clippy`：无新增告警（仓库基线本有 47 处
+  fmt 漂移，本次未扩散）。
+- 实机复验（3 轮管线零 HOST_RPC_TIMEOUT）见下节，随遗留 B 一并跑。
+
+### 5.4 实机复验记录
+
+（待遗留 B 实施后统一执行；配方：双并发重 Python + 无 daemon；口径：
+3 轮全管线 0 次 HOST_RPC_TIMEOUT / HOST_OVERLOADED，且门等待日志无 ≥2s 记录。）
