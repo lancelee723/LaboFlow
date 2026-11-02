@@ -12,10 +12,26 @@ import {
   type McpTransport,
   type ProjectRecord,
 } from "@pi-desktop/shared";
-import { Button, Field, HelpIcon, Input, SettingsToggle, TooltipButton, cx, portalOverlay } from "../ui";
+import {
+  Button,
+  Field,
+  HelpIcon,
+  Input,
+  PasswordInput,
+  SegmentedControl,
+  SettingsToggle,
+  TooltipButton,
+  cx,
+  portalOverlay,
+} from "../ui";
 import { IconPlay, IconServer, IconTerminal, IconX } from "../icons";
 import { ScopeControl } from "./ScopeControl";
 import { KeyValueRows, pairsToRecord, recordToPairs, type KeyValuePair } from "./KeyValueRows";
+import {
+  buildHttpHeaders,
+  splitBearerHeaders,
+  type McpAuthMode,
+} from "./mcp-auth";
 import {
   MCP_STDIO_LAUNCHER_PRESETS,
   mcpStdioLauncherChoice,
@@ -46,6 +62,9 @@ export type McpDraft = {
   args: string;
   env: KeyValuePair[];
   url: string;
+  /** Auth-mode sugar: "bearer" edits a bare token, "headers" the raw rows. */
+  authMode: McpAuthMode;
+  bearerToken: string;
   headers: KeyValuePair[];
   enabled: boolean;
   scope: ActivationScope;
@@ -61,6 +80,8 @@ export function emptyMcpDraft(): McpDraft {
     args: "",
     env: [],
     url: "",
+    authMode: "bearer",
+    bearerToken: "",
     headers: [],
     enabled: true,
     scope: GLOBAL_SCOPE,
@@ -68,6 +89,10 @@ export function emptyMcpDraft(): McpDraft {
 }
 
 export function draftFromRecord(record: McpServerRecord): McpDraft {
+  // A Bearer-shaped Authorization header round-trips into the token field;
+  // any other header shape stays in the raw rows untouched.
+  const isHttp = record.transport === "http";
+  const split = isHttp ? splitBearerHeaders(record.headers) : null;
   return {
     id: record.id,
     label: record.label ?? "",
@@ -77,7 +102,9 @@ export function draftFromRecord(record: McpServerRecord): McpDraft {
     args: (record.args ?? []).join(" "),
     env: recordToPairs(record.env),
     url: record.url ?? "",
-    headers: recordToPairs(record.headers),
+    authMode: isHttp && !split ? "headers" : "bearer",
+    bearerToken: split?.token ?? "",
+    headers: split ? recordToPairs(split.rest) : recordToPairs(record.headers),
     enabled: record.enabled,
     scope: resolveScope(record.scope),
   };
@@ -146,7 +173,7 @@ export function draftToInput(
       ...base,
       transport: "http",
       url: draft.url.trim(),
-      headers: pairsToRecord(draft.headers),
+      headers: buildHttpHeaders(draft.authMode, draft.bearerToken, draft.headers),
     };
   }
   return {
@@ -283,6 +310,32 @@ export function McpEditorSheet({
       return;
     }
     setDraft({ ...draft, label: value, id: mcpIdFromLabel(value) });
+  };
+
+  // Mode switches migrate data visibly instead of losing it: leaving bearer
+  // mode materializes the token as a header row, entering it extracts a
+  // Bearer-shaped header back into the token field and keeps every other row.
+  const switchAuthMode = (mode: McpAuthMode) => {
+    if (mode === draft.authMode) return;
+    if (mode === "headers") {
+      const token = draft.bearerToken.trim();
+      setDraft({
+        ...draft,
+        authMode: "headers",
+        bearerToken: "",
+        headers: token
+          ? [...draft.headers, { key: "Authorization", value: `Bearer ${token}` }]
+          : draft.headers,
+      });
+      return;
+    }
+    const split = splitBearerHeaders(pairsToRecord(draft.headers));
+    setDraft({
+      ...draft,
+      authMode: "bearer",
+      bearerToken: split?.token ?? "",
+      headers: split ? recordToPairs(split.rest) : draft.headers,
+    });
   };
 
   const transports: Array<{
@@ -471,17 +524,63 @@ export function McpEditorSheet({
               ) : null}
               <div className="ext-field-group">
                 <div className="ext-field-label">
-                  {t("extensions.mcp.headers")}
-                  <HelpIcon label={t("extensions.mcp.headersHint")} />
+                  {t("extensions.mcp.authMode")}
+                  <HelpIcon label={t("extensions.mcp.authModeHint")} />
                 </div>
-                <KeyValueRows
-                  pairs={draft.headers}
-                  onChange={(next) => set("headers", next)}
-                  keyPlaceholder="Authorization"
-                  valuePlaceholder={t("extensions.mcp.valuePlaceholder")}
-                  addLabel={t("extensions.mcp.addHeader")}
+                <SegmentedControl
+                  value={draft.authMode}
+                  onChange={switchAuthMode}
+                  label={t("extensions.mcp.authMode")}
+                  options={[
+                    { value: "bearer", label: t("extensions.mcp.authBearer") },
+                    { value: "headers", label: t("extensions.mcp.authCustom") },
+                  ]}
                 />
               </div>
+              {draft.authMode === "bearer" ? (
+                <>
+                  <Field label={t("extensions.mcp.bearerToken")} hint={t("extensions.mcp.bearerTokenHint")}>
+                    <PasswordInput
+                      value={draft.bearerToken}
+                      placeholder={t("extensions.mcp.bearerTokenPlaceholder")}
+                      showLabel={t("extensions.mcp.showToken")}
+                      hideLabel={t("extensions.mcp.hideToken")}
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      onChange={(event) => set("bearerToken", event.target.value)}
+                    />
+                  </Field>
+                  <div className="ext-field-group">
+                    <div className="ext-field-label">
+                      {t("extensions.mcp.otherHeaders")}
+                      <HelpIcon label={t("extensions.mcp.otherHeadersHint")} />
+                    </div>
+                    <KeyValueRows
+                      pairs={draft.headers}
+                      onChange={(next) => set("headers", next)}
+                      keyPlaceholder="X-Api-Key"
+                      valuePlaceholder={t("extensions.mcp.valuePlaceholder")}
+                      addLabel={t("extensions.mcp.addHeader")}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="ext-field-group">
+                  <div className="ext-field-label">
+                    {t("extensions.mcp.headers")}
+                    <HelpIcon label={t("extensions.mcp.headersHint")} />
+                  </div>
+                  <KeyValueRows
+                    pairs={draft.headers}
+                    onChange={(next) => set("headers", next)}
+                    keyPlaceholder="Authorization"
+                    valuePlaceholder={t("extensions.mcp.valuePlaceholder")}
+                    addLabel={t("extensions.mcp.addHeader")}
+                  />
+                </div>
+              )}
             </>
           )}
 

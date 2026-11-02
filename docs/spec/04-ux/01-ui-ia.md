@@ -344,8 +344,10 @@ shared capability contract:
 - Skills have one native **Import** action per surface. It accepts exactly one
   file and physically copies it into the selected `.agents/skills` directory.
 - MCP has one **Add** action per surface. Add and Edit open the existing
-  `McpEditorSheet` as a modal overlay with stdio/HTTP branches, validation,
-  duplicate checks, locked edit ids, scope text, and Test connection feedback.
+  `McpEditorSheet` as a modal overlay with stdio/HTTP branches, an HTTP auth
+  section that edits either a bare bearer token or the raw request headers,
+  validation, duplicate checks, locked edit ids, scope text, and Test
+  connection feedback.
 - Subagents use one full-width global surface under `~/.agents/subagents`; they
   have no project picker, project surface, or project-level toggle. Creating or
   editing a subagent picks the pinned model from configured provider models, or
