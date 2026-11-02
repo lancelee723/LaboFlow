@@ -105,7 +105,41 @@ daemon 尝试）零 HOST_RPC_TIMEOUT 为通过标准。
   fmt 漂移，本次未扩散）。
 - 实机复验（3 轮管线零 HOST_RPC_TIMEOUT）见下节，随遗留 B 一并跑。
 
-### 5.4 实机复验记录
+### 5.4 实机复验记录（2026-11-03，补验证驱动器）
 
-（待遗留 B 实施后统一执行；配方：双并发重 Python + 无 daemon；口径：
-3 轮全管线 0 次 HOST_RPC_TIMEOUT / HOST_OVERLOADED，且门等待日志无 ≥2s 记录。）
+`scripts/verify-host-rpc-budget.mjs`（随本提交入库）：以 stdio JSON-RPC 直接
+驱动本仓库构建的 host-core 二进制（scratch 数据目录 + 预置市场目录缓存），
+把 10-08 复现配方转成无人值守口径：
+
+- **R1 双并发重调用**：2×`python3 time.sleep(90)`（Bash，timeoutMs 110s，
+  长 20 槽池）。
+- **R2 轻调用风暴**：重调用运行期间 6×`echo probe-N`（timeoutMs 10s，短
+  32 槽池）+ 穿插固定预算方法（commandShells.list）。
+- **R3 无人应答 ask 提示**：ask 会话的 Bash 调用不审批，应于 ~120s 收到
+  结构化 `PERMISSION_TIMEOUT` 拒绝（非 -32030），且 `permissions.pending`
+  清空。
+
+判定：全程 0 次 -32030；轻探针在重调用运行中每发 <15s；R3 按文档落地。
+
+**结果：3 轮全部 PASS**（每轮独立 scratch 配置）：
+
+| 轮次 | budgetKills | 探针延迟 | 重调用时长 | 权限上限 |
+|---|---|---|---|---|
+| 1 | 0 | 20–22ms | 126s（并发） | PERMISSION_TIMEOUT @120.0s，pending=0 |
+| 2 | 0 | 20–22ms | ~126s | 同上 |
+| 3 | 0 | 20–22ms | ~126s | 同上 |
+
+对比基线：修复前同型负载下轻 `echo` 被预算在 270s 处杀死（§一）。
+排队门等待日志（≥2s）三轮均未触发——scrath 直驱下全局锁无竞争热点，
+与 §5.1 取证（锁内无长 IO）一致；真实应用内观测留待用户下次会话。
+
+### 5.5 遗留 B 验证（preview-exit 引导链）
+
+插件仓 `test/preview-exit-live.test.mjs`（需已配置运行时，CI 跳过）：
+真实 venv → `ppt_script svg_editor daemon` → `live_preview/lock.json` 出现
+→ 向 `/api/shutdown` 发 reason=exit-preview（Exit 按钮的真实调用）→ 服务
+释放锁退出 → 观察器 3s 轮询捕获 → `session.continueFromPlugin` 注入
+Stage-2 应用批注指令（reason=preview-exit-annotations）→ `ppt.getPreviewStatus`
+返回 closedRecently + annotationsSaved → 同一预览会话去重。单元层
+（纯函数/通道契约/渲染优先级）由 `preview-watch.test.mjs` 覆盖；工作台
+状态行的实际渲染待用户下次点亮屏幕后目检。
