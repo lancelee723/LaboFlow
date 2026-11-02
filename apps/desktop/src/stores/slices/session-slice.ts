@@ -251,6 +251,9 @@ export function createSessionSlice({
       ) => {
         const record = opts?.record !== false;
         const commit = (state: AppState) => ({
+          // Switching conversations leaves the home-screen workbench mode
+          // behind — the chip belongs to the new-task surface only.
+          workbenchMode: false,
           ...(state.activeSessionId === id ? {} : switchWorkPanelSession(state, id)),
           ...retainSessionPane(state, id, messages),
           activeSessionId: id,
