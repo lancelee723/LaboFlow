@@ -1664,6 +1664,7 @@ export const es = {
     expertsDescription: "Centro de expertos: agentes de persona, equipos de expertos y el pipeline de bucle.",
     assistantTitle: "Canales de IM",
     assistant: {
+    description: "Conecta bots de Feishu, WeCom y WeChat MP para enviar tareas a LaboFlow; configura el webhook local para Atajos y scripts.",
     feishuTitle: "Bot de Feishu",
     feishuHelp: "App empresarial propia; pega App ID + App Secret. Guía: open.feishu.cn, permiso im:message.* requerido.",
     testAccountTitle: "Usar una app de PRUEBA de Feishu (solo desarrollo)",
@@ -1699,6 +1700,7 @@ export const es = {
     deleteOk: "Canal eliminado",
     notConfigured: "Sin configurar",
       webhookTitle: "Webhook local (atajos y scripts)",
+      actions: "Acciones",
       webhookRunning: "En ejecución",
       webhookStopped: "Detenido",
       webhookHelp: "POST /im/task con tu secreto devuelve la respuesta del asistente; atajos, scripts y plataformas de automatización se conectan aquí.",

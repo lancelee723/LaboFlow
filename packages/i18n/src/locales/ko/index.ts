@@ -1664,6 +1664,7 @@ export const ko = {
     expertsDescription: "전문가 센터: 페르소나 에이전트, 전문가 팀, 루프 파이프라인.",
     assistantTitle: "IM 채널",
     assistant: {
+    description: "Feishu·WeCom·WeChat MP 봇을 연결해 LaboFlow에 작업을 위임하고, 단축어·스크립트용 로컬 웹훅을 구성합니다.",
     feishuTitle: "Feishu 봇",
     feishuHelp: "기업 자체 앱 — App ID + App Secret을 붙여넣으세요. 가이드: open.feishu.cn, im:message.* 권한 필요.",
     testAccountTitle: "Feishu 테스트 앱 사용(개발용)",
@@ -1699,6 +1700,7 @@ export const ko = {
     deleteOk: "채널이 삭제되었습니다",
     notConfigured: "구성되지 않음",
       webhookTitle: "로컬 웹훅(단축어·스크립트)",
+      actions: "작업",
       webhookRunning: "실행 중",
       webhookStopped: "중지됨",
       webhookHelp: "시크릿과 함께 POST /im/task를 호출하면 어시스턴트 응답을 돌려줍니다. 단축어·스크립트·자동화 플랫폼이 여기로 연결됩니다.",

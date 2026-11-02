@@ -9,7 +9,7 @@ import type {
 } from "@pi-desktop/shared";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
-import { Badge, Button } from "../ui";
+import { Button, HelpIcon, Input, Select, Textarea } from "../ui";
 import { CHANNEL_CREDENTIAL_FIELDS, parseCredentialBlob } from "../../lib/channel-credentials";
 
 /**
@@ -17,6 +17,10 @@ import { CHANNEL_CREDENTIAL_FIELDS, parseCredentialBlob } from "../../lib/channe
  * Credentials are paste-in, masked, and never echoed back — empty inputs mean
  * "unchanged" and cannot clobber a stored secret (registry enforces, UI
  * mirrors). Connection states stream in via `IPC.event.channelState`.
+ *
+ * Layout rides the standard settings scaffolding (settings-card-block /
+ * model-config-section-head / settings-row + field-input controls), the same
+ * geometry every other settings tab uses.
  */
 
 const PROVIDERS: ChannelProvider[] = ["feishu", "wecom", "wechat_mp"];
@@ -53,6 +57,20 @@ const DIAG_KIND_KEYS: Record<DiagInfo["kind"], string> = {
   publish: "settings.assistant.diagPublish",
   unknown: "settings.assistant.diagUnknown",
 };
+
+/** Connection state → the shared capability badge tone (dot + label). */
+function stateBadgeClass(state: ChannelState | undefined): string {
+  switch (state) {
+    case "connected":
+      return "agent-capability-badge is-ready";
+    case "connecting":
+      return "agent-capability-badge is-connecting";
+    case "error":
+      return "agent-capability-badge is-failed";
+    default:
+      return "agent-capability-badge";
+  }
+}
 
 type Draft = {
   name: string;
@@ -254,226 +272,301 @@ export function AssistantChannelsPage() {
   };
 
   return (
-    <div className="settings-section flex flex-col gap-4">
-      <p className="text-sm opacity-70">{t("settings.assistant.description")}</p>
-      <div
-        className="rounded-lg border p-4"
-        style={{ borderColor: "var(--ds-border)" }}
-        data-webhook-card=""
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className={`inline-block h-2 w-2 rounded-full ${webhook?.running ? "bg-emerald-500" : "bg-neutral-400"}`}
-            aria-hidden
-          />
-          <span className="font-medium">{t("settings.assistant.webhookTitle")}</span>
-          {webhook?.running ? (
-            <Badge tone="success">{t("settings.assistant.webhookRunning")}</Badge>
-          ) : (
-            <Badge tone="neutral">{t("settings.assistant.webhookStopped")}</Badge>
-          )}
-        </div>
-        <p className="mt-2 text-xs opacity-60">{t("settings.assistant.webhookHelp")}</p>
-        {webhook ? (
-          <div className="mt-3 flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-xs">
-              <span>{t("settings.assistant.webhookPort")}</span>
-              <input
-                className="w-24 rounded-md border px-2 py-1.5 text-sm"
-                style={{ borderColor: "var(--ds-border)" }}
-                value={webhookPort}
-                onChange={(event) => setWebhookPort(event.target.value)}
-              />
-            </label>
-            <label className="flex items-center gap-1 text-xs">
-              <input
-                type="checkbox"
-                checked={webhook.lanOpen}
-                onChange={(event) => setWebhook({ ...webhook, lanOpen: event.target.checked })}
-              />
-              <span>{t("settings.assistant.webhookLan")}</span>
-            </label>
-            <span className="text-xs opacity-60">
-              {t("settings.assistant.webhookSecret")}: <code>{webhook.secretPreview || "—"}</code>
-            </span>
-            <Button size="sm" disabled={busy} onClick={saveWebhook}>
-              {t("settings.assistant.webhookApply")}
-            </Button>
+    <div className="settings-stack">
+      <p className="settings-lead">{t("settings.assistant.description")}</p>
+
+      <section className="settings-card-block" data-webhook-card="">
+        <div className="model-config-section-head">
+          <div className="settings-card-heading-line">
+            <h3 className="settings-card-heading">{t("settings.assistant.webhookTitle")}</h3>
+            <HelpIcon label={t("settings.assistant.webhookHelp")} />
+            {webhook ? (
+              <span
+                className={`agent-capability-badge ${webhook.running ? "is-ready" : ""}`}
+              >
+                <span className="agent-capability-status-dot" aria-hidden="true" />
+                {t(
+                  webhook.running
+                    ? "settings.assistant.webhookRunning"
+                    : "settings.assistant.webhookStopped",
+                )}
+              </span>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </div>
+        <div className="settings-panel">
+          {webhook ? (
+            <>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.webhookPort")}
+                    <HelpIcon label={t("settings.assistant.webhookHelp")} />
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <Input
+                    type="number"
+                    className="settings-webhook-port"
+                    value={webhookPort}
+                    aria-label={t("settings.assistant.webhookPort")}
+                    onChange={(event) => setWebhookPort(event.target.value)}
+                  />
+                  <Button
+                    variant="primary"
+                    disabled={busy}
+                    onClick={saveWebhook}
+                  >
+                    {t("settings.assistant.webhookApply")}
+                  </Button>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.webhookLan")}
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <input
+                    type="checkbox"
+                    checked={webhook.lanOpen}
+                    aria-label={t("settings.assistant.webhookLan")}
+                    onChange={(event) =>
+                      setWebhook({ ...webhook, lanOpen: event.target.checked })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.webhookSecret")}
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <code className="settings-secret-preview">
+                    {webhook.secretPreview || "—"}
+                  </code>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </section>
+
       {PROVIDERS.map((provider) => {
         const account = accountFor(provider);
         const draft = draftFor[provider];
         return (
-          <div
+          <section
             key={provider}
-            className="rounded-lg border p-4"
-            style={{ borderColor: "var(--ds-border)" }}
+            className="settings-card-block"
             data-channel-card={provider}
           >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${
-                    account?.state === "connected"
-                      ? "bg-emerald-500"
-                      : account?.state === "connecting"
-                        ? "bg-amber-500"
-                        : account?.state === "error"
-                          ? "bg-red-500"
-                          : "bg-neutral-400"
-                  }`}
-                  aria-hidden
-                />
-                <span className="font-medium">{t(PROVIDER_LABEL_KEYS[provider])}</span>
-                {account ? (
-                  <Badge tone={account.state === "connected" ? "success" : "neutral"}>
-                    {t(STATE_LABEL_KEYS[account.state])}
-                  </Badge>
-                ) : (
-                  <Badge tone="neutral">{t("settings.assistant.notConfigured")}</Badge>
-                )}
+            <div className="model-config-section-head">
+              <div className="settings-card-heading-line">
+                <h3 className="settings-card-heading">
+                  {t(PROVIDER_LABEL_KEYS[provider])}
+                </h3>
+                <HelpIcon label={t(PROVIDER_HELP_KEYS[provider])} />
+                <span className={stateBadgeClass(account?.state)}>
+                  <span className="agent-capability-status-dot" aria-hidden="true" />
+                  {account
+                    ? t(STATE_LABEL_KEYS[account.state])
+                    : t("settings.assistant.notConfigured")}
+                </span>
               </div>
               {account ? (
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void test(account)}>
+                <div className="settings-head-actions">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void test(account)}
+                  >
                     {t("settings.assistant.test")}
                   </Button>
                   {account.state === "disconnected" || account.state === "error" ? (
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => void connect(account)}>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={busy}
+                      onClick={() => void connect(account)}
+                    >
                       {t("settings.assistant.connect")}
                     </Button>
                   ) : (
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => void disconnect(account)}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => void disconnect(account)}
+                    >
                       {t("settings.assistant.disconnect")}
                     </Button>
                   )}
                 </div>
               ) : null}
             </div>
-            {account?.diag ? (
-              <p className="mt-2 text-xs text-red-500" data-channel-diag={account.diag.kind}>
-                {t(DIAG_KIND_KEYS[account.diag.kind])}
-                {account.diag.message ? `: ${account.diag.message}` : ""}
-              </p>
-            ) : null}
-            <p className="mt-2 text-xs opacity-60">{t(PROVIDER_HELP_KEYS[provider])}</p>
-            {PROVIDER_TEST_GUIDE_KEYS[provider] ? (
-              <details className="mt-2 text-xs" data-test-guide={provider}>
-                <summary className="cursor-pointer select-none opacity-70">
-                  {t("settings.assistant.testAccountTitle")}
-                </summary>
-                <p className="mt-1 whitespace-pre-line opacity-60">
-                  {t(PROVIDER_TEST_GUIDE_KEYS[provider] as string)}
-                </p>
-              </details>
-            ) : null}
-
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <label className="flex flex-col gap-1 text-xs">
-                <span>{t("settings.assistant.accountName")}</span>
-                <input
-                  className="rounded-md border px-2 py-1.5 text-sm"
-                  style={{ borderColor: "var(--ds-border)" }}
-                  value={draft.name}
-                  placeholder={t(PROVIDER_LABEL_KEYS[provider])}
-                  onChange={(event) => setDraft(provider, { name: event.target.value })}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <span>{t("settings.assistant.scope")}</span>
-                <select
-                  className="rounded-md border px-2 py-1.5 text-sm"
-                  style={{ borderColor: "var(--ds-border)" }}
-                  value={draft.scope}
-                  onChange={(event) =>
-                    setDraft(provider, {
-                      scope: event.target.value as Draft["scope"],
-                    })
-                  }
-                >
-                  <option value="both">{t("settings.assistant.scopeBoth")}</option>
-                  <option value="p2p">{t("settings.assistant.scopeP2p")}</option>
-                  <option value="group">{t("settings.assistant.scopeGroup")}</option>
-                </select>
-              </label>
-              {CHANNEL_CREDENTIAL_FIELDS[provider].map((field) => (
-                <label key={field.key} className="flex flex-col gap-1 text-xs">
-                  <span>{t(field.labelKey)}</span>
-                  <input
-                    type={field.secret ? "password" : "text"}
-                    className="rounded-md border px-2 py-1.5 text-sm"
-                    style={{ borderColor: "var(--ds-border)" }}
-                    autoComplete="off"
-                    value={draft.credentials[field.key] ?? ""}
-                    placeholder={
-                      account?.hasCredentials ? t("settings.assistant.credentialUnchanged") : ""
-                    }
-                    onChange={(event) =>
-                      setDraft(provider, {
-                        credentials: {
-                          ...draft.credentials,
-                          [field.key]: event.target.value,
-                        },
-                      })
-                    }
-                  />
-                </label>
-              ))}
-              <label className="col-span-2 flex flex-col gap-1 text-xs">
-                <span>{t("settings.assistant.allowlist")}</span>
-                <input
-                  className="rounded-md border px-2 py-1.5 text-sm"
-                  style={{ borderColor: "var(--ds-border)" }}
-                  value={draft.allowlist}
-                  placeholder={t("settings.assistant.allowlistHint")}
-                  onChange={(event) => setDraft(provider, { allowlist: event.target.value })}
-                />
-              </label>
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button size="sm" disabled={busy} onClick={() => void save(provider)}>
-                {t("settings.assistant.save")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => {
-                  setPasteText("");
-                  setPasteOpen(pasteOpen === provider ? null : provider);
-                }}
-              >
-                {t("settings.assistant.pasteParse")}
-              </Button>
-              {account ? (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(account)}>
-                  {t("settings.assistant.delete")}
-                </Button>
+            <div className="settings-panel">
+              {account?.diag ? (
+                <div className="settings-row" data-channel-diag={account.diag.kind}>
+                  <div className="settings-row-copy">
+                    <div className="settings-row-title">
+                      <span className="agent-capability-badge is-failed">
+                        <span className="agent-capability-status-dot" aria-hidden="true" />
+                        {t(DIAG_KIND_KEYS[account.diag.kind])}
+                      </span>
+                    </div>
+                    {account.diag.message ? (
+                      <div className="settings-row-detail">{account.diag.message}</div>
+                    ) : null}
+                  </div>
+                </div>
               ) : null}
-            </div>
-            {pasteOpen === provider ? (
-              <div className="mt-3 flex flex-col gap-2" data-channel-paste={provider}>
-                <textarea
-                  className="h-24 rounded-md border px-2 py-1.5 font-mono text-xs"
-                  style={{ borderColor: "var(--ds-border)" }}
-                  placeholder={t("settings.assistant.pastePlaceholder")}
-                  value={pasteText}
-                  onChange={(event) => setPasteText(event.target.value)}
-                />
-                <div className="flex gap-2">
-                  <Button size="sm" disabled={busy || !pasteText.trim()} onClick={() => applyPaste(provider)}>
-                    {t("settings.assistant.pasteApply")}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setPasteOpen(null)}>
-                    {t("common.cancel")}
-                  </Button>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.accountName")}
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <Input
+                    className="settings-field-wide"
+                    value={draft.name}
+                    placeholder={t(PROVIDER_LABEL_KEYS[provider])}
+                    onChange={(event) => setDraft(provider, { name: event.target.value })}
+                  />
                 </div>
               </div>
-            ) : null}
-          </div>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.scope")}
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <Select
+                    className="settings-field-wide"
+                    value={draft.scope}
+                    aria-label={t("settings.assistant.scope")}
+                    onChange={(event) =>
+                      setDraft(provider, {
+                        scope: event.target.value as Draft["scope"],
+                      })
+                    }
+                  >
+                    <option value="both">{t("settings.assistant.scopeBoth")}</option>
+                    <option value="p2p">{t("settings.assistant.scopeP2p")}</option>
+                    <option value="group">{t("settings.assistant.scopeGroup")}</option>
+                  </Select>
+                </div>
+              </div>
+              {CHANNEL_CREDENTIAL_FIELDS[provider].map((field) => (
+                <div className="settings-row" key={field.key}>
+                  <div className="settings-row-copy">
+                    <div className="settings-row-title">{t(field.labelKey)}</div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Input
+                      className="settings-field-wide"
+                      type={field.secret ? "password" : "text"}
+                      autoComplete="off"
+                      value={draft.credentials[field.key] ?? ""}
+                      placeholder={
+                        account?.hasCredentials
+                          ? t("settings.assistant.credentialUnchanged")
+                          : ""
+                      }
+                      onChange={(event) =>
+                        setDraft(provider, {
+                          credentials: {
+                            ...draft.credentials,
+                            [field.key]: event.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.allowlist")}
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <Input
+                    className="settings-field-wide"
+                    value={draft.allowlist}
+                    placeholder={t("settings.assistant.allowlistHint")}
+                    onChange={(event) => setDraft(provider, { allowlist: event.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-copy">
+                  <div className="settings-row-title">
+                    {t("settings.assistant.actions")}
+                  </div>
+                </div>
+                <div className="settings-row-control">
+                  <Button variant="primary" disabled={busy} onClick={() => void save(provider)}>
+                    {t("settings.assistant.save")}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      setPasteText("");
+                      setPasteOpen(pasteOpen === provider ? null : provider);
+                    }}
+                  >
+                    {t("settings.assistant.pasteParse")}
+                  </Button>
+                  {account ? (
+                    <Button variant="ghost" disabled={busy} onClick={() => void remove(account)}>
+                      {t("settings.assistant.delete")}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              {pasteOpen === provider ? (
+                <div className="settings-paste" data-channel-paste={provider}>
+                  <Textarea
+                    className="font-mono"
+                    rows={4}
+                    placeholder={t("settings.assistant.pastePlaceholder")}
+                    value={pasteText}
+                    onChange={(event) => setPasteText(event.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={busy || !pasteText.trim()}
+                      onClick={() => applyPaste(provider)}
+                    >
+                      {t("settings.assistant.pasteApply")}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setPasteOpen(null)}>
+                      {t("common.cancel")}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {PROVIDER_TEST_GUIDE_KEYS[provider] ? (
+                <details className="settings-test-guide" data-test-guide={provider}>
+                  <summary>{t("settings.assistant.testAccountTitle")}</summary>
+                  <p className="whitespace-pre-line">
+                    {t(PROVIDER_TEST_GUIDE_KEYS[provider] as string)}
+                  </p>
+                </details>
+              ) : null}
+            </div>
+          </section>
         );
       })}
     </div>

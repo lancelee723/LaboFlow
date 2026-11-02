@@ -1664,6 +1664,7 @@ export const tr = {
     expertsDescription: "Uzman merkezi: kişilik ajanları, uzman ekipleri ve döngü hattı.",
     assistantTitle: "IM kanalları",
     assistant: {
+    description: "Feishu, WeCom ve WeChat MP botlarını bağlayarak görevleri LaboFlow'a verin; Kısayollar ve betikler için yerel webhook'u yapılandırın.",
     feishuTitle: "Feishu botu",
     feishuHelp: "Kurumsal özel uygulama — App ID + App Secret yapıştırın. Kılavuz: open.feishu.cn, im:message.* izni gerekir.",
     testAccountTitle: "Feishu TEST uygulaması kullanma (yalnızca geliştirme)",
@@ -1699,6 +1700,7 @@ export const tr = {
     deleteOk: "Kanal silindi",
     notConfigured: "Yapılandırılmadı",
       webhookTitle: "Yerel webhook (Kısayollar ve betikler)",
+      actions: "İşlemler",
       webhookRunning: "Çalışıyor",
       webhookStopped: "Durduruldu",
       webhookHelp: "Gizli anahtarınızla POST /imtask isteği asistan yanıtını döndürür; Kısayollar, betikler ve otomasyon platformları buraya bağlanır.",

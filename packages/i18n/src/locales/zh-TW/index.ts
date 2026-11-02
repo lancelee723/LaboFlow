@@ -1664,6 +1664,7 @@ export const zhTW = {
     expertsDescription: "專家中心：獨立專家、專家團與 Loop 管線。",
     assistantTitle: "IM通道",
     assistant: {
+    description: "連接飛書、企業微信、微信公眾號機器人，把任務派給 LaboFlow；配置本機 Webhook 供快捷指令與腳本接入。",
     feishuTitle: "飛書機器人",
     feishuHelp: "企業自建應用，貼上 App ID + App Secret。指引：open.feishu.cn 建應用並開通 im:message.* 權限。",
     testAccountTitle: "使用飛書測試號（開發用途）",
@@ -1699,6 +1700,7 @@ export const zhTW = {
     deleteOk: "通道已刪除",
     notConfigured: "未配置",
       webhookTitle: "本機 Webhook（快捷指令/指令碼）",
+      actions: "操作",
       webhookRunning: "執行中",
       webhookStopped: "已停止",
       webhookHelp: "攜帶密鑰 POST /im/task 即可取得助理回覆；iOS 捷徑、指令碼與自動化平台均可接入。",
