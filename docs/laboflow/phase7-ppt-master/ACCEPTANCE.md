@@ -119,9 +119,26 @@ cd "/Users/lance/LaboFlow Desktop" && pnpm build:js
 
 ## 6. 已知遗留项
 
-1. **宿主 RPC 预算耗尽（P4-①，DESIGN 非目标）**：单轮内累计重 Python 调用
-   仍可能耗尽预算（PPT Test 取证：270s→330s）。本轮仅解决 P4-②（daemon
-   禁令）。预算策略改造**另立项目**，不在本阶段范围。
+1. **宿主 RPC 预算耗尽（P4-①，DESIGN 非目标）——已闭环（2026-11-02/03）**：
+   宿主结构修复落地于分支 `fix/rpc-budget-dispatch`（worktree
+   `/Users/lance/laboflow-wt-rpc`，提交 530388828 + 7f78cae56）：两阶段
+   预算（调度门排队单独计时）、强制权限等待上限（PERMISSION_TIMEOUT，
+   结构化拒绝）、长/短工具请求槽分池（20/32）。无人值守复验 3 轮全 PASS
+   （`scripts/verify-host-rpc-budget.mjs`：双并发 90s 重调用 + 轻探针风暴
+   + ask 提示上限），0 次 HOST_RPC_TIMEOUT；取证与实施记录见
+   [RPC-BUDGET-ANALYSIS.md](RPC-BUDGET-ANALYSIS.md) §5。
+
+### 6a. 遗留事项闭环（2026-11-02/03，用户批准"两个遗留事项都要开干"）
+
+| 事项 | 落地 | 验证 |
+|---|---|---|
+| A. RPC 宿主修复 | host-core `fix/rpc-budget-dispatch` 530388828/7f78cae56；spec 08-error-codes 同步 | cargo 707 通过；验证驱动器 3 轮 PASS（§6.1） |
+| B. Exit-preview 引导 | 插件 v4.5.0（dbf49f3）：锁观察器 + 工作台状态行"预览已关闭·批注已保存"（10 分钟窗口）+ F-2 注入 Stage-2 应用批注指令；集成锁 da3785e2e | 插件 196 测试通过（含 live 链路 preview-exit-live：真实 daemon→Exit HTTP→观察器→注入→状态通道）；状态行目检待屏幕点亮 |
+
+已知残余：验证驱动器覆盖 host-core 协议层（与真实应用同代码路径），真实
+agent + 工作台的端到端目检（状态行渲染、`queue_wait_ms` 告警观测）留待
+用户下次会话；PLUGIN 工具请求槽分类沿用通用池（其执行受 150s 派发上限
+约束），不构成本次故障路径。
 2. **实机 GUI 走查（§4）待用户运行**：8 项清单全部通过前，DESIGN §9.3
    验收不闭合。
 3. **发行 CI 的 release-zip 拉取源暂缓**：`plugins.bundle.json` 当前
