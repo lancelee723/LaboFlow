@@ -2,9 +2,12 @@ mod activation;
 mod agent_capabilities;
 mod artifacts;
 mod audit;
-mod channel_accounts;
+mod background_tasks;
 mod config_sync;
+mod data_relocation;
 mod db;
+mod file_batches;
+mod file_resources;
 mod keyboard;
 mod mcp_servers;
 mod network_policy;
@@ -23,15 +26,17 @@ mod scratch;
 mod secrets;
 mod session_collaboration;
 mod session_search;
+mod session_worktrees;
 mod sessions;
 mod state;
+mod todos;
 mod tool_budget;
 mod tools;
 mod transcripts;
 mod turn_queue;
 mod user_skills;
-mod user_experts;
 mod user_subagents;
+mod visualizations;
 mod workspace;
 
 use std::sync::Arc;
@@ -45,6 +50,9 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if data_relocation::run_cli()? {
+        return Ok(());
+    }
     if std::env::args().any(|arg| arg == tools::INTERNAL_TOOL_RUNNER_FLAG) {
         let exit_code = match tools::run_internal_tool_runner().await {
             Ok(exit_code) => exit_code,
@@ -91,8 +99,17 @@ async fn main() -> anyhow::Result<()> {
         if let Ok(list) = sessions::list_sessions(&st.db) {
             let live: std::collections::HashSet<String> = list.into_iter().map(|s| s.id).collect();
             scratch::sweep(&data_dir, &live);
+            // Visualization dirs are swept for orphans only, never by age
+            // (D671): live transcripts still reference their cards.
+            visualizations::sweep(&data_dir, &live);
             review::sweep(&data_dir, &live);
         }
     }
+    // Drop half-created worktrees, mark vanished ones, repair links after a
+    // moved data directory, and remove orphans (ADR 0329).
+    tokio::spawn(session_worktrees::lifecycle::reconcile(
+        state.clone(),
+        session_worktrees::git::GitRunner::default(),
+    ));
     rpc::serve(state).await
 }
