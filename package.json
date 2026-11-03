@@ -1,15 +1,9 @@
 {
   "name": "laboflow",
   "private": true,
-<<<<<<< ours
-  "version": "0.21.0-beta.3",
+  "version": "0.21.0",
   "description": "LaboFlow \u2014 local-first AI agent desktop workspace (hard fork of PI-Desktop v0.15.10)",
   "packageManager": "pnpm@10.34.5",
-=======
-  "version": "0.21.0",
-  "description": "Local-first AI coding agent desktop client",
-  "packageManager": "pnpm@12.8.1+sha512.f64ba907507f5ceafe06c8d38e6052d0179444580ec1279ddd5bfc11cb48aa8a2644b66598e07e761da84872a9fc57d5f902b87fa49d024198d558612aabbe45",
->>>>>>> upstream
   "engines": {
     "node": ">=22.19.0",
     "pnpm": ">=10"
@@ -31,31 +25,20 @@
     "test:e2e:scheduled-quit-cancel": "node scripts/e2e-scheduled-quit-cancel.mjs",
     "test:e2e:keep-awake": "node scripts/e2e-keep-awake.mjs",
     "test:e2e:rpc-unicode": "node scripts/e2e-rpc-unicode.mjs",
-<<<<<<< ours
-=======
-    "test:e2e:tool-result-persistence": "node --max-old-space-size=4096 scripts/e2e-tool-result-persistence.mjs",
-    "test:e2e:transcript-cache": "node scripts/e2e-transcript-cache.mjs",
-    "test:e2e:review-state": "node scripts/e2e-review-state-persistence.mjs",
->>>>>>> upstream
-    "test:e2e:plan": "node scripts/e2e-plan.mjs",
+  "test:e2e:tool-result-persistence": "node --max-old-space-size=4096 scripts/e2e-tool-result-persistence.mjs",
+  "test:e2e:transcript-cache": "node scripts/e2e-transcript-cache.mjs",
+  "test:e2e:review-state": "node scripts/e2e-review-state-persistence.mjs",    "test:e2e:plan": "node scripts/e2e-plan.mjs",
     "test:e2e:plan-ui": "node scripts/e2e-plan-ui.mjs",
     "test:e2e:theme-surfaces": "node scripts/e2e-theme-surfaces.mjs",
     "test:e2e:composer-occlusion": "node scripts/e2e-theme-surfaces.mjs --dock-mask-only",
     "test:e2e:composer-autocomplete": "node scripts/e2e-composer-autocomplete.mjs",
-<<<<<<< ours
-    "test:e2e:composer-model-selection": "node scripts/e2e-composer-model-selection.mjs",
-    "test:e2e:composer-paste": "node scripts/e2e-composer-paste.mjs",
-    "test:e2e:transcript": "node scripts/e2e-transcript-render.mjs",
-=======
-    "test:e2e:composer-ime-slash": "node scripts/e2e-composer-ime-stack.mjs",
-    "test:e2e:model-discovery-state": "node scripts/e2e-model-discovery-state.mjs",
-    "test:e2e:composer-model-selection": "node scripts/e2e-composer-model-selection.mjs",
-    "test:e2e:composer-paste": "node scripts/e2e-composer-paste.mjs",
-    "test:e2e:transcript": "node scripts/e2e-transcript-render.mjs",
-    "test:e2e:gen-ui": "node scripts/e2e-gen-ui.mjs",
-    "test:e2e:renderer-responsiveness": "node scripts/e2e-renderer-responsiveness.mjs",
->>>>>>> upstream
-    "test:e2e:transcript-minimap-jump": "node scripts/e2e-transcript-minimap-jump.mjs",
+  "test:e2e:composer-ime-slash": "node scripts/e2e-composer-ime-stack.mjs",
+  "test:e2e:model-discovery-state": "node scripts/e2e-model-discovery-state.mjs",
+  "test:e2e:composer-model-selection": "node scripts/e2e-composer-model-selection.mjs",
+  "test:e2e:composer-paste": "node scripts/e2e-composer-paste.mjs",
+  "test:e2e:transcript": "node scripts/e2e-transcript-render.mjs",
+  "test:e2e:gen-ui": "node scripts/e2e-gen-ui.mjs",
+  "test:e2e:renderer-responsiveness": "node scripts/e2e-renderer-responsiveness.mjs",    "test:e2e:transcript-minimap-jump": "node scripts/e2e-transcript-minimap-jump.mjs",
     "test:e2e:copy-tex": "node scripts/e2e-copy-tex.mjs",
     "test:e2e:radial-menu": "node scripts/e2e-radial-menu.mjs",
     "test:e2e:transcript-disclosure": "node scripts/e2e-transcript-disclosure-anchor.mjs",
@@ -96,26 +79,18 @@
     "test:e2e:mcp-market": "node scripts/e2e-mcp-market.mjs",
     "test:e2e:skill-market": "node scripts/e2e-skill-market.mjs",
     "test:e2e:capability-move": "node scripts/e2e-capability-move.mjs",
-<<<<<<< ours
-=======
-    "test:e2e:plugin-fetch-redirect": "node --test apps/desktop/test/plugin-fetch-redirect.test.mjs",
-    "test:e2e:plugin-command-ownership": "node --test --test-timeout=60000 apps/desktop/test/plugin-command-ownership.test.mjs",
-    "test:e2e:plugin-projects": "node scripts/e2e-plugin-projects.mjs",
->>>>>>> upstream
-    "test:e2e:plugin-import-deps": "node scripts/e2e-plugin-import-deps.mjs",
+  "test:e2e:plugin-fetch-redirect": "node --test apps/desktop/test/plugin-fetch-redirect.test.mjs",
+  "test:e2e:plugin-command-ownership": "node --test --test-timeout=60000 apps/desktop/test/plugin-command-ownership.test.mjs",
+  "test:e2e:plugin-projects": "node scripts/e2e-plugin-projects.mjs",    "test:e2e:plugin-import-deps": "node scripts/e2e-plugin-import-deps.mjs",
     "test:e2e:trusted-extensions": "node scripts/e2e-trusted-extensions.mjs",
     "test:e2e:plugin-ui-slots": "node scripts/e2e-plugin-ui-slots.mjs",
     "test:e2e:file-manager-theme": "node --test apps/desktop/test/file-manager-theme-user-path.e2e.mjs",
     "test:e2e:collaboration": "node scripts/e2e-session-collaboration.mjs",
     "test:e2e:session-completion": "node scripts/e2e-session-completion.mjs",
     "test:e2e:remote-host": "node scripts/e2e-remote-host.mjs",
-<<<<<<< ours
-=======
-    "test:e2e:remote-file-manager": "node scripts/e2e-remote-file-manager.mjs",
-    "test:e2e:remote-mvp": "node scripts/e2e-remote-mvp.mjs",
-    "test:e2e:remote-mvp-ui": "node scripts/e2e-remote-mvp-ui.mjs",
->>>>>>> upstream
-    "test:e2e:shortcut-settings": "node scripts/test-shortcut-settings.mjs",
+  "test:e2e:remote-file-manager": "node scripts/e2e-remote-file-manager.mjs",
+  "test:e2e:remote-mvp": "node scripts/e2e-remote-mvp.mjs",
+  "test:e2e:remote-mvp-ui": "node scripts/e2e-remote-mvp-ui.mjs",    "test:e2e:shortcut-settings": "node scripts/test-shortcut-settings.mjs",
     "test:e2e:dialog-overflow": "node scripts/test-dialog-overflow.mjs"
   },
   "devDependencies": {
