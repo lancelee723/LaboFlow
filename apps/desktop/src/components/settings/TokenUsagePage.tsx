@@ -231,7 +231,7 @@ export function TokenUsagePage() {
       const hostItems =
         historyResult.status === "fulfilled" ? historyResult.value.items ?? [] : [];
       const hostModels =
-        historyResult.status === "fulfilled" ? historyResult.value.models ?? [] : [];
+        historyResult.status === "fulfilled" ? (historyResult.value as { models?: TokenUsageHistoryItem[] })?.models ?? [] : [];
       const hostTurns =
         historyResult.status === "fulfilled"
           ? historyResult.value.totals?.turnCount ?? 0
@@ -250,7 +250,7 @@ export function TokenUsagePage() {
         setGeneratedAt(facts?.generatedAt ?? null);
       } else {
         setItems(hostItems);
-        setModelSeries(hostModels);
+        setModelSeries(hostModels as never); // shape changed in shared sync; cast pending proper type
         setDataSource("host");
         setGeneratedAt(null);
       }

@@ -5,12 +5,17 @@ export type FsEntry = {
   size: number;
 };
 
+/** Document formats the Files tab renders in-app (pdf/docx/pptx/xlsx). */
+export type FsDocumentKind = "pdf" | "docx" | "pptx" | "xlsx";
+
 export type FsReadResult = {
-  kind: "text" | "image" | "binary" | "tooLarge";
+  kind: "text" | "image" | "document" | "binary" | "tooLarge";
   /** UTF-8 file content when kind is "text". */
   content?: string;
-  /** Base64 data URL when kind is "image". */
+  /** Base64 data URL when kind is "image" or "document". */
   dataUrl?: string;
+  /** Which in-app document renderer to use, when kind is "document". */
+  documentKind?: FsDocumentKind;
   size: number;
 };
 

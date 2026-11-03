@@ -6,6 +6,10 @@ import type { SessionThinkingLevel } from "./models.js";
 export type AppVersionInfo = {
   name: string;
   version: string;
+  /** Marketing display name ("LaboFlow Desktop"); `name` stays the process identity. */
+  displayName?: string;
+  /** Product version codename ("Alpha-1.0.0"); `version` stays the build semver. */
+  displayVersion?: string;
   protocolVersion: number;
   hostProtocolVersion?: number;
   hostVersion?: string;
@@ -78,11 +82,6 @@ export type UpdateState = {
   error?: string;
   /** True when the transition came from a user-initiated check. */
   manual?: boolean;
-  /**
-   * True when the user dismissed the notice for `availableVersion`. Stays
-   * dismissed across restarts until a newer version is detected (#1317).
-   */
-  dismissed?: boolean;
   releasesUrl: string;
 };
 
@@ -97,7 +96,13 @@ export type OnboardingState = {
 };
 
 
-export type ScheduledTaskCadence = "manual" | "hourly" | "interval" | "daily" | "weekly";
+export type ScheduledTaskCadence =
+  | "manual"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  /** LaboFlow module 03 (R5-1): 5-field cron expression in `cronExpr`. */
+  | "cron";
 export type ScheduledTaskSchedule = {
   hour: number;
   minute: number;
@@ -105,22 +110,12 @@ export type ScheduledTaskSchedule = {
   weekday: number;
   /** Selected days, Monday = 0. When present, must be nonempty and unique. */
   weekdays?: number[];
-  /**
-   * Elapsed minutes between runs of an `interval` task. That cadence requires
-   * it and no other cadence reads it, so switching back to a calendar keeps
-   * the value for the way back. 5–1440, mirroring `INTERVAL_MIN_MINUTES` and
-   * `INTERVAL_MAX_MINUTES` in `crates/host-core/src/scheduled/timing.rs`.
-   */
-  intervalMinutes?: number;
 };
 export type ScheduledTaskRun = {
   id: string; taskId: string; sessionId: string | null;
   status: "running" | "completed" | "aborted" | "error";
   errorCode: string | null; startedAt: string; endedAt: string | null;
 };
-
-/** How a scheduled run relates to the task's conversations. */
-export type ScheduledSessionMode = "perRun" | "reuse";
 
 export type ScheduledTask = {
   id: string;
@@ -133,16 +128,19 @@ export type ScheduledTask = {
   updatedAt: string;
   lastRunAt?: string;
   schedule?: ScheduledTaskSchedule | null;
+  /** LaboFlow module 03 (R5-1): 5-field cron expression (cadence "cron"). */
+  cronExpr?: string | null;
+  /** FR-MC-15 output destination: empty = session only. */
+  outputDestination?: string | null;
   nextRunAt?: string;
   workspacePath?: string;
   /** Explicit task-owned execution settings. Missing fields preserve legacy behavior. */
   permissionMode?: GlobalPermissionMode;
   thinkingLevel?: SessionThinkingLevel;
-  /**
-   * Whether each run opens its own conversation (`perRun`, the default) or
-   * continues the conversation its previous run used (`reuse`).
-   */
-  sessionMode?: ScheduledSessionMode;
   providerId?: string;
   modelId?: string;
+  /** FR-MC-11: per-task missed-run catch-up; absent = enabled. */
+  catchUpEnabled?: boolean | null;
+  /** FR-MC-17: strict | degraded | lenient; absent = executor default. */
+  unattendedPolicy?: "strict" | "degraded" | "lenient" | null;
 };

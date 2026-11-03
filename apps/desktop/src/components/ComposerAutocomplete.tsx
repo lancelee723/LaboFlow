@@ -48,6 +48,7 @@ function Highlighted({
 }
 
 const GROUP_KEYS: Record<ComposerCommand["kind"], string> = {
+  mcp: "chat.slashGroupMCP",
   template: "chat.slashGroupTemplates",
   builtin: "chat.slashGroupApp",
   plugin: "chat.slashGroupPlugins",

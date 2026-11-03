@@ -1,3 +1,4 @@
+import type { FsDocumentKind } from "./types/filesystem.js";
 /**
  * Document formats the app previews in-app (Files tab). One canonical list so
  * the host runtime, the renderer hook that routes chat file links, and the
@@ -7,8 +8,6 @@
  * browser-side renderer for them, so they keep the binary treatment.
  */
 export const DOCUMENT_PREVIEW_EXTENSIONS = ["pdf", "docx", "pptx", "xlsx"] as const;
-
-export type FsDocumentKind = (typeof DOCUMENT_PREVIEW_EXTENSIONS)[number];
 
 export const DOCUMENT_PREVIEW_MIME: Record<FsDocumentKind, string> = {
   pdf: "application/pdf",

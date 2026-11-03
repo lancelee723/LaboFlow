@@ -1,5 +1,4 @@
 /** Public, secret-free contracts for the app-owned real-time voice feature. */
-import type { SessionSource } from "./sessions.js";
 
 export const LIVE_ADAPTER_IDS = [
   "codex-live",
@@ -15,15 +14,13 @@ export type LiveWorkBinding = {
   workSessionId: string;
   workBindingRevision: number;
   label: string;
-  sessionSource?: SessionSource;
   contextEnabled: boolean;
 };
 
 export type LiveWorkSelectionOption = {
   selectionRef: string;
   kind: "project" | "session";
-  action: "none" | "open" | "select" | "create";
-  sessionSource?: SessionSource;
+  action: "none" | "open" | "create";
   label: string;
   duplicateLabel?: boolean;
 };
@@ -179,22 +176,8 @@ export type LiveCallView = {
   workOperations?: LiveWorkOperationView[];
 };
 
-export type LiveWorkStopOperationResult = {
-  status: "requested" | "already-terminal" | "stale-target" | "unsupported" | "unknown";
-  message?: string;
-};
-
-export type LiveWorkCancelQueuedOperationResult = {
-  status: "canceled" | "already-delivered" | "not-found" | "unsupported" | "unknown" | "stale-target";
-};
-
-export type LiveWorkOperationControlRequest = { callId: string; operationId: string };
-
 export type LiveWorkOperationView = {
   operationId: string;
-  workSessionId?: string;
-  workSessionLabel?: string;
-  sessionSource?: SessionSource;
   admission: "received" | "reviewing" | "dispatching" | "accepted" | "rejected" | "unknown" | "withdrawn";
   execution: "not-started" | "queued" | "running" | "waiting-permission" | "waiting-input" | "unknown" | "completed" | "failed" | "interrupted" | "canceled";
   failureCode?: "classifier-invalid" | "classifier-timeout" | "caller-withdrawn" | "receipt-undelivered" | "scope-changed" | "host-rejected" | "dispatch-unknown";
@@ -237,10 +220,8 @@ export type LivePrepareRequest = {
   bindingId: string;
   expectedSettingsRevision: number;
   initialMuted: boolean;
-  /** Current Composer session, when present; Main revalidates it against the live catalog. */
-  workTarget?: { workSessionId: string };
-  /** Independent, call-scoped consent to share bounded text from the current work session. */
-  shareSelectedSessionContext?: boolean;
+  /** Set only by an explicit user action to bind this call to a session. */
+  workTarget?: { workSessionId: string; contextEnabled: boolean };
 };
 
 export type LivePreparedCall = {
@@ -314,10 +295,3 @@ export type LiveTranscriptEvent = {
   callId: string;
   segment: LiveTranscriptSegment;
 };
-
-/**
- * The call actions a docked Live Voice widget can ask for. The widget window
- * owns no media and is not the Live Voice call owner, so every action travels
- * to the main window (the owner frame) and runs there.
- */
-export type LiveVoiceWidgetAction = "cancel" | "mute" | "resume" | "end" | "details" | "settings";
