@@ -23,6 +23,8 @@ export type ThinkingCapabilitySet = {
  */
 export type ModelConfig = {
   source: "pi" | "models.dev" | "generic";
+  /** Published identity before account endpoint or wire-model overrides. */
+  transcriptBinding?: { modelId: string; api: string; baseUrl: string };
   inputLimits?: Model<Api>["inputLimits"];
   promptCache?: Model<Api>["promptCache"];
   samplingParams?: Model<Api>["samplingParams"];
@@ -34,6 +36,8 @@ export type ModelConfig = {
   reasoning: boolean;
   reasoningOptions?: ModelReasoningOption[];
   thinkingProtocol?: ThinkingProtocol;
+  /** Explicit binding override, separate from published adapter compatibility. */
+  supportsReasoningEffort?: boolean | null;
   supportedThinkingLevels?: readonly ThinkingLevel[];
   thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
   toolCall?: boolean;

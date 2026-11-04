@@ -43,7 +43,8 @@ test("project group update is available through the host RPC and preload API", (
   assert.match(protocolSource, /projectGroupUpdate:\s*"pi-desktop\/project-group\/update"/);
   assert.match(apiSource, /updateProjectGroup: \(groupId: string, name: string, folders: string\[\]\)/);
   assert.match(hostSource, /"project\.group\.update"/);
-  assert.match(hostSource, /update_project_group\(group_id, name, &folders\)/);
+  // dd375d6b8 added the primary-folder promotion argument to the update call.
+  assert.match(hostSource, /update_project_group\(group_id, name, &folders, primary\)/);
 });
 
 for (const [locale, source] of [["en", enSource], ["zh-CN", zhSource], ["tr", trSource]]) {

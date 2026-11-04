@@ -253,8 +253,6 @@ test("FOREIGN KEY constraint failed drops the orphaned entry and keeps draining 
     logs.some((row) => row.message === "session persistence flush dropped orphaned message"),
   );
 });
-<<<<<<< ours
-=======
 
 const DEAD_LETTER_FILE = "session-message-outbox.dead-letter.json";
 
@@ -677,4 +675,3 @@ test("delayed consumption of a rejected outbox load stays observed and fails clo
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", source], { encoding: "utf8" });
   assert.equal(child.status, 0, child.stderr || child.stdout);
 });
->>>>>>> upstream

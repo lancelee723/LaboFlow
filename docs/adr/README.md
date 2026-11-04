@@ -20,8 +20,6 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
-<<<<<<< ours
-=======
 | plugin-projects-list | [Read-only durable project enumeration for plugins](plugin-projects-list.md) | Accepted |
 | append-only-review-state | [Append-only review state](append-only-review-state.md) | Implemented candidate |
 | lossless-tool-image-storage | [Lossless tool-image storage and bounded history mutations](lossless-tool-image-storage.md) | Implemented candidate |
@@ -41,7 +39,6 @@ Each ADR includes:
 | mcp-tool-approval-risk | [User MCP tools keep the normal approval path](mcp-tool-approval-risk.md) | Accepted |
 | models-dev-catalog-authority | [models.dev owns published model metadata](models-dev-catalog-authority.md) | Accepted for implementation |
 | pi-ai-core-0991-authority | [Pi 0.99.1 account model authority](pi-ai-core-0991-authority.md) | Superseded for chat model metadata |
->>>>>>> upstream
 | plan-tool-declarations-and-execution-denials | [Keep known tool declarations while denying contract-mode execution](plan-tool-declarations-and-execution-denials.md) | Accepted for implementation |
 | trusted-extension-operation-ownership | [Trusted extension operation ownership](trusted-extension-operation-ownership.md) | Implemented candidate |
 | scheduled-desktop-automations | [Desktop automation scheduling](scheduled-desktop-automations.md) | Accepted for implementation |
@@ -383,14 +380,11 @@ Each ADR includes:
 | 0326 | [Verified SSH Host installation and daily startup](0326-verified-ssh-host-installation.md) | Accepted for experimental implementation (amends ADR 0292; Linux SSH qualification and publication pending) |
 | 0327 | [Automatic remote Host version realignment](0327-remote-host-version-realignment.md) | Accepted for experimental implementation (amends ADR 0326 item 6; Linux SSH qualification pending) |
 | 0328 | [Open arbitrary local files in the embedded Browser](0328-browser-arbitrary-local-files.md) | Accepted (D657; amends ADR 0170; issue #1627) |
-<<<<<<< ours
-=======
 | 0329 | [Isolate parallel sessions of one project in git worktrees](0329-session-worktree-isolation.md) | Accepted (Windows E2E pending) |
 | 0330 | [Open scoped HTML files in the work-panel Browser from plugins](0330-open-html-files-in-work-panel-browser-from-plugins.md) | Accepted |
 | 0331 | [Plugin session follow and host-owned work-panel reveal](0331-plugin-session-follow-and-work-panel-reveal.md) | Accepted |
 | 0333 | [A plugin-owned suggestion in the Composer placeholder](0333-plugin-composer-suggestion.md) | Accepted |
 | 0334 | [OpenAI Fast mode as a per-session switch gated by model settings](0334-openai-fast-mode.md) | Accepted |
->>>>>>> upstream
 | plugin-fetch-redirect-policy | [Host-enforced plugin fetch redirect policy](plugin-fetch-redirect-policy.md) | Accepted (implementation candidate for #1475) |
 
 | local-agent-remote-workspace-tools | [Local Agent and model requests for remote workspaces](local-agent-remote-workspace-tools.md) | Accepted for implementation |

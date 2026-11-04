@@ -197,7 +197,7 @@ module.exports = { onLoad, onUnload };
       :root[data-base="light"] { color-scheme: light; --bg: #ffffff; --surface: #f9f9f9; --fg: #1a1c1f; --muted: #5d5d5d; --border: color-mix(in oklab, #1a1c1f 10%, transparent); --accent: #1a1c1f; }
       * { box-sizing: border-box; }
       body { margin: 0; min-height: 100vh; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: var(--pi-plugin-titlebar-height, 0px) 16px 16px; overflow: auto; background: var(--bg); color: var(--fg); }
-      /* PI-Desktop reserves exactly a transparent 46px drag band. Normal-flow
+      /* LaboFlow reserves exactly a transparent 46px drag band. Normal-flow
          content is offset automatically; fixed/sticky top UI starts at
          top: var(--pi-plugin-titlebar-height, 46px). */
       .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--surface); }
@@ -338,7 +338,7 @@ module.exports = { onLoad, onUnload };
     :root[data-base="light"] { color-scheme: light; --bg: #ffffff; --surface: #f9f9f9; --fg: #1a1c1f; --muted: #5d5d5d; --border: color-mix(in oklab, #1a1c1f 10%, transparent); --accent: #1a1c1f; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); padding: var(--pi-plugin-titlebar-height, 0px) 16px 16px; overflow: auto; }
-    /* PI-Desktop reserves exactly a transparent 46px drag band. Normal-flow
+    /* LaboFlow reserves exactly a transparent 46px drag band. Normal-flow
        content is offset automatically; fixed/sticky top UI starts at
        top: var(--pi-plugin-titlebar-height, 46px). */
     textarea { width: 100%; min-height: 180px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: inherit; padding: 10px; box-sizing: border-box; font: inherit; }

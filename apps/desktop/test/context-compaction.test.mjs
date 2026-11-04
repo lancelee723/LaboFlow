@@ -124,11 +124,13 @@ test("the hard boundary is enforced by the host, with a model-side escape hatch"
   assert.match(runtime, /contextReminderClaimed/);
   assert.match(runtime, /contextFallbackReminderClaimed/);
   // pi 0.86 carries the canonical system prompt in the transcript. The
-  // reminder is appended as a per-turn system message, not only as the legacy
-  // AgentContext.systemPrompt field.
+  // reminder is appended as a per-turn system message — upstream evolved the
+  // plain content into a replaceable CONTEXT_BUDGET_SECTION that expires when
+  // compaction opens a new window (the legacy systemPrompt field is still
+  // appended for pre-section agents).
   assert.match(
     runtime,
-    /messages: \[\s*\.\.\.context\.messages,\s*\{\s*role: "system",\s*content: reminder,/,
+    /messages: \[\s*\.\.\.context\.messages,\s*\{\s*role: "system",\s*content: "", sections: \{ \[CONTEXT_BUDGET_SECTION\]: reminder \}/,
   );
   assert.match(hostPermissions, /"new_context"/);
 });

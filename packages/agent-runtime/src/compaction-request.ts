@@ -30,6 +30,11 @@ import {
   type RuntimeProviderConfig,
 } from "./provider-binding.js";
 import { mergeProviderHeaders, withProviderHeaders } from "./provider-headers.js";
+import {
+  providerUsesSessionAffinity,
+  withSessionAffinityOptions,
+  withSessionPromptCacheKey,
+} from "./session-affinity.js";
 import { compactionRequestShape, type CompactionRequestShape } from "./compaction-diagnostics.js";
 
 /**
@@ -47,16 +52,19 @@ export function compactionRequestOptions(input: {
   options?: ModelsSimpleStreamOptions;
 }): ModelsSimpleStreamOptions {
   const { provider, sessionId, model, context, options } = input;
-  return withProviderHeaders(
-    withOpenCodeSessionHeaders(
-      { ...options, sessionId, reasoning: requestThinkingLevel(model, options?.reasoning ?? "off") },
-      { ...openCodeEndpointFromProvider(provider, model), sessionId },
+  return withSessionAffinityOptions(
+    withProviderHeaders(
+      withOpenCodeSessionHeaders(
+        { ...options, sessionId, reasoning: requestThinkingLevel(model, options?.reasoning ?? "off") },
+        { ...openCodeEndpointFromProvider(provider, model), sessionId },
+      ),
+      mergeProviderHeaders(
+        copilotRequestHeaders(provider, context),
+        provider.headers,
+      ),
+      model.api,
     ),
-    mergeProviderHeaders(
-      copilotRequestHeaders(provider, context),
-      provider.headers,
-    ),
-    model.api,
+    { provider, api: model.api, baseUrl: model.baseUrl, sessionId },
   );
 }
 
@@ -109,24 +117,51 @@ export function withCompactionRequestHeaders(
   onUsage?: UsageObserver,
   onRequestShape?: (shape: CompactionRequestShape) => void,
 ): Models {
-  const completeSimple: Models["completeSimple"] = (model, context, options) => {
+  const completeSimple: Models["completeSimple"] = async (model, context, options) => {
+    const identity = { ...requestUsageIdentity(model, provider.id), costStatus: nativeCostStatus(provider.modelConfig?.nativeCost) };
     const requestOptions = compactionRequestOptions({ provider, sessionId, model, context, options });
     const previousOnPayload = requestOptions.onPayload;
-    if (SUMMARY_CONVERSATION_APIS.has(model.api)) {
+    if (
+      SUMMARY_CONVERSATION_APIS.has(model.api) ||
+      providerUsesSessionAffinity(provider, model.api, model.baseUrl) ||
+      onRequestShape
+    ) {
       requestOptions.onPayload = async (payload, requestModel) => {
         const replacement = await previousOnPayload?.(payload, requestModel);
         const base = replacement === undefined ? payload : replacement;
-        const keyed = withSummaryPromptCacheKey({
+        // Two shapes, one owner each, and each pass is a no-op for the other's
+        // API: the summary adapter asks for `"none"` retention on the Responses
+        // APIs, which is what costs the adapter's own key there, while the
+        // Completions adapter keys only `api.openai.com`. Both add only an
+        // absent key, so a payload that already carries one is left alone.
+        const summaryKeyed = withSummaryPromptCacheKey({
           payload: base,
           api: requestModel.api,
           sessionId,
         });
+        const keyed = withSessionPromptCacheKey({
+          payload: summaryKeyed,
+          api: requestModel.api,
+          sessionId,
+          enabled: providerUsesSessionAffinity(
+            provider,
+            requestModel.api,
+            requestModel.baseUrl,
+          ),
+        });
         // Nothing to change keeps the hook's own return value, so an untouched
         // payload stays the adapter's object instead of a copy of it.
+        onRequestShape?.(compactionRequestShape({
+          model: requestModel,
+          payload: keyed ?? base,
+          messages: context.messages,
+          tools: (context as Context & { tools?: readonly unknown[] }).tools,
+        }));
         return keyed === base ? replacement : keyed;
       };
     }
-    return models.completeSimple(model, context, requestOptions);
+    const result = await models.completeSimple(model, context, requestOptions);
+    return onUsage ? accountModelResult(result, identity, onUsage) : result;
   };
   return new Proxy(models, {
     get: (target, property, receiver) =>

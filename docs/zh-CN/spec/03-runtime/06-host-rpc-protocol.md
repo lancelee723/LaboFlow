@@ -253,13 +253,9 @@ type ToolBudgetHealth = {
 ### 会议
 - `session.list`
 - `session.create` — 接受可选的 `thinkingLevel`； missing/null 默认值
-<<<<<<< ours
-至 `off`
-=======
 至 `off`。可选布尔值 `fastMode`（ADR 0334）保存会话的 `/fast` 开关；缺省/null 表示
 `false`，非布尔值返回 `INVALID_PARAMS`。可选的 `isolated: true`（ADR 0329）同时要求 `projectPath`，并在返回前为新会话
 创建专属 git worktree；无法创建时会话会被删除，调用以 `WORKTREE_*` 错误（§7）失败。
->>>>>>> upstream
 - `session.fork` — accepts `sessionId`, an optional caller-provided display
   `title`, and optional `throughMessageId`; creates
   one independent session from the source's current active canonical

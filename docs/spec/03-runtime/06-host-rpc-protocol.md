@@ -312,15 +312,12 @@ to later refresh and inference; the vendor picker does not collect them.
   `inheritPermissionFromSessionId`; when present, the host copies the existing
   session's persisted permission mode atomically, while omission preserves the
   existing `inherit` default. Missing/null thinking level defaults to `off`.
-<<<<<<< ours
-=======
   Optional boolean `fastMode` (ADR 0334) stores the session `/fast` switch;
   missing/null means `false` and a non-boolean returns `INVALID_PARAMS`.
   Optional `isolated: true` (ADR 0329) also requires `projectPath` and gives
   the new session its own git worktree before it returns; if the worktree
   cannot be created the session is deleted again and the call fails with a
   `WORKTREE_*` error (§7).
->>>>>>> upstream
 - `session.fork` — accepts `sessionId`, an optional caller-provided display
   `title`, and optional `throughMessageId`; creates
   one independent session from the source's current active canonical
@@ -610,8 +607,6 @@ than appending it to answer `content`.
 - `tools.abort`
 - `tools.output` notifications for ordered `stdout`/`stderr` chunks
 
-<<<<<<< ours
-=======
 `tools.abort` accepts `sessionId`, `toolCallId`, and the optional `toolName`.
 Current runtimes include the name so Host cancellation is scoped to the exact
 tool while permission and admission are pending. Older callers may omit it;
@@ -647,7 +642,6 @@ not wait for them to settle and does not fail when one cannot be killed.
 Removing a row in the UI is purely a view action and issues no RPC, so a removed
 task's output remains readable by id until the host's own retention drops it.
 
->>>>>>> upstream
 ### Shells
 - `commandShells.list`
 - `settings.set` with a partial settings object; omitted fields are preserved,
@@ -1361,33 +1355,6 @@ The Host exposes the `configSync.getState`, `configSync.test`,
 `configSync.mapProject`, `configSync.listHistory`, `configSync.restore`,
 `configSync.changePassword`, and
 `configSync.disconnect` methods through the existing Electron Host bridge.
-<<<<<<< ours
-These methods operate on the Host-owned encrypted vault and the explicit
-portable-domain adapter registry. They do not expose raw secrets or local
-filesystem bindings to the Renderer.
-
-`configSync.test` performs a capability probe against a temporary remote
-object and reports whether reliable strong conditional writes are available.
-`configSync.syncNow` and the five-minute automatic poll serialize per vault,
-reconcile against the last acknowledged base, publish immutable encrypted
-objects followed by a conditional head update, and retain unresolved
-conflicts/security-sensitive imports as pending state. A failed head
-precondition restarts from the newly read head; it never overwrites blindly.
-
-`configSync.listHistory` returns revision IDs, creation timestamps, parent IDs,
-and counts without decrypting data in the Renderer. `configSync.restore` requires
-an explicit propagation acknowledgement, writes an encrypted local recovery
-point, publishes a new head with a CAS, and keeps executable/security-sensitive
-entities pending until local approval. `configSync.changePassword` updates the
-wrapped-key header with a strong-ETag CAS; it does not revoke copied old vault
-keys.
-
-The public result is a redacted state snapshot. `configSync.changed` is a Host
-notification carrying that same snapshot. Approval and rejection require the
-current entity digest, so a security-relevant edit cannot reuse an older local
-decision. Disconnect deletes only local credentials, vault keys, metadata and
-staging files; remote objects remain intact.
-=======
 These methods operate on the Host-owned encrypted S3 vault and explicit
 portable-domain adapters. Connection input uses `endpoint`, `region`, `bucket`,
 `prefix`, `accessKeyId`, optional `secretAccessKey` and `sessionToken`,
@@ -1446,4 +1413,3 @@ clients never supply authoritative identities. A changed workspace binding
 reports TOOL_CONTEXT_CHANGED; an identity/address change fails before writing.
 Close/expiry cannot release a running disk task; no failed/uncertain write is
 automatically replayed. See the Host file admission ADR for lifecycle and limits.
->>>>>>> upstream

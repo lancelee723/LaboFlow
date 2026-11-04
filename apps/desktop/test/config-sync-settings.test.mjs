@@ -173,14 +173,13 @@ test("the sync card exposes the fraction to assistive technology", () => {
   assert.match(styles, /\.settings-config-sync-progress-figures \{/);
 });
 
-test("a manual sync outlasts the flat default transport deadline", () => {
+test("a manual sync has no total-request RPC timeout", () => {
   // The host cannot cancel a run that is already under way, so a deadline that
   // fires while it is still working would only report a failure that is not
-  // one; the report events carry liveness instead.
-  assert.match(rpcTimeouts, /CONFIG_SYNC_RPC_TIMEOUT_MS = 1_800_000/);
-  assert.match(rpcTimeouts, /method === "configSync\.syncNow"/);
-  assert.equal(rpcTimeoutMs("configSync.syncNow", {}), CONFIG_SYNC_RPC_TIMEOUT_MS);
-  assert.ok(CONFIG_SYNC_RPC_TIMEOUT_MS > DEFAULT_RPC_TIMEOUT_MS);
+  // one; progress report events carry liveness instead, and the request stays
+  // alive across Settings navigation.
+  assert.match(rpcTimeouts, /if \(method === "configSync\.syncNow"\) return undefined;/);
+  assert.equal(rpcTimeoutMs("configSync.syncNow", {}), undefined);
   // Every other config-sync call keeps the shared default.
   assert.equal(rpcTimeoutMs("configSync.getState", {}), DEFAULT_RPC_TIMEOUT_MS);
 });

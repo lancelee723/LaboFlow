@@ -1,6 +1,3 @@
-<<<<<<< ours
-# 04. Data Storage (Schema v17)
-=======
 # 04. Data Storage (Schema v27)
 
 
@@ -30,7 +27,6 @@ rewrite transcripts at startup. Downgrading to an old application requires a
 complete compatible backup, not merely swapping the SQLite file. No external
 blob directory, new file cleanup lifecycle or lossy image transform is added.
 
->>>>>>> upstream
 
 ## 0. Ownership decision
 
@@ -79,8 +75,6 @@ read time; their path-scoped memory and filesystem instructions remain readable.
 
 ## 2. File layout
 
-<<<<<<< ours
-=======
 ### User-selected storage location (issue #1213)
 
 Settings → General → Storage can select an empty directory on a different
@@ -182,7 +176,6 @@ review snapshots, plugin code/data, models, configuration, or logs. Partial clea
 failure remains observable, retains active roots, and can be retried.
 
 
->>>>>>> upstream
 A packaged installation keeps this tree in `~/.pi-desktop`. A development build
 keeps the same tree in `~/.pi-desktop-dev`, because a shipped app and a
 `pnpm dev` host are two installations that have to run at the same time (D599,
@@ -281,8 +274,6 @@ per message; `seq` is implied by line order:
 {"type":"compaction","id":"cp1","summary":"…","firstKeptMessageId":"m2","throughMessageId":"m3","tokensBefore":917000,"retainedTail":[…],"providerId":"…","modelId":"…","createdAt":"…"}
 ```
 
-<<<<<<< ours
-=======
 Internal system-state rows use role `system`, empty visible content, and optional
 `meta.modelSystem = { version: 1, messageJson, beforeMessageId?, afterMessageId? }`.
 `messageJson` is validated JSON text of a Pi system message with sections and tool
@@ -326,7 +317,6 @@ schema migration. Old sessions remain readable; their first continuation records
 a new baseline. Older app versions ignore the metadata and reconstruct their
 usual current prompt, so downgrade does not promise the same cache prefix.
 
->>>>>>> upstream
 `sessions/<sessionId>.inflight.json` — the assistant reply currently
 streaming in the session, as one `{ schema, sessionId, turnId, savedAt,
 message }` object that host-core replaces atomically (temp + rename) on every
@@ -478,22 +468,6 @@ CREATE TABLE kv (
 | `plugin:<id>` | per-plugin settings; uninstall = `DELETE WHERE ns = ?` |
 | `projectMemory` | durable user-authored context keyed by canonical project path; structured values contain `format: "entries-v1"`, visual `entries`, derived `content`, and `updatedAt` |
 
-<<<<<<< ours
-The app settings JSON optionally stores `thinkingDisplayMode` (`detailed` or
-`compact`). Missing values retain detailed presentation. This additive display
-preference neither rewrites stored reasoning nor changes the database schema.
-
-The same blob optionally stores the prompt-enhancement overrides
-`promptEnhancementCustomTemplate` (the switch that decides whether a stored
-template applies), `promptEnhancementUserTemplate`,
-`promptEnhancementProviderId`, `promptEnhancementModelId`, and
-`promptEnhancementThinkingLevel` (ADR 0121). An absent or blank user template means the
-built-in default applies, so clearing the field stores no key rather than an
-empty string. A non-blank user template must contain the draft variable and stay
-within `PROMPT_ENHANCEMENT_TEMPLATE_MAX_LENGTH`; host-core rejects a write that
-breaks either rule and drops any stored `promptEnhancementSystemPrompt`, which is
-no longer read. No schema version bump is required.
-=======
 The app settings JSON optionally stores `showThinking` (boolean) for transcript
 reasoning visibility. It is a portable application preference and synchronizes
 across devices like the legacy field. Missing values fall back to the legacy
@@ -518,7 +492,6 @@ user installs and grants the standalone `pi.prompt-enhancement` plugin, Electron
 copies valid legacy values into that plugin's private settings once (see
 `04-ux/12-prompt-enhancement.md`). The migration marker is also stored in the
 plugin's private data directory; the host settings schema does not change.
->>>>>>> upstream
 
 New config domains (e.g. MCP servers) start as a namespace; they graduate to
 tables only when they need relations or indexes.
@@ -738,8 +711,6 @@ CREATE INDEX idx_session_import_origins_plugin
   rename does not update `updated_at`, so changing a label cannot reorder
   recent activity; transcript rows, message count, and session state remain
   unchanged.
-<<<<<<< ours
-=======
 - `title_source` records `legacy`, `default`, `manual`, or `generated`. The
   v22→v23 migration leaves pre-existing titles as `legacy`; new session creation
   and manual rename write the corresponding source. `default` means "not chosen
@@ -756,7 +727,6 @@ CREATE INDEX idx_session_import_origins_plugin
   The standalone title plugin can read first-turn text only while `default`,
   and writes using exact-title
   compare-and-set, so a manual rename wins a race.
->>>>>>> upstream
 - Import binds every non-empty normalized `projectPath` to `project_id`;
   path-less imports remain `NULL`. Re-importing a deterministic session id
   creates neither another session nor another project row.
@@ -1534,18 +1504,6 @@ relationship or index. The renderer's unified reading view is shared by ordinary
 history and search; it never becomes canonical mutation or model input.
 
 A bounded window is served through a per-session **transcript layout**: the byte
-<<<<<<< ours
-offset of every message and compaction line, plus the file length those offsets
-were recorded against. Serving a window then seeks to its first selected line
-instead of parsing the history in front of it, so the cost of opening a session
-is proportional to the window rather than to the conversation. Consequences:
-
-- The layout is derived data, cached in memory and rebuilt by scanning the file.
-  `file_len` is its validity token: the transcript is append-only between atomic
-  rewrites, so a longer file is scanned from the previous end and a shorter or
-  replaced file is rescanned in full. Every rewrite and delete path also drops
-  the cached entry, because a rewrite can land on an identical length.
-=======
 offset of every message and compaction line, plus the file identity and complete
 prefix length those offsets describe. Serving a window seeks to its first
 selected line instead of parsing the history in front of it, so the common
@@ -1585,7 +1543,6 @@ cached read is proportional to the requested page. Consequences:
   reject and rebuild. Downgrading to an older app preserves the transcript and
   database, though that app's own cache defect may recur. No database or
   transcript migration is involved.
->>>>>>> upstream
 - A torn trailing line (crash mid-append) is excluded from both the offsets and
   `file_len`, so a later refresh picks it up once the writer completes it.
 - Line classification reads the `type` discriminator with a single depth-aware
@@ -1635,11 +1592,7 @@ truncating at a guessed position.
 - JSON columns are read blind on hot paths (shipped to the renderer as-is);
   anything filtered or summed is a promoted column by rule.
 
-<<<<<<< ours
-## 7. Versioning, v7 reset, and v8-to-v15 migration
-=======
 ## 7. Versioning, v7 reset, and v8-to-v27 migration
->>>>>>> upstream
 
 - `PRAGMA user_version` stays the schema authority; future structural changes
   add ordered Rust migration fns again, each in one transaction, with a
@@ -1650,11 +1603,7 @@ truncating at a guessed position.
   Sessions, providers, and settings from the old file are not carried over;
   the archive remains for manual recovery. All pre-v7 migration code
   (v1 `settings.sqlite` import, v2→v6 chain) is deleted.
-<<<<<<< ours
-- Fresh installs run the full v15 DDL directly.
-=======
 - Fresh installs run the full v27 DDL directly.
->>>>>>> upstream
 - **Schema v7 first reaches v8, then uses the guarded path.** The v7→v8
   migration is followed by the same guarded v8→v15 migration; schema-v9 and
   schema-v10 databases take the same guarded path and receive an exact readable
@@ -1712,8 +1661,6 @@ truncating at a guessed position.
   and `turn_queue.voice_origin_json`; existing queue rows remain valid and
   unset. The migration keeps a v19 backup, and queue entries remain held until
   the existing Agent Host controller attaches.
-<<<<<<< ours
-=======
 - **Schema v22 is additive.** It replaces `idx_sessions_updated` with
   `idx_sessions_updated_id(updated_at DESC, id DESC)` for session-list ordering.
   It changes no rows or persisted fields; a v21 backup precedes the migration.
@@ -1733,7 +1680,6 @@ truncating at a guessed position.
   session `/fast` switch, defaulting to `0` for every existing session. Forks
   copy it; scheduled runs and delegated workers start at `0`. The migration
   keeps a v26 backup.
->>>>>>> upstream
 - **Schema v14 is additive.** It adds nullable `sessions.deleted_at`, the
   partial deletion index, and `session_import_origins`. Existing sessions stay
   active and have no origin rows. The migration runs in the same guarded
@@ -1911,13 +1857,6 @@ migration is required.
 
 ## 12. Native Pi session authority (ADR 0254)
 
-<<<<<<< ours
-Native Pi v3 sessions under the Pi agent session root are a second, explicitly
-source-discriminated transcript authority owned by the Node agent sidecar. They
-are never inserted into SQLite and never copied to the Desktop transcript
-directory. `session.list` merges their projections with Rust-owned
-Desktop summaries, and `session.get` routes by the opaque `native-pi:` id.
-=======
 Native Pi v3 sessions are a second, explicitly source-discriminated transcript
 authority owned by the Node agent sidecar. They are never inserted into SQLite
 and never copied to the Desktop transcript directory. `session.list` merges
@@ -1952,7 +1891,6 @@ keeping the projection with the newest transcript `updatedAt`. The selected
 file retains its path-derived opaque session id; duplicate files are not
 rewritten or deleted, and their paths are omitted from the in-memory lookup
 map for the current scan.
->>>>>>> upstream
 
 Detail reads take an immutable byte snapshot, parse it into an in-memory
 `SessionManager`, and follow the current native branch. They must not call
