@@ -1094,14 +1094,6 @@ export type AgentRuntimeDiagnostic = {
   data: Record<string, unknown>;
 };
 
-export type AgentRuntimeDiagnostic = {
-  kind: "compaction_failure" | "compaction_shape";
-  sessionId: string;
-  turnId?: string;
-  requestId: string;
-  data: Record<string, unknown>;
-};
-
 export type RuntimeMatchConfig = {
   mode: Mode;
   provider: RuntimeProviderConfig;
