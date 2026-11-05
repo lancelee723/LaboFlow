@@ -713,7 +713,7 @@ export function SpacePage() {
                   >
                     <NodeTypeIcon type={String(hit.type) as SpaceNode["type"]} />
                     <span className="truncate">{String(hit.name)}</span>
-                    <span className="ml-auto text-[10px] opacity-50">
+                    <span className="ml-auto text-3xs opacity-50">
                       {t(hit.matchedIn === "title" ? "space.searchTitle" : "space.searchContent")}
                     </span>
                   </button>

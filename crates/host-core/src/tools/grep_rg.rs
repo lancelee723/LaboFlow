@@ -1,6 +1,6 @@
 //! Optional system `rg` backend for the Grep tool.
 //!
-//! Codex prefers `rg` when the machine has it. LaboFlow keeps Grep as the
+//! Codex prefers `rg` when the machine has it. PI-Desktop keeps Grep as the
 //! model-facing contract (budgets, newest-first, scoped ignore) and uses a
 //! direct `rg` exec as the fast path when a binary is on the user PATH.
 //! Spawn failures and `rg` exit 2 fall back to the in-process searcher so a
@@ -41,6 +41,11 @@ thread_local! {
 
 #[cfg(test)]
 pub struct TestRgGuard;
+
+#[cfg(test)]
+pub fn current_test_rg() -> Option<PathBuf> {
+    TEST_RG.with(|rg| rg.borrow().clone())
+}
 
 #[cfg(test)]
 pub fn install_test_rg(path: PathBuf) -> TestRgGuard {

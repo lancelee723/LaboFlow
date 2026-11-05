@@ -7,16 +7,37 @@ use uuid::Uuid;
 use crate::db::{ms_to_ts, now_ms, ts_to_ms, Database};
 use crate::notifications::{self, Notification};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 use crate::transcripts::{self, CompactionRecord, MessageRecord, RevisionRecord};
 
 mod fork_files;
+mod history_mutations;
+pub use history_mutations::{
+    activate_message_revision_canonical, delete_message, retract_pending_prompt,
+};
+mod model_system;
+mod usage;
+pub use usage::record_usage;
 
 pub const MODES: [&str; 3] = ["plan", "goal", "agent"];
 
 /// Maximum number of Unicode scalar values accepted for a user-defined title.
 pub const MAX_SESSION_TITLE_CHARS: usize = 80;
+const TITLE_SOURCE_DEFAULT: &str = "default";
+const TITLE_SOURCE_MANUAL: &str = "manual";
+const TITLE_SOURCE_GENERATED: &str = "generated";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoTitleContext {
+    pub session_id: String,
+    pub expected_title: String,
+    pub user_prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_reply: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_key: Option<String>,
+}
 
 /// Compatibility normalization for v7 callers and imported records. The
 /// persisted operating profile is now always `plan`, `goal` or `agent`.
@@ -111,8 +132,23 @@ pub struct SessionSummary {
     pub thinking_level: String,
     #[serde(default = "default_permission_mode")]
     pub permission_mode: String,
+    /// The `/fast` switch for this session's main turns (ADR 0334). Requests
+    /// use the priority tier only when the model binding also allows it.
+    #[serde(default)]
+    pub fast_mode: bool,
     pub updated_at: String,
     pub created_at: String,
+    /// True when this session is the transcript owned by a scheduled-task run.
+    /// Automation transcripts are entered from the Scheduled page, so the
+    /// sidebar and session search hide them (issue #1291). The value is derived
+    /// from `task_runs.session_id` on read; no session column stores it, and
+    /// deleting the task frees its sessions back into the ordinary lists.
+    #[serde(default)]
+    pub scheduled_run: bool,
+    /// The session's isolated worktree (ADR 0329); absent for every other
+    /// session. Filled in by the list and single-summary reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::session_worktrees::lifecycle::WorktreeSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +163,10 @@ pub struct MessageUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<i64>,
     pub total_tokens: i64,
+    /// Additive accounting provenance and atomic operation ledger. Preserve these
+    /// JSON fields verbatim, including fields introduced by a newer producer.
+    #[serde(default, flatten)]
+    pub accounting: serde_json::Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -140,6 +180,16 @@ pub struct MessageAttachment {
     pub mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<i64>,
+    /// Bounded excerpt of a referenced conversation (`kind: "session"`), written
+    /// by Electron main when the prompt carried a `pi-desktop://session/<id>`
+    /// link. Travels with the user message so the model keeps reading it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The `@path` text this attachment occupies inside the message content when
+    /// the user placed it between words. The transcript renders the attachment
+    /// at that position instead of appending it after the body.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,10 +235,6 @@ pub struct UiMessage {
     /// Structured AppError for an assistant turn that failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Value>,
-    /// Card kind for synthesized rows (`expert-card`, `team-card` — module 01)
-    /// so the renderer can badge them across host roundtrips.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
     /// Stable regenerate-family key shared across rewritten user prompts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision_root_id: Option<String>,
@@ -219,6 +265,8 @@ pub struct UiMessage {
     /// runtime excludes them from the parent's model context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested_parent_tool_call_id: Option<String>,
     /// Subagent definition name that produced the row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
@@ -226,6 +274,14 @@ pub struct UiMessage {
     /// as an additive `hostedSearch` transcript block; no SQL migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted_search: Option<Value>,
+    /// Internal model-context state, preserved outside visible message text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_system: Option<Value>,
+    /// Opaque provider replay data (thinking/text block boundaries and
+    /// signatures) for an assistant row. Stored in record meta; no SQL
+    /// migration, and older builds ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_replay: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +298,8 @@ pub struct SessionDetail {
     #[serde(flatten)]
     pub summary: SessionSummary,
     pub messages: Vec<UiMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plan_history: Vec<crate::plans::PlanHistoryEntry>,
     /// Owning Task for a nested messageAround target, outside the page cursors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub navigation_parent: Option<UiMessage>,
@@ -292,11 +350,43 @@ pub struct SearchHit {
     pub created_at: String,
 }
 
+/// Titles the app writes for a session the user has not named yet.
+///
+/// The renderer creates a session with its localized `chat.untitledTask` label
+/// and also recognizes `nav.newChat`, so host-core has to recognize the same
+/// values: it owns title eligibility and cannot read the renderer catalog when
+/// it decides whether a title may still be replaced. Every entry is stored
+/// lowercased and compared through `to_lowercase`, because both localized
+/// keys the renderer writes — `chat.untitledTask` and `nav.newChat` — have
+/// their own label per locale, and a non-ASCII uppercase letter (a future
+/// "Ñö..." entry) would slip past ASCII-case-insensitive matching (#1755).
+/// Keep this in sync with `LEGACY_DEFAULT_TITLES` in
+/// `apps/desktop/src/lib/session-title-utils.ts`.
+const PLACEHOLDER_TITLES: [&str; 19] = [
+    "",
+    "new task",
+    "new chat",
+    "新建任务",
+    "新对话",
+    "新建任務",
+    "新對話",
+    "새 작업",
+    "새 채팅",
+    "tarefa sem título",
+    "nova conversa",
+    "yeni görev",
+    "yeni sohbet",
+    "neue aufgabe",
+    "nouvelle tâche",
+    "nueva tarea",
+    "neuer chat",
+    "nuevo chat",
+    "nouvelle discussion",
+];
+
 fn is_default_title(title: &str) -> bool {
-    matches!(
-        title.trim(),
-        "" | "New task" | "New chat" | "新建任务" | "新对话"
-    )
+    let t = title.trim().to_lowercase();
+    PLACEHOLDER_TITLES.iter().any(|p| *p == t)
 }
 
 // ---- UiMessage ⇄ transcript record mapping -----------------------------------
@@ -305,6 +395,12 @@ fn is_default_title(title: &str) -> bool {
 /// the search index row (None for tool rows, matching the FTS triggers).
 pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String>) {
     let mut meta_obj = serde_json::Map::new();
+    if let Some(system) = &message.model_system {
+        meta_obj.insert("modelSystem".into(), system.clone());
+    }
+    if let Some(replay) = &message.provider_replay {
+        meta_obj.insert("providerReplay".into(), replay.clone());
+    }
     if let Some(command) = &message.command {
         meta_obj.insert("command".into(), json!(command));
     }
@@ -330,17 +426,7 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
         meta_obj.insert("providerId".into(), json!(provider_id));
     }
     if let Some(usage) = &message.usage {
-        meta_obj.insert(
-            "usage".into(),
-            json!({
-                "inputTokens": usage.input_tokens,
-                "outputTokens": usage.output_tokens,
-                "cacheReadTokens": usage.cache_read_tokens,
-                "cacheWriteTokens": usage.cache_write_tokens,
-                "reasoningTokens": usage.reasoning_tokens,
-                "totalTokens": usage.total_tokens,
-            }),
-        );
+        meta_obj.insert("usage".into(), json!(usage));
     }
     if let Some(duration) = message.response_duration_ms {
         meta_obj.insert("responseDurationMs".into(), json!(duration));
@@ -362,6 +448,9 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
     }
     if let Some(parent) = &message.parent_tool_call_id {
         meta_obj.insert("parentToolCallId".into(), json!(parent));
+    }
+    if let Some(parent) = &message.nested_parent_tool_call_id {
+        meta_obj.insert("nestedParentToolCallId".into(), json!(parent));
     }
     if let Some(agent) = &message.agent_name {
         meta_obj.insert("agentName".into(), json!(agent));
@@ -435,6 +524,12 @@ pub(crate) fn ui_to_record(message: &UiMessage) -> (MessageRecord, Option<String
                 if let Some(size) = attachment.size {
                     block.insert("size".into(), json!(size));
                 }
+                if let Some(text) = &attachment.text {
+                    block.insert("text".into(), json!(text));
+                }
+                if let Some(inline_path) = &attachment.inline_path {
+                    block.insert("inlinePath".into(), json!(inline_path));
+                }
                 blocks.push(Value::Object(block));
             }
         }
@@ -461,6 +556,8 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         _ => Vec::new(),
     };
     let meta = record.meta.unwrap_or(Value::Null);
+    let model_system = meta.get("modelSystem").cloned();
+    let provider_replay = meta.get("providerReplay").cloned();
     let command = meta
         .get("command")
         .and_then(Value::as_str)
@@ -497,6 +594,22 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             cache_write_tokens: value.get("cacheWriteTokens").and_then(|v| v.as_i64()),
             reasoning_tokens: value.get("reasoningTokens").and_then(|v| v.as_i64()),
             total_tokens,
+            accounting: value
+                .as_object()?
+                .iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "inputTokens"
+                            | "outputTokens"
+                            | "cacheReadTokens"
+                            | "cacheWriteTokens"
+                            | "reasoningTokens"
+                            | "totalTokens"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
         })
     });
     let error = meta.get("error").cloned();
@@ -512,6 +625,10 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
         .get("parentToolCallId")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let nested_parent_tool_call_id = meta
+        .get("nestedParentToolCallId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let agent_name = meta
         .get("agentName")
         .and_then(|v| v.as_str())
@@ -551,6 +668,14 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
                 size: block.get("size").and_then(|v| v.as_i64()),
+                text: block
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                inline_path: block
+                    .get("inlinePath")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             })
         })
         .collect::<Vec<_>>();
@@ -607,9 +732,11 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             tool_duration_ms: block.get("durationMs").and_then(|v| v.as_i64()),
             is_error,
             parent_tool_call_id,
+            nested_parent_tool_call_id,
             agent_name,
-            kind: None,
             hosted_search: hosted_search.clone(),
+            model_system: None,
+            provider_replay: None,
         }
     } else {
         let content = blocks
@@ -651,9 +778,11 @@ pub(crate) fn record_to_ui(record: MessageRecord) -> UiMessage {
             tool_duration_ms: None,
             is_error,
             parent_tool_call_id,
+            nested_parent_tool_call_id,
             agent_name,
-            kind: None,
             hosted_search,
+            model_system,
+            provider_replay,
         }
     }
 }
@@ -873,6 +1002,19 @@ fn clone_records_for_fork(
                 .cloned()
                 .unwrap_or_else(|| Uuid::new_v4().to_string());
             if let Some(meta) = record.meta.as_mut().and_then(Value::as_object_mut) {
+                if let Some(system) = meta.get_mut("modelSystem").and_then(Value::as_object_mut) {
+                    for key in ["beforeMessageId", "afterMessageId"] {
+                        if let Some(new_id) = system
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .and_then(|id| message_ids.get(id))
+                        {
+                            system.insert(key.into(), json!(new_id));
+                        } else {
+                            system.remove(key);
+                        }
+                    }
+                }
                 meta.remove("revisionRootId");
                 meta.remove("revisionCount");
                 meta.remove("activeRevision");
@@ -970,8 +1112,9 @@ pub(crate) fn insert_index_row(
 ) -> Result<()> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO messages (
-            id, session_id, turn_id, seq, role, tool_name, is_error, text, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            id, session_id, turn_id, seq, role, tool_name, is_error, text, created_at,
+            streaming
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?;
     stmt.execute(params![
         record.id,
@@ -983,8 +1126,25 @@ pub(crate) fn insert_index_row(
         record.is_error,
         text,
         ts_to_ms(&record.created_at),
+        i64::from(record_is_streaming(record)),
     ])?;
     Ok(())
+}
+
+/// Whether a record's own metadata marks it as a provisional, streaming
+/// assistant row.
+///
+/// The index stores this answer so the write path can ask "is this message still
+/// streaming?" with one indexed lookup. The transcript remains the source of
+/// truth: a rebuild recomputes the column from the file.
+fn record_is_streaming(record: &MessageRecord) -> bool {
+    record.role == "assistant"
+        && record
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("status"))
+            .and_then(Value::as_str)
+            == Some("streaming")
 }
 
 fn recovered_session_title(records: &[MessageRecord]) -> String {
@@ -1066,7 +1226,6 @@ pub fn restore_orphaned_session(db: &Database, session_id: &str) -> Result<bool>
             &records,
             &read.compactions,
         )?;
-        invalidate_transcript_layout(session_id);
     }
     let created_at = records
         .first()
@@ -1158,7 +1317,9 @@ fn session_created_at(db: &Database, session_id: &str) -> Result<String> {
 
 const SUMMARY_SELECT: &str =
     "SELECT s.id, s.title, s.last_seq, p.path, s.model_id, s.provider_id, s.mode,
-            s.thinking_level, s.permission_mode, s.updated_at, s.created_at
+            s.thinking_level, s.permission_mode, s.updated_at, s.created_at,
+            EXISTS (SELECT 1 FROM task_runs r WHERE r.session_id = s.id) AS scheduled_run,
+            s.fast_mode
      FROM sessions s LEFT JOIN projects p ON p.id = s.project_id
      WHERE s.deleted_at IS NULL";
 
@@ -1175,34 +1336,27 @@ pub(crate) fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sess
         permission_mode: row.get(8)?,
         updated_at: ms_to_ts(row.get(9)?),
         created_at: ms_to_ts(row.get(10)?),
+        // Read by name: search and listing build their own column lists, so the
+        // alias keeps this mapper independent of any one query's column order.
+        scheduled_run: row.get("scheduled_run")?,
+        fast_mode: row.get("fast_mode")?,
+        worktree: None,
     })
 }
 
-// ---- sessions ---------------------------------------------------------------
-
-fn first_user_title(db: &Database, session_id: &str) -> Result<Option<String>> {
-    let mut stmt = db.conn().prepare_cached(
-        "SELECT text FROM messages
-         WHERE session_id = ?1 AND role = 'user' AND text IS NOT NULL
-         ORDER BY seq ASC LIMIT 1",
-    )?;
-    let content: Option<String> = stmt
-        .query_row(params![session_id], |row| row.get(0))
-        .optional()?;
-    Ok(content.and_then(|c| {
-        let t = c.trim().replace('\n', " ");
-        let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
-        if t.is_empty() {
-            None
-        } else {
-            let mut out = t.chars().take(48).collect::<String>();
-            if t.chars().count() > 48 {
-                out.push('…');
-            }
-            Some(out)
-        }
-    }))
+/// Attach isolated-worktree badges. Sessions without a worktree are untouched.
+fn attach_worktrees(db: &Database, summaries: &mut [SessionSummary]) -> Result<()> {
+    let mut worktrees = crate::session_worktrees::lifecycle::summaries(db)?;
+    if worktrees.is_empty() {
+        return Ok(());
+    }
+    for summary in summaries {
+        summary.worktree = worktrees.remove(&summary.id);
+    }
+    Ok(())
 }
+
+// ---- sessions ---------------------------------------------------------------
 
 pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
     let sql = format!("{SUMMARY_SELECT} ORDER BY s.updated_at DESC");
@@ -1210,26 +1364,10 @@ pub fn list_sessions(db: &Database) -> Result<Vec<SessionSummary>> {
     let rows = stmt.query_map([], summary_from_row)?;
     let mut out = Vec::new();
     for row in rows {
-        let mut session = row?;
-        if is_default_title(&session.title) {
-            if let Some(title) = first_user_title(db, &session.id)? {
-                // Persist so Recents stays stable across restarts.
-                let _ = rename_session(db, &session.id, &title);
-                session.title = title;
-            }
-        }
-        out.push(session);
+        out.push(row?);
     }
+    attach_worktrees(db, &mut out)?;
     Ok(out)
-}
-
-/// Cheap existence probe for RPC inputs that attach rows to a session
-/// (e.g. artifact registration from main-process producers).
-pub fn exists(db: &Database, session_id: &str) -> Result<bool> {
-    let mut stmt = db
-        .conn()
-        .prepare_cached("SELECT 1 FROM sessions WHERE id = ?1")?;
-    Ok(stmt.query_row(params![session_id], |_| Ok(())).is_ok())
 }
 
 /// Backwards-compatible session constructor.  New callers that need an
@@ -1257,6 +1395,8 @@ pub struct SessionCreateOptions {
     pub project_path: Option<String>,
     pub thinking_level: Option<String>,
     pub permission_mode: Option<String>,
+    /// The `/fast` switch (ADR 0334); false keeps the default service tier.
+    pub fast_mode: bool,
 }
 
 pub fn create_session_with_thinking(
@@ -1278,6 +1418,7 @@ pub fn create_session_with_thinking(
             project_path,
             thinking_level,
             permission_mode: None,
+            fast_mode: false,
         },
     )
 }
@@ -1299,10 +1440,16 @@ pub fn create_session_with_options(
         project_path,
         thinking_level,
         permission_mode,
+        fast_mode,
     } = options;
     let now = now_ms();
     let id = Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "New task".into());
+    let title_source = if is_default_title(&title) {
+        TITLE_SOURCE_DEFAULT
+    } else {
+        TITLE_SOURCE_MANUAL
+    };
     let mode = normalize_mode(mode.as_deref());
     let thinking_level = thinking_level.unwrap_or_else(default_thinking_level);
     validate_thinking_level(&thinking_level)?;
@@ -1323,8 +1470,8 @@ pub fn create_session_with_options(
         .prepare_cached(
             "INSERT INTO sessions (
                 id, title, project_id, provider_id, model_id, mode, thinking_level,
-                permission_mode, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                permission_mode, title_source, fast_mode, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
         )?
         .execute(params![
             id,
@@ -1335,6 +1482,8 @@ pub fn create_session_with_options(
             mode,
             thinking_level,
             permission_mode,
+            title_source,
+            fast_mode,
             now
         ])?;
     Ok(SessionSummary {
@@ -1347,8 +1496,13 @@ pub fn create_session_with_options(
         mode,
         thinking_level,
         permission_mode,
+        fast_mode,
         updated_at: ms_to_ts(now),
         created_at: ms_to_ts(now),
+        // The run row that owns this transcript is written after creation.
+        scheduled_run: false,
+        // A new or forked session starts without a worktree (ADR 0329).
+        worktree: None,
     })
 }
 
@@ -1372,47 +1526,49 @@ pub fn session_mode(db: &Database, id: &str) -> Result<Option<String>> {
         .map(|mode| normalize_mode(Some(&mode))))
 }
 
-/// Process-wide cache of transcript layouts, keyed by session id.
-///
-/// The layout is derived data: it can always be rebuilt by scanning the file,
-/// and `file_len` makes a stale entry detectable. Caching it turns a repeated
-/// session open, and each older page, into a bounded seek-and-parse instead of
-/// another full-history scan.
-static TRANSCRIPT_LAYOUTS: OnceLock<Mutex<HashMap<String, transcripts::TranscriptLayout>>> =
-    OnceLock::new();
-
-fn layout_cache() -> &'static Mutex<HashMap<String, transcripts::TranscriptLayout>> {
-    TRANSCRIPT_LAYOUTS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Return an up-to-date layout for one session, reusing the cached offsets and
+/// Return an up-to-date layout for one session, reusing cached offsets and
 /// scanning only what was appended since.
 pub(crate) fn session_layout(
     db: &Database,
     session_id: &str,
 ) -> Result<transcripts::TranscriptLayout> {
-    let cached = layout_cache()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(session_id).cloned())
-        .unwrap_or_default();
-    let layout = transcripts::refresh_layout(db.data_dir(), session_id, cached)?;
-    if let Ok(mut guard) = layout_cache().lock() {
-        guard.insert(session_id.to_string(), layout.clone());
-    }
-    Ok(layout)
-}
-
-/// Drop a session's cached layout. Called after a rewrite or a delete so the
-/// next read rebuilds from the file rather than trusting stale offsets.
-pub fn invalidate_transcript_layout(session_id: &str) {
-    if let Ok(mut guard) = layout_cache().lock() {
-        guard.remove(session_id);
-    }
+    transcripts::layout::session_layout(db.data_dir(), session_id)
 }
 
 pub fn get_session(db: &Database, id: &str) -> Result<Option<SessionDetail>> {
     get_session_with_options(db, id, SessionReadOptions::default())
+}
+
+/// The session's index row, without touching the transcript.
+///
+/// `get_session` materializes every message to answer the same question, which
+/// made a plain index lookup cost O(transcript bytes). The workspace resolvers
+/// ran a full JSONL parse per tool call and per permission evaluation — twice
+/// per plan submission — only to read `project_path`, and two of them ran it
+/// just to check that the session exists. Everything they need is in
+/// `SUMMARY_SELECT`, so this is one indexed row.
+pub fn session_summary(db: &Database, id: &str) -> Result<Option<SessionSummary>> {
+    let sql = format!("{SUMMARY_SELECT} AND s.id = ?1");
+    let mut summary = db
+        .conn()
+        .prepare_cached(&sql)?
+        .query_row(params![id], summary_from_row)
+        .optional()?;
+    if let Some(summary) = summary.as_mut() {
+        attach_worktrees(db, std::slice::from_mut(summary))?;
+    }
+    Ok(summary)
+}
+
+/// Whether a session row still exists. Used to refuse work that would otherwise
+/// outlive its owning session and become unreachable — a background task
+/// started after its session was deleted belongs to nobody.
+pub fn session_exists(db: &Database, id: &str) -> Result<bool> {
+    Ok(db.conn().query_row(
+        "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?1)",
+        params![id],
+        |row| row.get(0),
+    )?)
 }
 
 /// Load a session detail with an optional renderer-facing message window.
@@ -1424,65 +1580,66 @@ pub fn get_session_with_options(
     id: &str,
     options: SessionReadOptions,
 ) -> Result<Option<SessionDetail>> {
-    let sql = format!("{SUMMARY_SELECT} AND s.id = ?1");
-    let summary = db
-        .conn()
-        .prepare_cached(&sql)?
-        .query_row(params![id], summary_from_row)
-        .optional()?;
-    let Some(summary) = summary else {
+    let Some(summary) = session_summary(db, id)? else {
         return Ok(None);
     };
 
-    let (records, compactions, message_start, has_more_before, message_end, has_more_after) =
-        if let Some(raw_limit) = options.message_limit.filter(|limit| *limit > 0) {
-            let limit = raw_limit.min(1_000) as usize;
-            // Window coordinates are physical transcript lines, so they must be
-            // clamped against the file layout rather than against `last_seq`.
-            // The index counter is a deduplicated logical count: a retried
-            // append leaves two lines with one id, and mixing the two spaces
-            // silently dropped the newest messages of a long session.
-            let layout = session_layout(db, id)?;
-            let total = layout.message_count();
-            let before = if let Some(message_id) = options.message_around.as_deref() {
-                let Some(position) =
-                    transcripts::find_message_position(db.data_dir(), id, &layout, message_id)?
-                else {
-                    return Ok(None);
+    let bounded = if let Some(raw_limit) = options.message_limit.filter(|limit| *limit > 0) {
+        let limit = raw_limit.min(1_000) as usize;
+        Some(transcripts::layout::with_layout_recovery(
+            db.data_dir(),
+            id,
+            |layout| {
+                let total = layout.message_count();
+                let before = if let Some(message_id) = options.message_around.as_deref() {
+                    let Some(position) =
+                        transcripts::find_message_position(db.data_dir(), id, layout, message_id)?
+                    else {
+                        return Ok(None);
+                    };
+                    (position + limit / 2 + 1).min(total)
+                } else {
+                    match options.message_before {
+                        Some(value) => (value.max(0) as usize).min(total),
+                        None => total,
+                    }
                 };
-                (position + limit / 2 + 1).min(total)
-            } else {
-                match options.message_before {
-                    Some(value) => (value.max(0) as usize).min(total),
-                    None => total,
-                }
-            };
-            let start = before.saturating_sub(limit);
-            let read = transcripts::read_transcript_window_with_layout(
-                db.data_dir(),
-                id,
-                &layout,
-                start,
-                Some(before.saturating_sub(start)),
-            )?;
-            (
-                dedupe_records(read.messages),
-                read.compactions,
-                Some(start as i64),
-                Some(start > 0),
-                Some(before as i64),
-                Some(before < total),
-            )
-        } else {
-            let read = transcripts::read_transcript_with_compactions(db.data_dir(), id)?;
-            (
-                dedupe_records(read.messages),
-                read.compactions,
-                None,
-                None,
-                None,
-                None,
-            )
+                let start = before.saturating_sub(limit);
+                let read = transcripts::read_transcript_window_with_layout(
+                    db.data_dir(),
+                    id,
+                    layout,
+                    start,
+                    Some(before.saturating_sub(start)),
+                )?;
+                Ok(Some((
+                    dedupe_records(read.messages),
+                    read.compactions,
+                    Some(start as i64),
+                    Some(start > 0),
+                    Some(before as i64),
+                    Some(before < total),
+                )))
+            },
+        )?)
+    } else {
+        None
+    };
+    let (records, compactions, message_start, has_more_before, message_end, has_more_after) =
+        match bounded {
+            Some(Some(window)) => window,
+            Some(None) => return Ok(None),
+            None => {
+                let read = transcripts::read_transcript_with_compactions(db.data_dir(), id)?;
+                (
+                    dedupe_records(read.messages),
+                    read.compactions,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
         };
     // Content comes from the transcript file; SQLite only indexes it. A
     // renderer window may additionally request a display cap so a single
@@ -1507,6 +1664,17 @@ pub fn get_session_with_options(
             .collect(),
         None => records.into_iter().map(record_to_ui).collect(),
     };
+    let plan_calls: Vec<&str> = messages
+        .iter()
+        .filter(|message| {
+            matches!(
+                message.tool_name.as_deref(),
+                Some("SubmitPlan" | "SubmitGoal")
+            )
+        })
+        .filter_map(|message| message.tool_call_id.as_deref())
+        .collect();
+    let plan_history = crate::plans::history_for_tool_calls(db, id, &plan_calls)?;
     let parent_call_id = options.message_around.as_deref().and_then(|target| {
         messages
             .iter()
@@ -1514,18 +1682,18 @@ pub fn get_session_with_options(
             .and_then(|message| message.parent_tool_call_id.as_deref())
     });
     let navigation_parent = match parent_call_id {
-        Some(call_id) => {
-            transcripts::read_tool_call(db.data_dir(), id, &session_layout(db, id)?, call_id)?.map(
-                |record| match options.content_limit {
-                    Some(limit) => record_to_ui_for_display(record, limit),
-                    None => record_to_ui(record),
-                },
-            )
-        }
+        Some(call_id) => transcripts::layout::with_layout_recovery(db.data_dir(), id, |layout| {
+            transcripts::read_tool_call(db.data_dir(), id, layout, call_id)
+        })?
+        .map(|record| match options.content_limit {
+            Some(limit) => record_to_ui_for_display(record, limit),
+            None => record_to_ui(record),
+        }),
         None => None,
     };
     Ok(Some(SessionDetail {
         summary,
+        plan_history,
         navigation_parent,
         message_start,
         message_end,
@@ -1649,6 +1817,13 @@ pub fn fork_session_through(
         &mut records,
         &mut compactions,
     )?;
+    let visualization_files = fork_files::preserve_visualizations(
+        db.data_dir(),
+        source_id,
+        &id,
+        &mut records,
+        &mut compactions,
+    )?;
     let texts = records.iter().map(record_index_text).collect::<Vec<_>>();
     let now = now_ms();
     let created_at = ms_to_ts(now);
@@ -1656,8 +1831,6 @@ pub fn fork_session_through(
     let title = requested_title
         .map(|value| value.chars().take(100).collect::<String>())
         .unwrap_or_else(|| format!("{} (branch)", source.summary.title));
-
-    invalidate_transcript_layout(&id);
     if let Err(error) = transcripts::write_transcript_with_compactions(
         db.data_dir(),
         &id,
@@ -1674,10 +1847,11 @@ pub fn fork_session_through(
             .prepare_cached(
                 "INSERT INTO sessions (
                     id, title, project_id, provider_id, model_id, mode, thinking_level,
-                    permission_mode, source, pinned, last_seq, created_at, updated_at
+                    permission_mode, fast_mode, source, pinned, last_seq, created_at,
+                    updated_at
                  )
                  SELECT ?1, ?2, project_id, provider_id, model_id, mode, thinking_level,
-                        permission_mode, NULL, 0, ?3, ?4, ?4
+                        permission_mode, fast_mode, NULL, 0, ?3, ?4, ?4
                  FROM sessions WHERE id = ?5",
             )?
             .execute(params![id, title, records.len() as i64, now, source_id])?;
@@ -1691,11 +1865,11 @@ pub fn fork_session_through(
         Ok(())
     })();
     if let Err(error) = indexed {
-        invalidate_transcript_layout(&id);
         transcripts::remove_session_files(db.data_dir(), &id);
         return Err(error);
     }
     files.commit();
+    visualization_files.commit();
 
     let summary = SessionSummary {
         id,
@@ -1707,12 +1881,18 @@ pub fn fork_session_through(
         mode: source.summary.mode,
         thinking_level: source.summary.thinking_level,
         permission_mode: source.summary.permission_mode,
+        fast_mode: source.summary.fast_mode,
         updated_at: created_at.clone(),
         created_at,
+        // A fork is the user's own conversation, not the automation's transcript.
+        scheduled_run: false,
+        // A new or forked session starts without a worktree (ADR 0329).
+        worktree: None,
     };
     let messages = records.into_iter().map(record_to_ui).collect();
     Ok(ForkSessionResult::Created(Box::new(SessionDetail {
         summary,
+        plan_history: Vec::new(),
         navigation_parent: None,
         message_start: None,
         message_end: None,
@@ -1747,6 +1927,31 @@ pub fn configure_session_with_thinking(
     thinking_level: Option<&str>,
     permission_mode: Option<&str>,
 ) -> Result<Option<SessionSummary>> {
+    configure_session_with_fast_mode(
+        db,
+        id,
+        mode,
+        provider_id,
+        model_id,
+        thinking_level,
+        permission_mode,
+        None,
+    )
+}
+
+/// Full configurator. Every `None` preserves the persisted value, including
+/// the `/fast` switch (ADR 0334).
+#[allow(clippy::too_many_arguments)]
+pub fn configure_session_with_fast_mode(
+    db: &Database,
+    id: &str,
+    mode: &str,
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+    thinking_level: Option<&str>,
+    permission_mode: Option<&str>,
+    fast_mode: Option<bool>,
+) -> Result<Option<SessionSummary>> {
     if !(is_valid_mode(mode) || mode == "chat") {
         return Err(anyhow!("mode must be plan or agent"));
     }
@@ -1773,7 +1978,8 @@ pub fn configure_session_with_thinking(
              SET mode = ?2, provider_id = COALESCE(?3, provider_id),
                  model_id = COALESCE(?4, model_id),
                  thinking_level = COALESCE(?5, thinking_level),
-                 permission_mode = COALESCE(?6, permission_mode), updated_at = ?7
+                 permission_mode = COALESCE(?6, permission_mode),
+                 fast_mode = COALESCE(?8, fast_mode), updated_at = ?7
              WHERE id = ?1",
         )?
         .execute(params![
@@ -1783,7 +1989,8 @@ pub fn configure_session_with_thinking(
             model_id,
             thinking_level,
             permission_mode,
-            now_ms()
+            now_ms(),
+            fast_mode
         ])?;
     if changed == 0 {
         return Ok(None);
@@ -1799,7 +2006,6 @@ pub fn delete_session(db: &Database, id: &str) -> Result<bool> {
     if n > 0 {
         // Here rather than in the RPC handler so every deletion path (UI,
         // failed scheduled-run cleanup) also drops the transcript files.
-        invalidate_transcript_layout(id);
         transcripts::remove_session_files(db.data_dir(), id);
     }
     Ok(n > 0)
@@ -1822,8 +2028,134 @@ pub fn rename_session(db: &Database, id: &str, title: &str) -> Result<bool> {
     let title = normalize_session_title(title)?;
     let n = db
         .conn()
-        .prepare_cached("UPDATE sessions SET title = ?1 WHERE id = ?2")?
-        .execute(params![title, id])?;
+        .prepare_cached("UPDATE sessions SET title = ?1, title_source = ?2 WHERE id = ?3")?
+        .execute(params![title, TITLE_SOURCE_MANUAL, id])?;
+    Ok(n > 0)
+}
+
+/// Replace a still-untitled session's placeholder with text derived from its
+/// first prompt.
+///
+/// This is the deterministic local fallback that keeps a new session readable
+/// without any plugin. It deliberately keeps the `default` title source: the
+/// derived text was not chosen by the user, so an installed title plugin may
+/// still upgrade it through `set_automatic_session_title`. The write only
+/// applies while host-core still sees a recognized placeholder, so a manual
+/// rename, a plugin-generated title, or an earlier derivation all win.
+pub fn derive_session_title(db: &Database, id: &str, title: &str) -> Result<bool> {
+    let title = normalize_session_title(title)?;
+    let current: Option<(String, String)> = db
+        .conn()
+        .query_row(
+            "SELECT title, title_source FROM sessions
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((current_title, title_source)) = current else {
+        return Ok(false);
+    };
+    if title_source != TITLE_SOURCE_DEFAULT || !is_default_title(&current_title) {
+        return Ok(false);
+    }
+    let n = db
+        .conn()
+        .prepare_cached(
+            "UPDATE sessions SET title = ?1
+             WHERE id = ?2 AND title = ?3 AND title_source = ?4 AND deleted_at IS NULL",
+        )?
+        .execute(params![title, id, current_title, TITLE_SOURCE_DEFAULT])?;
+    Ok(n > 0)
+}
+
+/// Return only the first-turn text needed to name an untouched session.
+/// The dedicated plugin API must not become a transcript-reading shortcut.
+pub fn auto_title_context(db: &Database, id: &str) -> Result<Option<AutoTitleContext>> {
+    let row: Option<(String, String, Option<String>, Option<String>)> = db
+        .conn()
+        .query_row(
+            "SELECT title, title_source, provider_id, model_id
+             FROM sessions WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let Some((title, title_source, provider_id, model_id)) = row else {
+        return Ok(None);
+    };
+    if title_source != TITLE_SOURCE_DEFAULT {
+        return Ok(None);
+    }
+
+    let first_user: Option<(i64, Option<String>, String)> = db
+        .conn()
+        .query_row(
+            "SELECT seq, turn_id, text FROM messages
+             WHERE session_id = ?1 AND role = 'user' AND text IS NOT NULL
+             ORDER BY seq ASC LIMIT 1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((user_seq, turn_id, user_prompt)) = first_user else {
+        return Ok(None);
+    };
+    if user_prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    let assistant_reply: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT text FROM messages
+             WHERE session_id = ?1 AND role = 'assistant' AND text IS NOT NULL AND seq > ?2
+               AND (?3 IS NULL OR turn_id = ?3)
+             ORDER BY seq ASC LIMIT 1",
+            params![id, user_seq, turn_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let user_prompt = truncate_title_context(&user_prompt, 1_000);
+    let assistant_reply = assistant_reply
+        .map(|reply| truncate_title_context(&reply, 500))
+        .filter(|reply| !reply.trim().is_empty());
+    Ok(Some(AutoTitleContext {
+        session_id: id.to_string(),
+        expected_title: title,
+        user_prompt,
+        assistant_reply,
+        model_key: provider_id
+            .zip(model_id)
+            .map(|(provider, model)| format!("{provider}/{model}")),
+    }))
+}
+
+fn truncate_title_context(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+/// Apply a plugin-generated title only if the exact default title read by the
+/// plugin is still current and no manual or generated title has won the race.
+pub fn set_automatic_session_title(
+    db: &Database,
+    id: &str,
+    expected_title: &str,
+    title: &str,
+) -> Result<bool> {
+    let title = normalize_session_title(title)?;
+    let n = db
+        .conn()
+        .prepare_cached(
+            "UPDATE sessions SET title = ?1, title_source = ?2
+             WHERE id = ?3 AND title = ?4 AND title_source = ?5 AND deleted_at IS NULL",
+        )?
+        .execute(params![
+            title,
+            TITLE_SOURCE_GENERATED,
+            id,
+            expected_title,
+            TITLE_SOURCE_DEFAULT
+        ])?;
     Ok(n > 0)
 }
 
@@ -1880,6 +2212,7 @@ pub fn append_message(
     message: &UiMessage,
     turn_id: Option<&str>,
 ) -> Result<()> {
+    model_system::validate(message)?;
     let message = crate::session_collaboration::prepare_append(db, session_id, message, turn_id)?;
     let session_created = ensure_session_for_append(db, session_id)?;
     let (mut record, text) = ui_to_record(&message);
@@ -1897,17 +2230,27 @@ pub fn append_message(
             && message.status.as_deref() != Some("streaming")
             && streaming_assistant_indexed(db, session_id, &record.id)?
         {
-            invalidate_transcript_layout(session_id);
-            if !transcripts::update_message(db.data_dir(), session_id, &record)? {
-                return Err(anyhow!(
-                    "streaming assistant is missing from its transcript"
-                ));
+            let stamped = "UPDATE messages SET text = ?3, is_error = ?4, streaming = 0
+                 WHERE session_id = ?1 AND id = ?2";
+            if transcripts::update_message(db.data_dir(), session_id, &record)? {
+                db.conn().execute(
+                    stamped,
+                    params![session_id, record.id, text, record.is_error],
+                )?;
+            } else {
+                // The index knows this id but the transcript does not. A device
+                // that lost a provisional row's bytes leaves exactly this shape,
+                // and the caller is delivering the settled row for it: appending
+                // keeps the file the source of truth instead of failing a reply
+                // whose only other copy is the checkpoint.
+                transcripts::append_message(db.data_dir(), session_id, &session_created, &record)?;
+                db.conn().execute(
+                    stamped,
+                    params![session_id, record.id, text, record.is_error],
+                )?;
             }
-            db.conn().execute(
-                "UPDATE messages SET text = ?3, is_error = ?4 WHERE session_id = ?1 AND id = ?2",
-                params![session_id, record.id, text, record.is_error],
-            )?;
         } else {
+            update_delegation_snapshot(db, session_id, &record)?;
             return Ok(());
         }
     } else {
@@ -1916,6 +2259,7 @@ pub fn append_message(
                 let original_id = record.id.clone();
                 record.id = namespaced_message_id(session_id, &record.id);
                 if message_indexed(db, session_id, &record.id)? {
+                    update_delegation_snapshot(db, session_id, &record)?;
                     return Ok(());
                 }
                 // Old hosts wrote JSONL then failed UNIQUE. Replaying that
@@ -1978,11 +2322,8 @@ pub fn append_message(
 fn message_indexed(db: &Database, session_id: &str, message_id: &str) -> Result<bool> {
     let existing: Option<i64> = db
         .conn()
-        .query_row(
-            "SELECT mid FROM messages WHERE id = ?1 AND session_id = ?2",
-            params![message_id, session_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT mid FROM messages WHERE id = ?1 AND session_id = ?2")?
+        .query_row(params![message_id, session_id], |row| row.get(0))
         .optional()?;
     Ok(existing.is_some())
 }
@@ -1991,11 +2332,8 @@ fn message_indexed(db: &Database, session_id: &str, message_id: &str) -> Result<
 fn message_owner(db: &Database, message_id: &str) -> Result<Option<String>> {
     let owner: Option<String> = db
         .conn()
-        .query_row(
-            "SELECT session_id FROM messages WHERE id = ?1",
-            params![message_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT session_id FROM messages WHERE id = ?1")?
+        .query_row(params![message_id], |row| row.get(0))
         .optional()?;
     Ok(owner)
 }
@@ -2004,10 +2342,13 @@ fn namespaced_message_id(session_id: &str, message_id: &str) -> String {
     format!("{session_id}:{message_id}")
 }
 
+/// Whether this session's transcript already holds `message_id`.
+///
+/// This used to read the whole transcript, which parses every record's block
+/// tree to answer a presence question; the transcript store answers it from the
+/// id field alone.
 fn transcript_contains_id(db: &Database, session_id: &str, message_id: &str) -> Result<bool> {
-    Ok(transcripts::read_transcript(db.data_dir(), session_id)?
-        .iter()
-        .any(|record| record.id == message_id))
+    transcripts::transcript_contains_id(db.data_dir(), session_id, message_id)
 }
 
 fn valid_turn_reference(
@@ -2020,11 +2361,8 @@ fn valid_turn_reference(
     };
     let owner: Option<String> = db
         .conn()
-        .query_row(
-            "SELECT session_id FROM turns WHERE id = ?1",
-            params![turn_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT session_id FROM turns WHERE id = ?1")?
+        .query_row(params![turn_id], |row| row.get(0))
         .optional()?;
     if owner.as_deref() == Some(session_id) {
         return Ok(Some(turn_id.to_string()));
@@ -2054,7 +2392,6 @@ fn repair_unindexed_transcript_message(
         return Ok(false);
     }
     records[position] = record.clone();
-    invalidate_transcript_layout(session_id);
     rebuild_session_message_index(db, session_id, &records)?;
     tracing::warn!(
         %session_id,
@@ -2120,35 +2457,129 @@ fn rebuild_session_message_index(
     Ok(())
 }
 
+/// Whether the last copy of `message_id` is a provisional, streaming assistant
+/// row.
+///
+/// The index row mirrors that copy: it is inserted with the row, the append that
+/// lands the terminal snapshot re-stamps it, and an index rebuild recomputes it
+/// from the transcript. So this is one indexed lookup instead of a backwards walk
+/// over the transcript's message lines, 64 lines per window — the shape that cost
+/// 46 ms on a 104 MB transcript once the target sat 512 lines from the tail, and
+/// a read of every byte of the file when it sat further, twice per turn.
+///
+/// A NULL row is a message written before the column existed; those still answer
+/// from the transcript, which is why an unrebuilt database behaves exactly as it
+/// did before the cache. No row at all means the id has no index entry, which
+/// agrees with the transcript's own "the id is not in the file" answer.
 fn streaming_assistant_indexed(db: &Database, session_id: &str, message_id: &str) -> Result<bool> {
-    let layout = session_layout(db, session_id)?;
-    let mut end = layout.message_count();
-    while end > 0 {
-        let start = end.saturating_sub(64);
-        let window = transcripts::read_transcript_window_with_layout(
-            db.data_dir(),
-            session_id,
-            &layout,
-            start,
-            Some(end - start),
-        )?;
-        if let Some(record) = window
-            .messages
-            .iter()
-            .rev()
-            .find(|record| record.id == message_id)
-        {
-            return Ok(record.role == "assistant"
-                && record
-                    .meta
-                    .as_ref()
-                    .and_then(|meta| meta.get("status"))
-                    .and_then(Value::as_str)
-                    == Some("streaming"));
-        }
-        end = start;
+    let indexed: Option<(String, Option<i64>)> = db
+        .conn()
+        .prepare_cached("SELECT role, streaming FROM messages WHERE id = ?1 AND session_id = ?2")?
+        .query_row(params![message_id, session_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .optional()?;
+    match indexed {
+        Some((role, Some(streaming))) => Ok(role == "assistant" && streaming != 0),
+        Some((_, None)) => streaming_assistant_in_transcript(db, session_id, message_id),
+        None => Ok(false),
     }
-    Ok(false)
+}
+
+fn streaming_assistant_in_transcript(
+    db: &Database,
+    session_id: &str,
+    message_id: &str,
+) -> Result<bool> {
+    Ok(indexed_message_record(db, session_id, message_id)?
+        .is_some_and(|record| record_is_streaming(&record)))
+}
+
+fn indexed_message_record(
+    db: &Database,
+    session_id: &str,
+    message_id: &str,
+) -> Result<Option<MessageRecord>> {
+    transcripts::layout::with_layout_recovery(db.data_dir(), session_id, |layout| {
+        let mut end = layout.message_count();
+        while end > 0 {
+            let start = end.saturating_sub(64);
+            let window = transcripts::read_transcript_window_with_layout(
+                db.data_dir(),
+                session_id,
+                layout,
+                start,
+                Some(end - start),
+            )?;
+            if let Some(record) = window
+                .messages
+                .into_iter()
+                .rev()
+                .find(|record| record.id == message_id)
+            {
+                return Ok(Some(record));
+            }
+            end = start;
+        }
+        Ok(None)
+    })
+}
+
+/// Task is already a completed tool call while its delegated work is running.
+/// Only its matching terminal result may replace that provisional result; replay
+/// must neither reopen a settled delegate nor overwrite another call's metadata.
+fn update_delegation_snapshot(
+    db: &Database,
+    session_id: &str,
+    incoming: &MessageRecord,
+) -> Result<()> {
+    if incoming.role != "tool" || incoming.tool_name.as_deref() != Some("Task") {
+        return Ok(());
+    }
+    let Some(next) = incoming
+        .blocks
+        .as_array()
+        .and_then(|blocks| blocks.iter().find(|block| block["type"] == "tool_call"))
+    else {
+        return Ok(());
+    };
+    let details = &next["result"]["details"];
+    if !matches!(
+        details["status"].as_str(),
+        Some("completed" | "stopped" | "aborted" | "failed" | "timed_out")
+    ) {
+        return Ok(());
+    }
+    let Some(id) = details["delegationId"].as_str().filter(|id| !id.is_empty()) else {
+        return Ok(());
+    };
+    let Some(mut existing) = indexed_message_record(db, session_id, &incoming.id)? else {
+        return Ok(());
+    };
+    if existing.role != "tool" || existing.tool_name.as_deref() != Some("Task") {
+        return Ok(());
+    }
+    let Some(block) = existing
+        .blocks
+        .as_array_mut()
+        .and_then(|blocks| blocks.iter_mut().find(|block| block["type"] == "tool_call"))
+    else {
+        return Ok(());
+    };
+    if block["callId"] != next["callId"]
+        || block["result"]["details"]["delegationId"].as_str() != Some(id)
+        || block["result"]["details"]["status"] != "running"
+    {
+        return Ok(());
+    }
+    block["result"] = next["result"].clone();
+    block["text"] = next["text"].clone();
+    if !transcripts::update_message(db.data_dir(), session_id, &existing)? {
+        return Err(anyhow!(
+            "delegation snapshot is missing from its transcript"
+        ));
+    }
+    Ok(())
 }
 
 /// Append one canonical record: transcript line first, then the index row.
@@ -2249,10 +2680,26 @@ pub fn recover_inflight_message(
             return Ok(None);
         }
     };
+    // The file decides here, not the index. A device that lost a settled row's
+    // bytes can leave the index claiming the reply is finished while the
+    // transcript still holds the provisional row -- and that provisional row is
+    // what makes the checkpoint the durable copy of the reply. An index row whose
+    // transcript row is gone counts as provisional too, because the checkpoint is
+    // then the only copy left.
     let indexed = message_indexed(db, session_id, &inflight.message.id)?;
-    if indexed && !streaming_assistant_indexed(db, session_id, &inflight.message.id)? {
+    let provisional = streaming_assistant_in_transcript(db, session_id, &inflight.message.id)?
+        || (indexed && streaming_assistant_indexed(db, session_id, &inflight.message.id)?);
+    if indexed && !provisional {
         transcripts::remove_inflight(db.data_dir(), session_id)?;
         return Ok(None);
+    }
+    if indexed && provisional {
+        // Line the cache up with the file before the promotion below, which asks
+        // the index whether this id is still the provisional row.
+        db.conn().execute(
+            "UPDATE messages SET streaming = 1 WHERE session_id = ?1 AND id = ?2",
+            params![session_id, inflight.message.id],
+        )?;
     }
     // A leftover checkpoint whose final row never landed is the durable
     // reply. Boot skips `completed` turns so the outbox can still append the
@@ -2451,7 +2898,6 @@ fn rewrite_transcript_body(db: &Database, session_id: &str, messages: &[UiMessag
             .into_iter()
             .filter(|record| compaction_valid_for_records(record, &records))
             .collect();
-    invalidate_transcript_layout(session_id);
     transcripts::write_transcript_with_compactions(
         db.data_dir(),
         session_id,
@@ -2586,11 +3032,8 @@ pub fn truncate_from(
 fn abort_running_turn(db: &Database, session_id: &str) -> Result<Option<String>> {
     let turn_id: Option<String> = db
         .conn()
-        .query_row(
-            "SELECT id FROM turns WHERE session_id = ?1 AND status = 'running'",
-            params![session_id],
-            |row| row.get(0),
-        )
+        .prepare_cached("SELECT id FROM turns WHERE session_id = ?1 AND status = 'running'")?
+        .query_row(params![session_id], |row| row.get(0))
         .optional()?;
     let Some(turn_id) = turn_id else {
         return Ok(None);
@@ -2671,38 +3114,66 @@ pub fn update_tool_review_state(
     snapshot_id: &str,
     state: &str,
 ) -> Result<bool> {
-    let Some(detail) = get_session(db, session_id)? else {
+    if !session_exists(db, session_id)? {
+        return Ok(false);
+    }
+    let record = transcripts::layout::with_layout_recovery(db.data_dir(), session_id, |layout| {
+        if layout.message_count() == 0 {
+            return Ok(None);
+        }
+        let Some(position) =
+            transcripts::find_message_position(db.data_dir(), session_id, layout, message_id)?
+        else {
+            return Ok(None);
+        };
+        Ok(transcripts::read_transcript_window_with_layout(
+            db.data_dir(),
+            session_id,
+            layout,
+            position,
+            Some(1),
+        )?
+        .messages
+        .pop())
+    })?;
+    let Some(record) = record else {
         return Ok(false);
     };
-    let mut messages = detail.messages;
-    let mut changed = false;
-    for message in &mut messages {
-        if message.id != message_id || message.role != "tool" {
-            continue;
-        }
-        let Some(tool_result) = message.tool_result.as_mut().and_then(Value::as_object_mut) else {
-            continue;
-        };
-        let Some(details) = tool_result
-            .get_mut("details")
-            .and_then(Value::as_object_mut)
-        else {
-            continue;
-        };
-        let Some(review) = details.get_mut("review").and_then(Value::as_object_mut) else {
-            continue;
-        };
-        if review.get("snapshotId").and_then(Value::as_str) != Some(snapshot_id) {
-            continue;
-        }
-        review.insert("state".into(), Value::String(state.to_string()));
-        changed = true;
-        break;
+    let message = record_to_ui(record);
+    let matches_snapshot = message.role == "tool"
+        && message
+            .tool_result
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|result| result.get("details"))
+            .and_then(Value::as_object)
+            .and_then(|details| details.get("review"))
+            .and_then(Value::as_object)
+            .and_then(|review| review.get("snapshotId"))
+            .and_then(Value::as_str)
+            == Some(snapshot_id);
+    if !matches_snapshot {
+        return Ok(false);
     }
-    if changed {
-        replace_messages(db, session_id, &messages)?;
+    if message
+        .tool_result
+        .as_ref()
+        .and_then(|result| result.get("details")?.get("review")?.get("state")?.as_str())
+        == Some(state)
+    {
+        return Ok(true);
     }
-    Ok(changed)
+    transcripts::append_tool_review_state(
+        db.data_dir(),
+        session_id,
+        message_id,
+        snapshot_id,
+        state,
+    )?;
+    db.conn()
+        .prepare_cached("UPDATE sessions SET updated_at = ?1 WHERE id = ?2")?
+        .execute(params![now_ms(), session_id])?;
+    Ok(true)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3118,7 +3589,6 @@ pub fn save_active_branch_revision(
     root.revision_count = Some(total);
     root.active_revision = Some(active);
     let (record, _) = ui_to_record(root);
-    invalidate_transcript_layout(session_id);
     transcripts::update_message(db.data_dir(), session_id, &record)?;
     Ok(Some(ActiveRevisionSave {
         root_user_id,
@@ -3139,6 +3609,23 @@ pub fn activate_message_revision(
     revision_index: i64,
     prefix: &[UiMessage],
 ) -> Result<Vec<UiMessage>> {
+    activate_message_revision_with_prefix(
+        db,
+        session_id,
+        root_user_id,
+        revision_index,
+        Some(prefix),
+    )
+}
+
+/// None requires a durable family anchor; Some preserves the legacy prefix API.
+fn activate_message_revision_with_prefix(
+    db: &Database,
+    session_id: &str,
+    root_user_id: &str,
+    revision_index: i64,
+    prefix: Option<&[UiMessage]>,
+) -> Result<Vec<UiMessage>> {
     let session_created = session_created_at(db, session_id)?;
     {
         let conn = db.conn();
@@ -3158,10 +3645,19 @@ pub fn activate_message_revision(
     let live = get_session(db, session_id)?
         .map(|detail| detail.messages)
         .unwrap_or_default();
+    if prefix.is_none()
+        && live_branch_start(&live, root_user_id)
+            .filter(|&index| live[index].role == "user")
+            .is_none()
+    {
+        return Err(anyhow!(
+            "NOT_FOUND: revision family anchor missing from canonical transcript"
+        ));
+    }
     let live_start = archive_live_branch(db, session_id, root_user_id, &live)?;
     let prefix: &[UiMessage] = match live_start {
         Some(start) => &live[..start],
-        None => prefix,
+        None => prefix.ok_or_else(|| anyhow!("NOT_FOUND: canonical revision prefix missing"))?,
     };
 
     let payload =
@@ -3243,7 +3739,6 @@ pub fn activate_message_revision(
         &combined,
         &[root_user_id.to_string()],
     )?;
-    invalidate_transcript_layout(session_id);
     transcripts::write_transcript_with_compactions(
         db.data_dir(),
         session_id,
@@ -3317,7 +3812,6 @@ pub fn import_session(
         return Ok(false);
     }
     let (records, texts) = records_and_texts(messages);
-    invalidate_transcript_layout(&summary.id);
     transcripts::write_transcript(db.data_dir(), &summary.id, &summary.created_at, &records)?;
     let indexed = (|| -> Result<()> {
         let tx = conn.unchecked_transaction()?;
@@ -3372,7 +3866,6 @@ pub fn import_session(
     if let Err(e) = indexed {
         // Don't leave transcript files behind for a session row that never
         // materialized.
-        invalidate_transcript_layout(&summary.id);
         transcripts::remove_session_files(db.data_dir(), &summary.id);
         return Err(e);
     }
@@ -3473,6 +3966,21 @@ pub fn end_turn_settling(
         "completed" | "aborted" | "error" => status,
         _ => "completed",
     };
+    let existing_usage: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT usage_json FROM turns WHERE id = ?1",
+            params![turn_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let existing_usage = existing_usage
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()?;
+    let merged_usage = usage.map(|next| usage::merge_usage(existing_usage.as_ref(), next));
+    let usage = merged_usage.as_ref().or(existing_usage.as_ref());
     let input_tokens = usage
         .and_then(|u| u.get("inputTokens"))
         .and_then(|v| v.as_i64());
@@ -3502,6 +4010,19 @@ pub fn end_turn_settling(
             usage.map(|u| u.to_string()),
             turn_id,
         ])?;
+    // A replay after startup recovery may complete accounting for a terminal
+    // turn, but must never change its settled status or emit another notification.
+    if n == 0 && usage.is_some_and(|value| value.get("operations").is_some()) {
+        tx.execute(
+            "UPDATE turns SET input_tokens = ?1, output_tokens = ?2, usage_json = ?3 WHERE id = ?4",
+            params![
+                input_tokens,
+                output_tokens,
+                usage.map(Value::to_string),
+                turn_id
+            ],
+        )?;
+    }
     let notification = if n > 0 && create_notification {
         notifications::insert_for_terminal_turn(&tx, turn_id, status, error_code)?
     } else {
@@ -3547,14 +4068,35 @@ pub fn search_messages(db: &Database, query: &str, limit: i64) -> Result<Vec<Sea
     // trigram FTS needs >= 3 chars; shorter queries fall back to LIKE.
     if query.chars().count() >= 3 {
         let quoted = format!("\"{}\"", query.replace('"', "\"\""));
+        // `snippet()` is an FTS5 auxiliary function, and the planner evaluates
+        // it while it walks the FTS matches — that is, before the ORDER BY and
+        // the LIMIT have reduced the set. It re-reads and re-tokenizes the
+        // whole document on every call, so on a 40k-message corpus the 800
+        // matches that produced 20 rows cost 5.24 of the statement's 6.00 ms.
+        // The CTE moves the limit in front of it, leaving 20 calls.
+        //
+        // The inner subquery must repeat `MATCH ?1`: an FTS5 auxiliary function
+        // reads the phrase list of the MATCH that positioned its cursor, so a
+        // lookup by `rowid` alone has none and returns the head of the document
+        // instead of the window around the hit. The two forms were compared row
+        // for row: with the repeated MATCH, id, order and snippet
+        // text are identical; without it, 0 of 20 snippets match.
         let mut stmt = db.conn().prepare_cached(
-            "SELECT m.id, m.session_id, s.title, m.role, m.created_at,
-                    snippet(messages_fts, 0, '', '', '…', 16)
-             FROM messages_fts
-             JOIN messages m ON m.mid = messages_fts.rowid
-             JOIN sessions s ON s.id = m.session_id
-             WHERE messages_fts MATCH ?1
-             ORDER BY m.created_at DESC LIMIT ?2",
+            "WITH hits AS (
+               SELECT m.id, m.mid, m.session_id, s.title, m.role, m.created_at
+               FROM messages_fts
+               JOIN messages m ON m.mid = messages_fts.rowid
+               JOIN sessions s ON s.id = m.session_id
+               WHERE messages_fts MATCH ?1
+               ORDER BY m.created_at DESC LIMIT ?2
+             )
+             SELECT hits.id, hits.session_id, hits.title, hits.role,
+                    hits.created_at,
+                    (SELECT snippet(messages_fts, 0, '', '', '…', 16)
+                     FROM messages_fts
+                     WHERE messages_fts MATCH ?1
+                       AND messages_fts.rowid = hits.mid)
+             FROM hits",
         )?;
         let rows = stmt.query_map(params![quoted, limit], |row| {
             Ok(SearchHit {
@@ -3768,7 +4310,7 @@ pub fn get_token_usage_history(
     let bucket = normalize_usage_bucket(bucket);
     let (range_start, range_end) = resolve_history_range(start_date, end_date, bucket);
     let mut stmt = db.conn().prepare_cached(
-        "SELECT ended_at, input_tokens, output_tokens, usage_json, model_id
+        "SELECT ended_at, input_tokens, output_tokens, usage_json
          FROM turns
          WHERE status = 'completed' AND ended_at IS NOT NULL AND ended_at >= ?1 AND ended_at <= ?2
          ORDER BY ended_at ASC",
@@ -3780,17 +4322,11 @@ pub fn get_token_usage_history(
             row.get::<_, i64>(1)?,
             row.get::<_, i64>(2)?,
             row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
         ))
     })?;
 
     use std::collections::BTreeMap;
     let mut bucket_map: BTreeMap<String, UsageBucketAcc> = BTreeMap::new();
-    // Per-model series for the trend chart: model id → bucket date → totals.
-    // Turns with no recorded model land under "unknown" so older data still
-    // shows up instead of silently disappearing from the per-model view.
-    let mut model_bucket_map: BTreeMap<String, BTreeMap<String, UsageBucketAcc>> =
-        BTreeMap::new();
     let mut total_input = 0i64;
     let mut total_output = 0i64;
     let mut total_turns = 0i64;
@@ -3799,7 +4335,7 @@ pub fn get_token_usage_history(
     let mut total_reasoning = 0i64;
 
     for row in rows {
-        let (ended_at, input_tokens, output_tokens, usage_json, model_id) = row?;
+        let (ended_at, input_tokens, output_tokens, usage_json) = row?;
         let Some(dt) = local_from_ms(ended_at) else {
             continue;
         };
@@ -3830,7 +4366,7 @@ pub fn get_token_usage_history(
         total_reasoning += reasoning;
 
         let key = usage_bucket_key(&dt, bucket);
-        bucket_map.entry(key.clone()).or_default().add(
+        bucket_map.entry(key).or_default().add(
             input_tokens,
             output_tokens,
             cache_read,
@@ -3838,51 +4374,16 @@ pub fn get_token_usage_history(
             reasoning,
             ended_at,
         );
-        model_bucket_map
-            .entry(model_id.unwrap_or_else(|| "unknown".to_string()))
-            .or_default()
-            .entry(key)
-            .or_default()
-            .add(input_tokens, output_tokens, cache_read, cache_write, reasoning, ended_at);
     }
 
-    let filled = filled_history_keys(range_start, range_end, bucket);
-    let items: Vec<Value> = filled
-        .iter()
+    let items: Vec<Value> = filled_history_keys(range_start, range_end, bucket)
+        .into_iter()
         .map(|(date, timestamp)| {
-            let mut acc = bucket_map.remove(date).unwrap_or_default();
+            let mut acc = bucket_map.remove(&date).unwrap_or_default();
             if acc.turns == 0 {
-                acc.timestamp = *timestamp;
+                acc.timestamp = timestamp;
             }
-            acc.to_json(date)
-        })
-        .collect();
-
-    // Same bucket alignment as the top-level items, then ranked by total
-    // consumption so the chart legend leads with the heaviest model.
-    let mut model_series: Vec<(String, i64, Vec<Value>)> = model_bucket_map
-        .into_iter()
-        .map(|(model_id, buckets)| {
-            let mut running_total = 0i64;
-            let series = filled
-                .iter()
-                .map(|(date, timestamp)| {
-                    let mut acc = buckets.get(date).cloned().unwrap_or_default();
-                    if acc.turns == 0 {
-                        acc.timestamp = *timestamp;
-                    }
-                    running_total += acc.total_tokens();
-                    acc.to_json(date)
-                })
-                .collect::<Vec<Value>>();
-            (model_id, running_total, series)
-        })
-        .collect();
-    model_series.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
-    let models_json: Vec<Value> = model_series
-        .into_iter()
-        .map(|(model_id, _, series)| {
-            json!({ "modelId": model_id, "items": series })
+            acc.to_json(&date)
         })
         .collect();
 
@@ -3891,7 +4392,6 @@ pub fn get_token_usage_history(
         "rangeStart": range_start,
         "rangeEnd": range_end,
         "items": items,
-        "models": models_json,
         "totals": {
             "inputTokens": total_input,
             "outputTokens": total_output,
@@ -3907,6 +4407,19 @@ pub fn get_token_usage_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_title_matches_the_german_french_and_spanish_placeholders() {
+        // The renderer lowercases `chat.untitledTask` before persisting (#1755);
+        // the nav.newChat labels resolve through the same to_lowercase path.
+        assert!(is_default_title("neue aufgabe"));
+        assert!(is_default_title("Nouvelle tâche"));
+        assert!(is_default_title("nueva tarea"));
+        assert!(is_default_title("Neuer Chat"));
+        assert!(is_default_title("nuevo chat"));
+        assert!(is_default_title("Nouvelle discussion"));
+        assert!(!is_default_title("real session name"));
+    }
     use crate::workspace::simple_canonicalize;
 
     fn test_db() -> Database {
@@ -3946,11 +4459,70 @@ mod tests {
             tool_duration_ms: None,
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
-            kind: None,
             hosted_search: None,
+            model_system: None,
+            provider_replay: None,
             session_message: None,
         }
+    }
+
+    /// A failed transcript device flush must not leave an index row that makes
+    /// replay of the same append a no-op.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_transcript_flush_can_be_retried_without_a_phantom_index() {
+        use std::os::unix::fs::symlink;
+
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let transcript_path = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        if transcript_path.exists() {
+            std::fs::remove_file(&transcript_path).unwrap();
+        }
+        std::fs::create_dir_all(transcript_path.parent().unwrap()).unwrap();
+        symlink("/dev/null", &transcript_path).unwrap();
+
+        let message = user_msg("retry-after-flush-failure", "body", "2025-05-01T00:00:00Z");
+        let (written, committed) = transcripts::commit_writes_of(async {
+            append_message(&db, &session.id, &message, None)
+        })
+        .await;
+        assert!(
+            written.is_err() || committed.is_err(),
+            "the append must report the device flush failure"
+        );
+
+        std::fs::remove_file(&transcript_path).unwrap();
+        let (retried, committed) = transcripts::commit_writes_of(async {
+            append_message(&db, &session.id, &message, None)
+        })
+        .await;
+        retried.expect("retry should append after the device recovers");
+        committed.expect("retry should commit its durable transcript line");
+
+        let records = transcripts::read_transcript(db.data_dir(), &session.id).unwrap();
+        let index_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND id = ?2",
+                params![session.id, message.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.id == message.id)
+                .count(),
+            1,
+            "the canonical transcript should hold the retried message once"
+        );
+        assert_eq!(
+            index_count, 1,
+            "the index should hold the retried message once"
+        );
     }
 
     fn checkpoint(first: &str, through: &str) -> CompactionRecord {
@@ -4326,6 +4898,76 @@ mod tests {
         assert_eq!(omitted.thinking_level, "omit");
     }
 
+    /// ADR 0334: `/fast` is stored per session, survives configures that do
+    /// not mention it, and is copied by a fork.
+    #[test]
+    fn session_fast_mode_is_persisted_preserved_and_forked() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(!session.fast_mode);
+
+        let set = |enabled: Option<bool>, mode: &str| {
+            configure_session_with_fast_mode(
+                &db,
+                &session.id,
+                mode,
+                None,
+                None,
+                None,
+                None,
+                enabled,
+            )
+            .unwrap()
+            .unwrap()
+        };
+        assert!(set(Some(true), "agent").fast_mode);
+        assert!(set(None, "plan").fast_mode);
+        let kept = configure_session(&db, &session.id, "agent", None, None)
+            .unwrap()
+            .unwrap();
+        assert!(kept.fast_mode);
+        assert!(
+            get_session(&db, &session.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .fast_mode
+        );
+
+        let ForkSessionResult::Created(fork) =
+            fork_session_through(&db, &session.id, None, None).unwrap()
+        else {
+            panic!("expected fork");
+        };
+        assert!(fork.summary.fast_mode);
+        assert!(
+            get_session(&db, &fork.summary.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .fast_mode
+        );
+
+        assert!(!set(Some(false), "agent").fast_mode);
+
+        let created = create_session_with_options(
+            &db,
+            SessionCreateOptions {
+                fast_mode: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(created.fast_mode);
+        assert!(
+            get_session(&db, &created.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .fast_mode
+        );
+    }
+
     #[test]
     fn create_session_permission_mode_is_optional_and_validated() {
         let db = test_db();
@@ -4391,6 +5033,185 @@ mod tests {
     }
 
     #[test]
+    fn derived_prompt_title_stays_eligible_for_the_title_plugin() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("user-1", "Fix the login button", "2026-01-01T00:00:01Z"),
+            None,
+        )
+        .unwrap();
+        let before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT updated_at FROM sessions WHERE id = ?1",
+                params![session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert!(derive_session_title(&db, &session.id, "Fix login bug").unwrap());
+        let derived = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(derived.summary.title, "Fix login bug");
+        let after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT updated_at FROM sessions WHERE id = ?1",
+                params![session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, before);
+
+        // The derived text is still an automatic title: the plugin reads it as
+        // the expected title and may replace it.
+        let context = auto_title_context(&db, &session.id).unwrap().unwrap();
+        assert_eq!(context.expected_title, "Fix login bug");
+        assert_eq!(context.user_prompt, "Fix the login button");
+        assert!(
+            set_automatic_session_title(&db, &session.id, "Fix login bug", "Login fix").unwrap()
+        );
+        assert_eq!(
+            get_session(&db, &session.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .title,
+            "Login fix"
+        );
+        assert!(auto_title_context(&db, &session.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn derived_prompt_title_never_overrides_named_sessions() {
+        let db = test_db();
+        let manual = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(rename_session(&db, &manual.id, "Picked by user").unwrap());
+        assert!(!derive_session_title(&db, &manual.id, "First prompt").unwrap());
+        assert_eq!(
+            get_session(&db, &manual.id).unwrap().unwrap().summary.title,
+            "Picked by user"
+        );
+
+        let generated = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(set_automatic_session_title(&db, &generated.id, "New task", "Generated").unwrap());
+        assert!(!derive_session_title(&db, &generated.id, "First prompt").unwrap());
+
+        let named =
+            create_session(&db, Some("Named up front".into()), None, None, None, None).unwrap();
+        assert!(!derive_session_title(&db, &named.id, "First prompt").unwrap());
+
+        let returned = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(derive_session_title(&db, &returned.id, "First prompt").unwrap());
+        assert!(!derive_session_title(&db, &returned.id, "Second prompt").unwrap());
+        assert_eq!(
+            get_session(&db, &returned.id)
+                .unwrap()
+                .unwrap()
+                .summary
+                .title,
+            "First prompt"
+        );
+
+        assert!(!derive_session_title(&db, "missing", "First prompt").unwrap());
+        assert!(derive_session_title(&db, &returned.id, "  ").is_err());
+    }
+
+    #[test]
+    fn localized_placeholder_titles_accept_the_first_prompt_fallback() {
+        let db = test_db();
+        for placeholder in [
+            "새 작업",
+            "新建任務",
+            "Tarefa sem título",
+            "Yeni görev",
+            "New chat",
+            "new task",
+            "new chat",
+            "tarefa sem título",
+            "nova conversa",
+            "yeni görev",
+            "yeni sohbet",
+        ] {
+            let session =
+                create_session(&db, Some(placeholder.into()), None, None, None, None).unwrap();
+            assert!(
+                derive_session_title(&db, &session.id, "Derived label").unwrap(),
+                "{placeholder} must accept the first-prompt fallback"
+            );
+            assert_eq!(
+                get_session(&db, &session.id)
+                    .unwrap()
+                    .unwrap()
+                    .summary
+                    .title,
+                "Derived label"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_title_context_is_limited_to_the_first_turn_and_bounded() {
+        let db = test_db();
+        let session = create_session_with_options(
+            &db,
+            SessionCreateOptions {
+                provider_id: Some("provider".into()),
+                model_id: Some("model".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let first_prompt = "p".repeat(1_100);
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("user-1", &first_prompt, "2026-01-01T00:00:01Z"),
+            None,
+        )
+        .unwrap();
+        let mut first_reply = user_msg("assistant-1", &"r".repeat(600), "2026-01-01T00:00:02Z");
+        first_reply.role = "assistant".into();
+        append_message(&db, &session.id, &first_reply, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("user-2", "later prompt", "2026-01-01T00:00:03Z"),
+            None,
+        )
+        .unwrap();
+        let mut later_reply = user_msg("assistant-2", "later reply", "2026-01-01T00:00:04Z");
+        later_reply.role = "assistant".into();
+        append_message(&db, &session.id, &later_reply, None).unwrap();
+
+        let context = auto_title_context(&db, &session.id).unwrap().unwrap();
+        assert_eq!(context.session_id, session.id);
+        assert_eq!(context.expected_title, "New task");
+        assert_eq!(context.user_prompt, "p".repeat(1_000));
+        assert_eq!(context.assistant_reply, Some("r".repeat(500)));
+        assert_eq!(context.model_key.as_deref(), Some("provider/model"));
+    }
+
+    #[test]
+    fn automatic_title_compare_and_set_respects_manual_and_stale_titles() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(set_automatic_session_title(&db, &session.id, "New task", "Generated").unwrap());
+        assert!(auto_title_context(&db, &session.id).unwrap().is_none());
+        assert!(!set_automatic_session_title(&db, &session.id, "New task", "Stale").unwrap());
+
+        let manual = create_session(&db, None, None, None, None, None).unwrap();
+        assert!(rename_session(&db, &manual.id, "Picked by user").unwrap());
+        assert!(!set_automatic_session_title(&db, &manual.id, "New task", "Generated").unwrap());
+        assert_eq!(
+            get_session(&db, &manual.id).unwrap().unwrap().summary.title,
+            "Picked by user"
+        );
+    }
+
+    #[test]
     fn create_session_returns_canonical_project_path() {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("project");
@@ -4437,6 +5258,10 @@ mod tests {
             mode: "agent".into(),
             thinking_level: "off".into(),
             permission_mode: "inherit".into(),
+            // Ownership is derived from `task_runs`, so an import is never one.
+            scheduled_run: false,
+            fast_mode: false,
+            worktree: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-02T00:00:00Z".into(),
         };
@@ -4487,6 +5312,10 @@ mod tests {
             mode: "agent".into(),
             thinking_level: "off".into(),
             permission_mode: "inherit".into(),
+            // Ownership is derived from `task_runs`, so an import is never one.
+            scheduled_run: false,
+            fast_mode: false,
+            worktree: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -4594,9 +5423,11 @@ mod tests {
             tool_duration_ms: Some(1_000),
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
-            kind: None,
             hosted_search: None,
+            model_system: None,
+            provider_replay: None,
             session_message: None,
         };
         append_message(&db, &session.id, &tool, None).unwrap();
@@ -4642,11 +5473,55 @@ mod tests {
             ],
         )
         .unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &user_msg("m3", "继续", "2025-05-01T00:00:04Z"),
+            None,
+        )
+        .unwrap();
+        let transcript = db
+            .data_dir()
+            .join("sessions")
+            .join(format!("{}.jsonl", session.id));
+        let before_review_update = std::fs::read(&transcript).unwrap();
         assert!(
             update_tool_review_state(&db, &session.id, "m2", "snapshot-1", "rolledBack",).unwrap()
         );
+        let after_review_update = std::fs::read(&transcript).unwrap();
+        assert!(
+            after_review_update.starts_with(&before_review_update),
+            "review state updates must append instead of rewriting retained history"
+        );
+        assert!(after_review_update.len() - before_review_update.len() < 256);
+        assert!(
+            update_tool_review_state(&db, &session.id, "m2", "snapshot-1", "rolledBack").unwrap()
+        );
+        for (message_id, snapshot_id) in [
+            ("missing", "snapshot-1"),
+            ("m2", "wrong"),
+            ("m1", "snapshot-1"),
+        ] {
+            assert!(!update_tool_review_state(
+                &db,
+                &session.id,
+                message_id,
+                snapshot_id,
+                "rolledBack"
+            )
+            .unwrap());
+        }
+        assert_eq!(std::fs::read(&transcript).unwrap(), after_review_update);
         let updated = get_session(&db, &session.id).unwrap().unwrap();
-        assert_eq!(updated.summary.message_count, 2);
+        assert_eq!(updated.summary.message_count, 3);
+        assert_eq!(
+            updated
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["m1", "m2", "m3"]
+        );
         assert_eq!(
             updated.messages[1].tool_result,
             Some(json!({
@@ -4670,7 +5545,175 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(last_seq, 2);
+        assert_eq!(last_seq, 3);
+    }
+
+    #[test]
+    fn truncate_from_folds_review_state_into_the_retained_prefix() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let mut tool = user_msg("review-tool", "written", "2025-05-01T00:00:01Z");
+        tool.role = "tool".into();
+        tool.tool_call_id = Some("review-call".into());
+        tool.tool_name = Some("Write".into());
+        tool.tool_result = Some(json!({"details": {"review": {
+            "snapshotId": "snapshot-1", "state": "active"
+        }}}));
+        for message in [
+            user_msg("root", "write", "2025-05-01T00:00:00Z"),
+            tool,
+            user_msg("later-root", "regenerate", "2025-05-01T00:00:02Z"),
+        ] {
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        assert!(update_tool_review_state(
+            &db,
+            &session.id,
+            "review-tool",
+            "snapshot-1",
+            "rolledBack"
+        )
+        .unwrap());
+        truncate_from(&db, &session.id, Some("later-root"), None).unwrap();
+        let raw = std::fs::read_to_string(
+            db.data_dir()
+                .join("sessions")
+                .join(format!("{}.jsonl", session.id)),
+        )
+        .unwrap();
+        let lines = raw
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert!(!lines.iter().any(|line| line["type"] == "tool_review_state"));
+        let stored_tool = lines
+            .iter()
+            .find(|line| line["id"] == "review-tool")
+            .unwrap();
+        assert_eq!(
+            stored_tool["blocks"][0]["result"]["details"]["review"]["state"],
+            "rolledBack"
+        );
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(
+            detail
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["root", "review-tool"]
+        );
+        assert_eq!(
+            detail.messages[1].tool_result.as_ref().unwrap()["details"]["review"]["state"],
+            "rolledBack"
+        );
+    }
+
+    #[test]
+    fn tool_review_state_survives_fork_revision_activation_and_deletion() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let mut tool = user_msg("review-tool", "written", "2025-05-01T00:00:01Z");
+        tool.role = "tool".into();
+        tool.tool_call_id = Some("review-call".into());
+        tool.tool_name = Some("Write".into());
+        tool.tool_result = Some(json!({"details": {"review": {
+            "snapshotId": "snapshot-1", "state": "active"
+        }}}));
+        let mut answer = user_msg("answer", "done", "2025-05-01T00:00:02Z");
+        answer.role = "assistant".into();
+        for message in [
+            user_msg("root", "write", "2025-05-01T00:00:00Z"),
+            tool,
+            answer,
+        ] {
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        assert!(update_tool_review_state(
+            &db,
+            &session.id,
+            "review-tool",
+            "snapshot-1",
+            "rolledBack"
+        )
+        .unwrap());
+        let assert_rolled_back = |messages: &[UiMessage]| {
+            let tool = messages
+                .iter()
+                .find(|message| message.role == "tool")
+                .unwrap();
+            assert_eq!(
+                tool.tool_result.as_ref().unwrap()["details"]["review"]["state"],
+                "rolledBack"
+            );
+        };
+        let ForkSessionResult::Created(child) =
+            fork_session_through(&db, &session.id, None, None).unwrap()
+        else {
+            panic!("fork must succeed");
+        };
+        assert_rolled_back(&child.messages);
+
+        truncate_from(&db, &session.id, Some("root"), None).unwrap();
+        let mut replacement = user_msg("other-root", "new variant", "2025-05-01T00:00:03Z");
+        replacement.revision_root_id = Some("root".into());
+        replacement.revision_count = Some(2);
+        replacement.active_revision = Some(2);
+        append_message(&db, &session.id, &replacement, None).unwrap();
+        let restored = activate_message_revision_canonical(&db, &session.id, "root", 1).unwrap();
+        assert_rolled_back(&restored);
+        assert!(delete_message(&db, &session.id, "answer").unwrap().deleted);
+        let path = db.data_dir().join("test.sqlite");
+        drop(db);
+        let reopened = Database::open(&path).unwrap();
+        assert_rolled_back(
+            &get_session(&reopened, &session.id)
+                .unwrap()
+                .unwrap()
+                .messages,
+        );
+        assert_rolled_back(
+            &get_session(&reopened, &child.summary.id)
+                .unwrap()
+                .unwrap()
+                .messages,
+        );
+    }
+
+    #[test]
+    fn delegation_settlement_updates_only_its_running_snapshot() {
+        let db = test_db();
+        let first = create_session(&db, None, None, None, None, None).unwrap();
+        let second = create_session(&db, None, None, None, None, None).unwrap();
+        let mut task = user_msg("task-shared-id", "partial", "2026-10-05T00:00:00Z");
+        task.role = "tool".into();
+        task.tool_name = Some("Task".into());
+        task.tool_call_id = Some(task.id.clone());
+        task.tool_args = Some(json!({"agent": "explorer"}));
+        task.tool_result =
+            Some(json!({"details": {"delegationId": "delegate-A", "status": "running"}}));
+        append_message(&db, &first.id, &task, None).unwrap();
+        append_message(&db, &second.id, &task, None).unwrap();
+        let mut stopped = task.clone();
+        stopped.tool_result =
+            Some(json!({"details": {"delegationId": "delegate-A", "status": "stopped"}}));
+        stopped.tool_args = Some(json!({"agent": "changed"}));
+        append_message(&db, &second.id, &stopped, None).unwrap();
+        // Late replay cannot reopen a settled delegation, including namespaced IDs.
+        append_message(&db, &second.id, &task, None).unwrap();
+        let read = |id: &str| get_session(&db, id).unwrap().unwrap().messages;
+        assert_eq!(read(&second.id).len(), 1);
+        assert_eq!(read(&second.id)[0].tool_result, stopped.tool_result);
+        assert_eq!(read(&second.id)[0].tool_args, task.tool_args);
+        assert_eq!(read(&first.id)[0].tool_result, task.tool_result);
+        let mut foreign = stopped.clone();
+        foreign.tool_result =
+            Some(json!({"details": {"delegationId": "different", "status": "stopped"}}));
+        append_message(&db, &first.id, &foreign, None).unwrap();
+        assert_eq!(read(&first.id)[0].tool_result, task.tool_result);
+        append_message(&db, &first.id, &stopped, None).unwrap();
+        append_message(&db, &first.id, &task, None).unwrap();
+        assert_eq!(read(&first.id)[0].tool_result, stopped.tool_result);
     }
 
     #[test]
@@ -4772,6 +5815,8 @@ mod tests {
             reference: "attachments/abc123".into(),
             mime_type: Some("image/png".into()),
             size: Some(42),
+            text: None,
+            inline_path: Some("@/scratch/pasted/image.png".into()),
         }]);
 
         append_message(&db, &session.id, &user, None).unwrap();
@@ -4788,6 +5833,7 @@ mod tests {
         let blocks = record.blocks;
         assert_eq!(blocks[1]["type"], "attachment");
         assert_eq!(blocks[1]["ref"], "attachments/abc123");
+        assert_eq!(blocks[1]["inlinePath"], "@/scratch/pasted/image.png");
         assert!(blocks[1].get("data").is_none());
     }
 
@@ -4953,6 +5999,78 @@ mod tests {
     }
 
     #[test]
+    fn a_replaced_message_keeps_its_position_for_an_around_window() {
+        // A branch stamp and a terminal steering snapshot both rewrite one
+        // existing message through `transcripts::update_message`. That call
+        // splices the line where it stands. Writing the replacement at the end
+        // of the file instead would still resolve the *content* — reads dedupe
+        // keep-last — but it would move the line, and an `around` window is
+        // centred on a physical position, so a search jump to an updated message
+        // would open on the tail of the session. This pins the geometry, not
+        // just the text.
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        for index in 0..12 {
+            append_message(
+                &db,
+                &session.id,
+                &user_msg(
+                    &format!("m{index}"),
+                    &format!("body {index}"),
+                    "2025-05-01T00:00:00Z",
+                ),
+                None,
+            )
+            .unwrap();
+        }
+        let replaced = user_msg("m5", "body 5 newest snapshot", "2025-05-01T00:00:00Z");
+        let (record, _) = ui_to_record(&replaced);
+        assert!(transcripts::update_message(db.data_dir(), &session.id, &record).unwrap());
+
+        let page = get_session_with_options(
+            &db,
+            &session.id,
+            SessionReadOptions {
+                message_around: Some("m5".to_string()),
+                message_before: None,
+                message_limit: Some(4),
+                content_limit: None,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        let ids: Vec<&str> = page.messages.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ids.contains(&"m5"),
+            "the anchor must be inside its own window: {ids:?}"
+        );
+        // Numeric, not lexicographic: "m10" < "m5" as strings, which would let
+        // a tail-window regression through.
+        let index_of = |id: &str| id.strip_prefix('m').and_then(|n| n.parse::<usize>().ok());
+        assert!(
+            ids.iter().any(|id| index_of(id).is_some_and(|n| n < 5)),
+            "messages before the anchor must stay reachable: {ids:?}"
+        );
+        assert!(
+            ids.iter().any(|id| index_of(id).is_some_and(|n| n > 5)),
+            "messages after the anchor must stay reachable: {ids:?}"
+        );
+        assert_eq!(
+            page.has_more_after,
+            Some(true),
+            "an anchor in the middle of the history is not the end of the session"
+        );
+        assert_eq!(
+            page.messages
+                .iter()
+                .find(|message| message.id == "m5")
+                .unwrap()
+                .content,
+            "body 5 newest snapshot"
+        );
+    }
+
+    #[test]
     fn bounded_session_reads_page_history_and_cap_display_content() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -4994,6 +6112,79 @@ mod tests {
     }
 
     #[test]
+    fn nested_lineage_roundtrips_independently_of_legacy_task_parent() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        for (id, task, nested) in [
+            ("legacy", Some("task-1"), None),
+            ("nested-root", None, Some("code-root")),
+            ("nested-delegate", Some("task-1"), Some("code-child")),
+        ] {
+            let mut message = user_msg(id, "result", "2026-09-30T00:00:00Z");
+            message.role = "assistant".into();
+            message.parent_tool_call_id = task.map(str::to_owned);
+            message.nested_parent_tool_call_id = nested.map(str::to_owned);
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(
+            detail.messages[0].parent_tool_call_id.as_deref(),
+            Some("task-1")
+        );
+        assert_eq!(detail.messages[0].nested_parent_tool_call_id, None);
+        assert_eq!(detail.messages[1].parent_tool_call_id, None);
+        assert_eq!(
+            detail.messages[1].nested_parent_tool_call_id.as_deref(),
+            Some("code-root")
+        );
+        assert_eq!(
+            detail.messages[2].parent_tool_call_id.as_deref(),
+            Some("task-1")
+        );
+        assert_eq!(
+            detail.messages[2].nested_parent_tool_call_id.as_deref(),
+            Some("code-child")
+        );
+    }
+
+    #[test]
+    fn usage_accounting_roundtrips_without_rewriting_legacy_tokens() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let fixtures = [
+            json!({"inputTokens": 12, "outputTokens": 3, "totalTokens": 15}),
+            json!({
+                "inputTokens": 12, "outputTokens": 3, "totalTokens": 15,
+                "operationId": "request-1", "usageOrigin": "pi",
+                "providerId": "physical-account", "modelId": "physical-model",
+                "costStatus": "reported", "aggregation": "operation",
+                "cost": {"input": 0.12, "output": 0.03, "cacheRead": 0, "cacheWrite": 0, "total": 0.15}
+            }),
+            json!({
+                "inputTokens": 12, "outputTokens": 3, "totalTokens": 15,
+                "costStatus": "unknown", "aggregation": "aggregate",
+                "operations": [
+                    {"operationId": "child-1", "usageOrigin": "pi", "inputTokens": 10, "outputTokens": 2, "totalTokens": 12, "costStatus": "unknown"},
+                    {"operationId": "classifier-1", "usageOrigin": "pi", "inputTokens": 2, "outputTokens": 1, "totalTokens": 3, "costStatus": "estimated", "cost": {"input": 0.2, "output": 0.1, "cacheRead": 0, "cacheWrite": 0, "total": 0.3}}
+                ]
+            }),
+        ];
+        for (index, usage) in fixtures.iter().enumerate() {
+            let mut message = user_msg(&format!("usage-{index}"), "answer", "2026-09-30T00:00:00Z");
+            message.role = "assistant".into();
+            message.usage = Some(serde_json::from_value(usage.clone()).unwrap());
+            append_message(&db, &session.id, &message, None).unwrap();
+            // Replayed message_end replaces a row; it must not duplicate usage.
+            append_message(&db, &session.id, &message, None).unwrap();
+        }
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(detail.messages.len(), fixtures.len());
+        for (message, expected) in detail.messages.iter().zip(fixtures) {
+            assert_eq!(json!(message.usage), expected);
+        }
+    }
+
+    #[test]
     fn assistant_thinking_roundtrips_as_canonical_blocks() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -5018,6 +6209,7 @@ mod tests {
                 cache_write_tokens: None,
                 reasoning_tokens: Some(5),
                 total_tokens: 48,
+                accounting: serde_json::Map::new(),
             }),
             response_duration_ms: Some(2_000),
             response_output_tokens: Some(34),
@@ -5034,9 +6226,11 @@ mod tests {
             tool_duration_ms: None,
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
-            kind: None,
             hosted_search: None,
+            model_system: None,
+            provider_replay: None,
             session_message: None,
         };
         append_message(&db, &session.id, &assistant, None).unwrap();
@@ -5081,6 +6275,64 @@ mod tests {
     }
 
     #[test]
+    fn assistant_provider_replay_roundtrips_in_record_meta() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let replay = json!({
+            "version": 1,
+            "blocks": [
+                { "type": "thinking", "length": 3, "signature": "sig-a" },
+                { "type": "text", "length": 6 }
+            ]
+        });
+        let assistant: UiMessage = serde_json::from_value(json!({
+            "id": "assistant-replay-1",
+            "role": "assistant",
+            "content": "answer",
+            "thinking": "abc",
+            "createdAt": "2025-05-01T00:00:01Z",
+            "status": "complete",
+            "providerReplay": replay,
+        }))
+        .unwrap();
+        let plain: UiMessage = serde_json::from_value(json!({
+            "id": "assistant-replay-2",
+            "role": "assistant",
+            "content": "plain",
+            "createdAt": "2025-05-01T00:00:02Z",
+            "status": "complete",
+        }))
+        .unwrap();
+        append_message(&db, &session.id, &assistant, None).unwrap();
+        append_message(&db, &session.id, &plain, None).unwrap();
+
+        let records = transcripts::read_transcript(db.data_dir(), &session.id).unwrap();
+        assert_eq!(
+            records[0]
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("providerReplay")),
+            Some(&replay)
+        );
+        // Replay data lives in meta only: the visible blocks are unchanged.
+        assert_eq!(
+            records[0].blocks,
+            json!([{ "type": "thinking", "text": "abc" }, { "type": "text", "text": "answer" }])
+        );
+        assert!(records[1]
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("providerReplay"))
+            .is_none());
+
+        let detail = get_session(&db, &session.id).unwrap().unwrap();
+        assert_eq!(detail.messages[0].provider_replay, Some(replay));
+        assert_eq!(detail.messages[0].thinking.as_deref(), Some("abc"));
+        assert_eq!(detail.messages[0].content, "answer");
+        assert_eq!(detail.messages[1].provider_replay, None);
+    }
+
+    #[test]
     fn assistant_hosted_search_roundtrips_as_canonical_blocks() {
         let db = test_db();
         let session = create_session(&db, None, None, None, None, None).unwrap();
@@ -5095,7 +6347,6 @@ mod tests {
             steering: None,
             created_at: "2025-05-01T00:00:01Z".into(),
             thinking: None,
-            kind: None,
             status: Some("complete".into()),
             model_id: Some("model-1".into()),
             provider_id: Some("provider-1".into()),
@@ -5115,7 +6366,10 @@ mod tests {
             tool_duration_ms: None,
             is_error: None,
             parent_tool_call_id: None,
+            nested_parent_tool_call_id: None,
             agent_name: None,
+            model_system: None,
+            provider_replay: None,
             hosted_search: Some(json!({
                 "status": "completed",
                 "rounds": [
@@ -5238,6 +6492,10 @@ mod tests {
             mode: "agent".into(),
             thinking_level: "medium".into(),
             permission_mode: "inherit".into(),
+            // Ownership is derived from `task_runs`, so an import is never one.
+            scheduled_run: false,
+            fast_mode: false,
+            worktree: None,
             created_at: "2025-01-01T00:00:00Z".into(),
             updated_at: "2025-01-01T00:00:00Z".into(),
         };
@@ -5491,6 +6749,47 @@ mod tests {
             1
         );
         assert_eq!(std::fs::read_to_string(file).unwrap(), "keep source");
+    }
+
+    #[test]
+    fn fork_copies_referenced_visualizations_so_cards_survive_source_deletion() {
+        let db = test_db();
+        let source = create_session(&db, Some("Charts".into()), None, None, None, None).unwrap();
+        let dir = crate::visualizations::session_dir(db.data_dir(), &source.id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let chart = dir.join("chart.html");
+        std::fs::write(&chart, "<p>chart</p>").unwrap();
+        std::fs::write(dir.join("unused.html"), "<p>unused</p>").unwrap();
+        let text = format!("::visualize{}", json!({"path": chart}));
+        append_message(
+            &db,
+            &source.id,
+            &UiMessage {
+                role: "assistant".into(),
+                ..user_msg("viz-1", &text, "2025-05-01T00:00:00Z")
+            },
+            None,
+        )
+        .unwrap();
+        let ForkSessionResult::Created(child) =
+            fork_session_through(&db, &source.id, None, None).unwrap()
+        else {
+            panic!("expected child")
+        };
+        let child_dir =
+            crate::visualizations::session_dir(db.data_dir(), &child.summary.id).unwrap();
+        let child_chart = child_dir.join("chart.html");
+        assert_eq!(
+            child.messages[0].content,
+            format!("::visualize{}", json!({"path": child_chart}))
+        );
+        assert!(!child_dir.join("unused.html").exists());
+        delete_session(&db, &source.id).unwrap();
+        crate::visualizations::remove_session_dir(db.data_dir(), &source.id);
+        assert_eq!(
+            std::fs::read_to_string(&child_chart).unwrap(),
+            "<p>chart</p>"
+        );
     }
 
     #[test]
@@ -6026,6 +7325,108 @@ mod tests {
         // Deleting the session clears the index (cascade + FTS trigger).
         delete_session(&db, &session.id).unwrap();
         assert!(search_messages(&db, "数据库", 10).unwrap().is_empty());
+    }
+
+    /// The search snippets must show the window around the match. FTS5's
+    /// `snippet()` reads the phrase list of the MATCH that positioned its
+    /// cursor, so a reformulation that reaches a document by rowid alone
+    /// silently degrades to the head of the document — which still looks like a
+    /// plausible preview. This pins the observable property.
+    #[test]
+    fn search_snippets_center_on_the_match_not_the_document_head() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let filler = "lorem ipsum dolor sit amet ".repeat(60);
+        append_message(
+            &db,
+            &session.id,
+            &user_msg(
+                "m1",
+                &format!("{filler}needle-window-tail"),
+                "2025-05-01T00:00:00Z",
+            ),
+            None,
+        )
+        .unwrap();
+        let hits = search_messages(&db, "needle-window-tail", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            hits[0].snippet.contains("needle-window-tail"),
+            "snippet is not the window around the match: {:?}",
+            hits[0].snippet
+        );
+        assert!(
+            hits[0].snippet.len() < filler.len(),
+            "snippet returned the whole body: {} bytes",
+            hits[0].snippet.len()
+        );
+    }
+
+    /// The ordering indexes are a plan change and must not be a result change.
+    /// Both branches of `search_messages` are compared with the indexes present
+    /// and dropped, on the same rows.
+    #[test]
+    fn search_results_do_not_depend_on_the_ordering_indexes() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        for index in 0..40 {
+            append_message(
+                &db,
+                &session.id,
+                &user_msg(
+                    &format!("m{index:02}"),
+                    &format!("needle body {index}"),
+                    &format!("2025-05-01T00:00:{index:02}Z"),
+                ),
+                None,
+            )
+            .unwrap();
+        }
+        let project = |hits: Vec<SearchHit>| {
+            hits.into_iter()
+                .map(|hit| (hit.message_id, hit.snippet))
+                .collect::<Vec<_>>()
+        };
+        let indexed_fts = project(search_messages(&db, "needle body", 10).unwrap());
+        let indexed_like = project(search_messages(&db, "ne", 10).unwrap());
+        assert_eq!(indexed_fts.len(), 10);
+        assert_eq!(indexed_like.len(), 10);
+        // Newest first: the query must rank by created_at, not by row order.
+        assert_eq!(indexed_fts[0].0, "m39");
+
+        db.conn()
+            .execute_batch(
+                "DROP INDEX idx_messages_created;
+                 DROP INDEX idx_messages_session_created;",
+            )
+            .unwrap();
+        assert_eq!(
+            project(search_messages(&db, "needle body", 10).unwrap()),
+            indexed_fts
+        );
+        assert_eq!(
+            project(search_messages(&db, "ne", 10).unwrap()),
+            indexed_like
+        );
+    }
+
+    /// `boot_maintenance` adds the ordering indexes to an existing database
+    /// without a schema-version bump, the same way it has always added
+    /// `idx_turns_ended_at`.
+    #[test]
+    fn opening_a_database_creates_the_message_ordering_indexes() {
+        let db = test_db();
+        for name in ["idx_messages_created", "idx_messages_session_created"] {
+            let present: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    params![name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(present, 1, "{name} was not created");
+        }
     }
 
     #[test]
@@ -6846,6 +8247,322 @@ mod tests {
         message
     }
 
+    fn streaming_flag(db: &Database, id: &str) -> Option<i64> {
+        db.conn()
+            .query_row(
+                "SELECT streaming FROM messages WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn messages_have_streaming_column(db: &Database) -> bool {
+        db.conn()
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM pragma_table_info('messages') WHERE name = 'streaming'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Randomized differential check of the one fact this change caches. A
+    /// session is driven through provisional appends, settled snapshots, retried
+    /// duplicates of the same id and checkpoint recovery, and after every step the
+    /// index's `streaming` bit and the guard's answer have to agree with the
+    /// transcript itself.
+    #[test]
+    fn the_streaming_bit_matches_the_transcript_under_random_appends() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for step in 0..80 {
+            let id = format!("m{}", next() % 6);
+            let mut message = user_msg(&id, &format!("body {step}"), "2025-05-01T00:00:00Z");
+            message.role = if next() % 4 == 0 {
+                "user".into()
+            } else {
+                "assistant".into()
+            };
+            if message.role == "assistant" {
+                message.status = Some(
+                    if next() % 2 == 0 {
+                        "streaming"
+                    } else {
+                        "complete"
+                    }
+                    .into(),
+                );
+            }
+            let appended = append_message(&db, &session.id, &message, None);
+            assert!(
+                !format!("{appended:?}").contains("missing from its transcript"),
+                "step {step}: the settled row could not reach the transcript: {appended:?}"
+            );
+            if next() % 3 == 0 {
+                let _ = save_inflight_message(&db, &session.id, None, &message);
+            }
+            if next() % 7 == 0 {
+                let _ = recover_inflight_message(&db, &session.id, next() % 2 == 0);
+            }
+            let records =
+                dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+            for record in &records {
+                assert_eq!(
+                    streaming_flag(&db, &record.id),
+                    Some(i64::from(record_is_streaming(record))),
+                    "step {step}: the index disagrees with the transcript for {}",
+                    record.id
+                );
+                assert_eq!(
+                    streaming_assistant_indexed(&db, &session.id, &record.id).unwrap(),
+                    record_is_streaming(record),
+                    "step {step}: the guard disagrees with the transcript for {}",
+                    record.id
+                );
+            }
+        }
+    }
+
+    /// The guard reads the index, not the transcript: a live streaming row keeps
+    /// its checkpoint even when the transcript file is gone.
+    #[test]
+    fn the_streaming_guard_answers_from_the_index_not_from_the_transcript() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        assert!(transcript.exists());
+        std::fs::remove_file(&transcript).unwrap();
+
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+        assert!(transcripts::inflight_path(db.data_dir(), &session.id)
+            .unwrap()
+            .exists());
+    }
+
+    /// The mirror image: a row the index cannot answer for is resolved from the
+    /// transcript, which is what makes an unrebuilt database behave exactly as it
+    /// did before the cache existed. Clearing the column *and* deleting the file
+    /// makes the two sources disagree, so the answer says which one was read.
+    #[test]
+    fn a_message_written_before_the_streaming_column_answers_from_the_transcript() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        db.conn()
+            .execute("UPDATE messages SET streaming = NULL WHERE id = 'a1'", [])
+            .unwrap();
+
+        // The transcript has the streaming row, and the fallback finds it.
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+
+        // Now only the column could answer "streaming"; the file cannot. The
+        // checkpoint is dropped, so the file is the source that answered.
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        std::fs::remove_file(&transcript).unwrap();
+        assert!(!save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+        assert!(!transcripts::inflight_path(db.data_dir(), &session.id)
+            .unwrap()
+            .exists());
+    }
+
+    /// The column is a cache of the transcript's last copy, so landing a terminal
+    /// snapshot has to re-stamp it. A stale row would keep answering "still
+    /// streaming", refuse the terminal row and lose the reply.
+    #[test]
+    fn the_streaming_column_tracks_the_last_copy_of_a_message() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        let settled = |id: &str, text: &str| {
+            let mut message = streaming_assistant(id, text);
+            message.status = Some("complete".into());
+            message
+        };
+
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(streaming_flag(&db, "a1"), Some(1));
+        append_message(
+            &db,
+            &session.id,
+            &settled("a1", "partial and complete"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(streaming_flag(&db, "a1"), Some(0));
+        append_message(&db, &session.id, &streaming_assistant("a2", "second"), None).unwrap();
+        assert_eq!(streaming_flag(&db, "a2"), Some(1));
+
+        // Every row agrees with the transcript's own last copy of its id.
+        let records =
+            dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+        assert_eq!(records.len(), 2);
+        for record in records {
+            assert_eq!(
+                streaming_flag(&db, &record.id),
+                Some(i64::from(record_is_streaming(&record))),
+                "the index disagrees with the transcript for {}",
+                record.id
+            );
+        }
+    }
+
+    /// The column arrives through boot maintenance, not a versioned migration: no
+    /// row is rewritten and no backup is taken, so a database that predates it
+    /// keeps working and simply answers from the transcript until its rows are
+    /// rewritten by an append.
+    #[test]
+    fn opening_a_database_adds_the_streaming_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pi.sqlite");
+        let db = Database::open(&path).unwrap();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert!(messages_have_streaming_column(&db));
+        db.conn()
+            .execute_batch("ALTER TABLE messages DROP COLUMN streaming")
+            .unwrap();
+        drop(db);
+
+        let db = Database::open(&path).unwrap();
+        assert!(messages_have_streaming_column(&db));
+        assert_eq!(streaming_flag(&db, "a1"), None);
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial")
+        )
+        .unwrap());
+    }
+    /// A device that lost a settled row's bytes leaves the index claiming the
+    /// reply is finished while the transcript still ends on the provisional row.
+    /// The checkpoint is then the durable copy, so recovery has to promote it —
+    /// and re-stamp the index — instead of dropping it as a settled duplicate.
+    #[test]
+    fn a_settled_index_row_over_a_provisional_transcript_row_still_recovers() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial reply")
+        )
+        .unwrap());
+        // The crash window: the index was re-stamped, the row's bytes never were.
+        db.conn()
+            .execute("UPDATE messages SET streaming = 0 WHERE id = 'a1'", [])
+            .unwrap();
+
+        let recovered = recover_inflight_messages(&db, false).unwrap();
+        assert_eq!(recovered.len(), 1, "the reply was dropped as a duplicate");
+        assert_eq!(recovered[0].1.content, "partial reply");
+        assert_eq!(streaming_flag(&db, "a1"), Some(0));
+        let records =
+            dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            record_index_text(&records[0]).as_deref(),
+            Some("partial reply")
+        );
+    }
+
+    /// The mirror window: the transcript lost the provisional row while the index
+    /// kept it. The checkpoint is again the only copy, and the promotion has to
+    /// append the row back instead of failing because the file does not have it.
+    #[test]
+    fn a_reply_whose_transcript_row_was_lost_is_appended_back_on_recovery() {
+        let db = test_db();
+        let session = create_session(&db, None, None, None, None, None).unwrap();
+        append_message(
+            &db,
+            &session.id,
+            &streaming_assistant("a1", "partial"),
+            None,
+        )
+        .unwrap();
+        assert!(save_inflight_message(
+            &db,
+            &session.id,
+            None,
+            &streaming_assistant("a1", "partial reply")
+        )
+        .unwrap());
+        // The transcript lost the row's bytes; only the index still has it.
+        let transcript = transcripts::transcript_path(db.data_dir(), &session.id).unwrap();
+        std::fs::write(&transcript, "").unwrap();
+
+        let recovered = recover_inflight_messages(&db, false).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(streaming_flag(&db, "a1"), Some(0));
+        let records =
+            dedupe_records(transcripts::read_transcript(db.data_dir(), &session.id).unwrap());
+        assert_eq!(records.len(), 1, "the promoted row never reached the file");
+        assert_eq!(
+            record_index_text(&records[0]).as_deref(),
+            Some("partial reply")
+        );
+    }
+
     #[test]
     fn inflight_checkpoint_is_promoted_as_aborted_after_reopen() {
         let dir = tempfile::tempdir().unwrap();
@@ -7226,50 +8943,6 @@ mod tests {
             .find(|item| item.get("turnCount").and_then(|v| v.as_i64()) == Some(1))
             .expect("active day");
         assert_eq!(active.get("totalTokens").unwrap().as_i64(), Some(250));
-    }
-
-    #[test]
-    fn token_usage_history_groups_by_model() {
-        let db = test_db();
-        let session = create_session(&db, None, None, None, None, None).unwrap();
-        let turn_a = begin_turn(&db, &session.id, Some("prov"), Some("glm-5.3-flash")).unwrap();
-        let usage_a = json!({ "inputTokens": 100, "outputTokens": 50 });
-        end_turn_settling(&db, &turn_a, "completed", None, Some(&usage_a), false, false).unwrap();
-        let turn_b = begin_turn(&db, &session.id, Some("prov"), Some("glm-5.3")).unwrap();
-        let usage_b = json!({ "inputTokens": 10, "outputTokens": 5 });
-        end_turn_settling(&db, &turn_b, "completed", None, Some(&usage_b), false, false).unwrap();
-
-        let history = get_token_usage_history(&db, None, None, "day").unwrap();
-        let models = history.get("models").unwrap().as_array().unwrap();
-        let flash = models
-            .iter()
-            .find(|m| m.get("modelId").and_then(|v| v.as_str()) == Some("glm-5.3-flash"))
-            .expect("glm-5.3-flash series");
-        let flash_items = flash.get("items").unwrap().as_array().unwrap();
-        let flash_total: i64 = flash_items
-            .iter()
-            .map(|item| item.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0))
-            .sum();
-        assert_eq!(flash_total, 150);
-
-        let other = models
-            .iter()
-            .find(|m| m.get("modelId").and_then(|v| v.as_str()) == Some("glm-5.3"))
-            .expect("glm-5.3 series");
-        let other_total: i64 = other
-            .get("items")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|item| item.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0))
-            .sum();
-        assert_eq!(other_total, 15);
-        // Heaviest model leads the series list for the chart legend.
-        assert_eq!(
-            models[0].get("modelId").and_then(|v| v.as_str()),
-            Some("glm-5.3-flash")
-        );
     }
 
     #[test]

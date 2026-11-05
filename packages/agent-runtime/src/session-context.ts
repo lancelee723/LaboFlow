@@ -1,10 +1,11 @@
+import { readSystemMessage } from "./system-transcript-journal.js";
+import { recoverMalformedToolCalls } from "./tool-call-recovery.js";
 /**
  * Project pi session entries into the model context.
  *
- * pi 0.85 moved `buildSessionContext` off the public package export and made
- * the remaining helper async for custom-entry projectors. LaboFlow
- * synthesizes only message and compaction entries, so the projection stays
- * synchronous and keeps the `{ messages }` shape the runtime already uses.
+ * The runtime owns this synchronous projection because its transcript includes
+ * desktop-only entries and persisted host checkpoints. It keeps the
+ * `{ messages }` shape consumed by the agent loop.
  *
  * The slice-from-latest-compaction and compactionSummary-before-retainedTail
  * order preserve the behavior D203 depends on. Retained
@@ -59,6 +60,8 @@ export function sessionEntryToContextMessages(
       return isContextMessage(entry.message) ? [entry.message] : [];
     case "compaction":
       return [
+        ...(entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details
+          ? [readSystemMessage(entry.details.systemMessageJson)] : []),
         createCompactionSummaryMessage(
           entry.summary,
           entry.tokensBefore,
@@ -71,7 +74,8 @@ export function sessionEntryToContextMessages(
               entry.timestamp,
               identity,
             )),
-        ...entry.retainedTail.filter(isContextMessage),
+        ...entry.retainedTail.filter((message) => isContextMessage(message) &&
+          !(message.role === "system" && entry.details && typeof entry.details === "object" && "systemMessageJson" in entry.details)),
       ];
     case "branch_summary":
       return entry.summary
@@ -95,8 +99,8 @@ export function buildSessionContext(
   messages: AgentMessage[];
 } {
   return {
-    messages: buildContextEntries(pathEntries).flatMap((entry) =>
+    messages: recoverMalformedToolCalls(buildContextEntries(pathEntries).flatMap((entry) =>
       sessionEntryToContextMessages(entry, identity),
-    ),
+    )),
   };
 }

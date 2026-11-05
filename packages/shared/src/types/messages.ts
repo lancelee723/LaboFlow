@@ -1,6 +1,7 @@
+import type { AppError } from "../errors.js";
 /** Shared public types grouped by the owning application domain. */
 import type { SessionMessageOrigin } from "../session-collaboration.js";
-import type { AppError } from "../errors.js";
+import type { PlanHistoryEntry } from "./plans.js";
 
 export type UiMessageRole = "user" | "assistant" | "system" | "tool";
 
@@ -45,7 +46,7 @@ export type UsageOperation = Omit<MessageUsage, "operations" | "aggregation"> & 
   operationId: string;
 };
 
-export { addUsage, withUsageIdentity } from "../message-usage.js";
+export { addUsage, contextOccupancyTokens, withUsageIdentity } from "../message-usage.js";
 
 export type MessageAttachment = {
   kind: "image" | "file" | "session";
@@ -60,6 +61,13 @@ export type MessageAttachment = {
    * with the user's message; other attachment kinds never carry it.
    */
   text?: string;
+  /**
+   * The `@path` text this attachment occupies inside the message content, when
+   * the user placed it between words. The transcript renders the attachment at
+   * that position instead of appending it after the text; absent means the
+   * attachment follows the body (a formatted, expanded, or legacy message).
+   */
+  inlinePath?: string;
   /** Sidecar-only hydrated image data; never persisted or sent by the host. */
   data?: string;
 };
@@ -81,10 +89,19 @@ export type ToolTokenUsage = {
 
 export type UiMessage = {
   id: string;
-  role: UiMessageRole;
-  content: string;
   /** Host card kind, e.g. "expert-card" / "team-card" (module 01). */
   kind?: string;
+  role: UiMessageRole;
+  content: string;
+  /** Internal model instructions/tool declarations; never a visible chat row. */
+  modelSystem?: {
+    version: 1;
+    /** The following user input can have been persisted before runtime admission. */
+    beforeMessageId?: string;
+    afterMessageId?: string;
+    /** Opaque JSON preserves section and schema key order across Host storage. */
+    messageJson: string;
+  };
   /** Authenticated agent-to-agent provenance; never inferred from message text. */
   sessionMessage?: SessionMessageOrigin;
   /** Present only on the durable user row created by a Live Voice operation. */
@@ -102,8 +119,12 @@ export type UiMessage = {
   providerId?: string;
   /** Token usage for the assistant turn, when the provider reported it. */
   usage?: MessageUsage;
-  /** Elapsed model streaming time used to calculate output throughput. */
+  /** Elapsed assistant response duration used to calculate output throughput. */
   responseDurationMs?: number;
+  /** Client-observed wait from issuing the model request to its first response event. */
+  providerWaitMs?: number;
+  /** Time spent streaming the model's thinking and answer after the first response event. */
+  modelStreamDurationMs?: number;
   /** Output tokens used only for throughput when a stopped stream has no final usage. */
   responseOutputTokens?: number;
   /** Structured failure attached to the assistant turn that failed. */
@@ -126,6 +147,8 @@ export type UiMessage = {
   toolStatus?: "running" | "success" | "error" | "denied";
   toolArgs?: unknown;
   toolResult?: unknown;
+  /** Renderer projection; never written back into canonical model evidence. */
+  planHistory?: PlanHistoryEntry;
   /** Estimated tokens occupied by this tool call and its result. */
   toolUsage?: ToolTokenUsage;
   toolCompletedAt?: string;
@@ -149,7 +172,42 @@ export type UiMessage = {
    * searched.
    */
   hostedSearch?: HostedSearch;
+  /**
+   * Opaque provider replay data for an assistant row: the signatures pi-ai
+   * keeps on thinking/text blocks. Never shown; the runtime uses it to send a
+   * restored history byte-for-byte as the live one, so a rebuilt runtime keeps
+   * the prompt cache and the model's own reasoning.
+   */
+  providerReplay?: AssistantProviderReplay;
 };
+
+/**
+ * Per-block replay metadata for one assistant message, in content order.
+ * `length` is the UTF-16 length of the block's text; the texts themselves are
+ * already stored as `thinking` and `content` (concatenated), so only the
+ * boundaries and signatures are kept here.
+ *
+ * `toolCalls` keeps the signature a provider attached to a function call
+ * (Gemini's `thoughtSignature`), keyed by call id. The calls themselves are
+ * rebuilt from their tool rows, which carry the same id.
+ */
+export type AssistantProviderReplay = {
+  version: 1;
+  blocks: AssistantProviderReplayBlock[];
+  toolCalls?: AssistantProviderReplayToolCall[];
+};
+
+/**
+ * A text block's `signature` is pi-ai's `textSignature`: the Responses message
+ * id or a Gemini thought signature. A thinking block's is the thinking
+ * signature, redacted payload, encrypted reasoning item, or Completions
+ * reasoning field name.
+ */
+export type AssistantProviderReplayBlock =
+  | { type: "thinking"; length: number; signature?: string; redacted?: true }
+  | { type: "text"; length: number; signature?: string };
+
+export type AssistantProviderReplayToolCall = { id: string; signature: string };
 
 /**
  * Normalized provider-hosted web search activity for one assistant message.

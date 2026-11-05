@@ -8,7 +8,6 @@ use crate::db::{ms_to_ts, now_ms, ts_to_ms, Database};
 use crate::sessions;
 
 pub mod automation;
-pub mod cron;
 pub mod project;
 pub mod timing;
 
@@ -31,10 +30,6 @@ pub struct ScheduledTask {
     pub schedule: Option<timing::Schedule>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_run_at: Option<String>,
-    /// LaboFlow module 03 (R5-1): 5-field cron expression; present instead of
-    /// `schedule` for cron-scheduled tasks (cadence tag stays "cron").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cron_expr: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,23 +40,19 @@ pub struct ScheduledTask {
     pub model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
-    /// FR-MC-11: per-task missed-run catch-up toggle; absent means enabled
-    /// (the historical behaviour).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub catch_up_enabled: Option<bool>,
-    /// FR-MC-17: task-level unattended policy (strict/degraded/lenient);
-    /// absent keeps the executor default ("strict" for scheduled runs).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unattended_policy: Option<String>,
-    /// FR-MC-15: output destination tag; absent/empty means session only.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_destination: Option<String>,
+    /// Whether each run continues one conversation or opens its own.
+    #[serde(default = "default_session_mode")]
+    pub session_mode: String,
     /// Presence distinguishes a saved project (including null) from legacy tasks.
     #[serde(skip)]
     pub(crate) workspace_bound: bool,
     /// Calendar intent is independent from Hourly's compatibility schedule.
     #[serde(skip)]
     pub(crate) calendar_configured: bool,
+}
+
+fn default_session_mode() -> String {
+    "perRun".to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,7 +67,7 @@ pub struct TaskRun {
     pub ended_at: Option<String>,
 }
 
-const CADENCES: [&str; 5] = ["manual", "hourly", "daily", "weekly", "cron"];
+const CADENCES: [&str; 5] = ["manual", "hourly", "interval", "daily", "weekly"];
 
 fn normalize_cadence(value: Option<&str>) -> String {
     match value {
@@ -207,11 +198,6 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
         _ => (None, None),
     };
     Ok(ScheduledTask {
-        cron_expr: config
-            .get("cronExpr")
-            .and_then(Value::as_str)
-            .filter(|expr| !expr.trim().is_empty())
-            .map(str::to_string),
         id: row.get(0)?,
         title: row.get(1)?,
         prompt: row.get(2)?,
@@ -246,19 +232,14 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
             .and_then(Value::as_str)
             .filter(|level| sessions::is_valid_thinking_level(level))
             .map(str::to_string),
-        catch_up_enabled: config.get("catchUpEnabled").and_then(Value::as_bool),
-        unattended_policy: config
-            .get("unattendedPolicy")
+        // Absent or unrecognized config keeps the historical shape: one
+        // conversation per run.
+        session_mode: config
+            .get("sessionMode")
             .and_then(Value::as_str)
-            .filter(|policy| {
-                matches!(*policy, "strict" | "degraded" | "lenient")
-            })
-            .map(str::to_string),
-        output_destination: config
-            .get("outputDestination")
-            .and_then(Value::as_str)
-            .filter(|dest| !dest.trim().is_empty())
-            .map(str::to_string),
+            .filter(|mode| automation::TASK_SESSION_MODES.contains(mode))
+            .unwrap_or("perRun")
+            .to_string(),
     })
 }
 
@@ -469,6 +450,30 @@ pub fn begin_run(db: &Database, task_id: &str, session_id: Option<&str>) -> Resu
     Ok(run_id)
 }
 
+/// The conversation a `reuse` task should continue: the session its newest run
+/// used, while that session still exists and still belongs to the same project.
+/// A deleted conversation — or a task re-pointed at another folder — starts a
+/// new one instead of replaying into the wrong workspace.
+pub fn reusable_session(
+    db: &Database,
+    task_id: &str,
+    project_path: Option<&str>,
+) -> Result<Option<String>> {
+    let found: Option<String> = db
+        .conn()
+        .prepare_cached(
+            "SELECT r.session_id FROM task_runs r
+             JOIN sessions s ON s.id = r.session_id
+             LEFT JOIN projects p ON p.id = s.project_id
+             WHERE r.task_id = ?1 AND r.session_id IS NOT NULL AND s.deleted_at IS NULL
+               AND ((?2 IS NULL AND s.project_id IS NULL) OR p.path = ?2)
+             ORDER BY r.started_at DESC LIMIT 1",
+        )?
+        .query_row(params![task_id, project_path], |row| row.get(0))
+        .optional()?;
+    Ok(found)
+}
+
 pub fn finish_run(
     db: &Database,
     run_id: &str,
@@ -486,67 +491,63 @@ pub fn finish_run(
              WHERE id = ?4 AND status = 'running'",
         )?
         .execute(params![status, error_code, now_ms(), run_id])?;
-    if n > 0 && status == "error" {
-        // FR-MC-13: three consecutive failed runs pause the task so it stops
-        // burning tokens; the failure record stays for review.
-        let task_id: String = db
-            .conn()
-            .query_row(
-                "SELECT task_id FROM task_runs WHERE id = ?1",
-                params![run_id],
-                |row| row.get(0),
-            )?;
-        let consecutive: i64 = db.conn().query_row(
-            "WITH recent AS (
-               SELECT status FROM task_runs
-               WHERE task_id = ?1 AND status IN ('error', 'completed')
-               ORDER BY started_at DESC LIMIT 3
-             )
-             SELECT COUNT(*) FROM recent WHERE status = 'error'",
-            params![task_id],
-            |row| row.get(0),
-        )?;
-        if consecutive >= 3 {
-            db.conn()
-                .prepare_cached(
-                    "UPDATE scheduled_tasks SET enabled = 0, updated_at = ?2 WHERE id = ?1 AND enabled = 1",
-                )?
-                .execute(params![task_id, now_ms()])?;
-        }
-    }
     Ok(n > 0)
 }
 
+fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRun> {
+    Ok(TaskRun {
+        id: row.get(0)?,
+        task_id: row.get(1)?,
+        session_id: row.get(2)?,
+        status: row.get(3)?,
+        error_code: row.get(4)?,
+        started_at: ms_to_ts(row.get(5)?),
+        ended_at: row.get::<_, Option<i64>>(6)?.map(ms_to_ts),
+    })
+}
+
+/// Newest first. `task_id` scopes the read to one task's history; without it the
+/// window spans every task and is bounded by `limit` (1..200).
 pub fn list_runs(db: &Database, task_id: Option<&str>, limit: i64) -> Result<Vec<TaskRun>> {
     let limit = limit.clamp(1, 200);
-    let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<TaskRun> {
-        Ok(TaskRun {
-            id: row.get(0)?,
-            task_id: row.get(1)?,
-            session_id: row.get(2)?,
-            status: row.get(3)?,
-            error_code: row.get(4)?,
-            started_at: ms_to_ts(row.get(5)?),
-            ended_at: row.get::<_, Option<i64>>(6)?.map(ms_to_ts),
-        })
-    };
     let mut out = Vec::new();
     if let Some(task_id) = task_id {
         let mut stmt = db.conn().prepare_cached(
             "SELECT id, task_id, session_id, status, error_code, started_at, ended_at
              FROM task_runs WHERE task_id = ?1 ORDER BY started_at DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![task_id, limit], map_row)?;
+        let rows = stmt.query_map(params![task_id, limit], run_from_row)?;
         out.extend(rows.collect::<rusqlite::Result<Vec<_>>>()?);
     } else {
         let mut stmt = db.conn().prepare_cached(
             "SELECT id, task_id, session_id, status, error_code, started_at, ended_at
              FROM task_runs ORDER BY started_at DESC LIMIT ?1",
         )?;
-        let rows = stmt.query_map(params![limit], map_row)?;
+        let rows = stmt.query_map(params![limit], run_from_row)?;
         out.extend(rows.collect::<rusqlite::Result<Vec<_>>>()?);
     }
     Ok(out)
+}
+
+/// The newest run of every task, whatever the size of the history table. The
+/// task column reads this rather than a global window, so a task that has been
+/// idle while other tasks produced hundreds of runs still reports its own last
+/// outcome instead of "never run". Ties on `started_at` resolve the way the run
+/// history orders them: by id, descending.
+pub fn latest_run_per_task(db: &Database) -> Result<Vec<TaskRun>> {
+    let mut stmt = db.conn().prepare_cached(
+        "SELECT id, task_id, session_id, status, error_code, started_at, ended_at
+         FROM task_runs
+         WHERE rowid = (
+             SELECT rowid FROM task_runs AS newer
+             WHERE newer.task_id = task_runs.task_id
+             ORDER BY newer.started_at DESC, newer.id DESC
+             LIMIT 1
+         )
+         ORDER BY started_at DESC",
+    )?;
+    let rows = stmt.query_map([], run_from_row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 #[cfg(test)]
@@ -692,5 +693,49 @@ mod tests {
         let config: Value = serde_json::from_str(&config).unwrap();
         assert_eq!(config["mode"], "plan");
         assert_eq!(config["notify"], true);
+    }
+
+    #[test]
+    fn the_task_column_reads_each_tasks_own_newest_run() {
+        let db = test_db();
+        let idle = create_task(&db, &json!({ "prompt": "idle", "cadence": "daily" })).unwrap();
+        let busy = create_task(&db, &json!({ "prompt": "busy", "cadence": "daily" })).unwrap();
+        let insert = |id: &str, task: &str, started: i64| {
+            db.conn()
+                .execute(
+                    "INSERT INTO task_runs
+                       (id, task_id, session_id, status, error_code, started_at, ended_at)
+                     VALUES (?1, ?2, NULL, 'completed', NULL, ?3, ?4)",
+                    params![id, task, started, started + 500],
+                )
+                .unwrap();
+        };
+        // The idle task ran first; afterwards the busy one piled up 120 runs.
+        insert("run-idle-1", &idle.id, 1_000);
+        insert("run-idle-2", &idle.id, 2_000);
+        for index in 0..120 {
+            insert(
+                &format!("run-busy-{index:03}"),
+                &busy.id,
+                10_000 + i64::from(index) * 1_000,
+            );
+        }
+
+        // A global window drops the idle task entirely — the defect the task
+        // column used to inherit from the shared read.
+        let window = list_runs(&db, None, 100).unwrap();
+        assert_eq!(window.len(), 100);
+        assert!(
+            window.iter().all(|run| run.task_id == busy.id),
+            "the newest 100 rows all belong to the busy task"
+        );
+
+        // One newest run per task reports both tasks, newest first.
+        let latest = latest_run_per_task(&db).unwrap();
+        assert_eq!(
+            latest.iter().map(|run| run.id.as_str()).collect::<Vec<_>>(),
+            vec!["run-busy-119", "run-idle-2"]
+        );
+        assert_eq!(latest[1].started_at, ms_to_ts(2_000));
     }
 }

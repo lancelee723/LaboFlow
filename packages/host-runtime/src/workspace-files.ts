@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import nodePath, { type PlatformPath, basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   DOCUMENT_PREVIEW_MIME,
   type FsDocumentKind,
@@ -7,6 +7,7 @@ import {
   type FsImageDataUrlResult,
   type FsReadResult,
 } from "@pi-desktop/shared";
+
 
 /**
  * Read-only workspace file access for the work panel files tab
@@ -61,13 +62,18 @@ export function isAttachmentBlobRef(path: string): boolean {
  * Resolve `rel` inside `root`, rejecting absolute inputs and `..` escapes.
  * Returns the absolute path or null when the input leaves the root.
  */
-export function resolveWithinRoot(root: string, rel: string): string | null {
+export function resolveWithinRoot(
+  root: string,
+  rel: string,
+  paths: Pick<PlatformPath, "resolve" | "sep"> = nodePath,
+): string | null {
   if (!root) return null;
   const cleanRel = String(rel ?? "").replace(/^[/\\]+/, "");
-  const rootAbs = resolve(root);
-  const target = resolve(rootAbs, cleanRel);
+  const rootAbs = paths.resolve(root);
+  const target = paths.resolve(rootAbs, cleanRel);
   if (target === rootAbs) return rootAbs;
-  if (!target.startsWith(rootAbs + sep)) return null;
+  const boundary = rootAbs.endsWith(paths.sep) ? rootAbs : rootAbs + paths.sep;
+  if (!target.startsWith(boundary)) return null;
   return target;
 }
 

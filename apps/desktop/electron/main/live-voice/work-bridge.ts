@@ -176,6 +176,15 @@ export function createLiveWorkBridge(input: {
   };
 
   const workPort: LiveWorkPort = {
+    // Upstream live-work added voice-side question answering and session
+    // selection; the LaboFlow voice flow has neither surface yet, so the port
+    // reports them as unavailable instead of pretending to support them.
+    async respondInput() {
+      return { status: "unavailable" as const, message: "The voice flow does not surface work questions yet." };
+    },
+    async selectSession() {
+      return { status: "unavailable" as const };
+    },
     async snapshot(sessionId) {
       await requireSupportedSession(sessionId);
       const bridge = input.getAgentHostBridge();

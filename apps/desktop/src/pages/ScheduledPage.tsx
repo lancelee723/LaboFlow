@@ -107,6 +107,7 @@ export function ScheduledPage() {
     new Date(value).toLocaleString(i18n.resolvedLanguage ?? i18n.language);
   const cadenceKey = {
     manual: "scheduled.cadenceManual",
+    interval: "scheduled.cadenceInterval",
     cron: "scheduled.cadenceCron",
     hourly: "scheduled.cadenceHourly",
     daily: "scheduled.cadenceDaily",

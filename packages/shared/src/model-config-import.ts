@@ -430,9 +430,14 @@ export function parsePiModelConfig(
     const baseUrl = firstString(record.baseUrl, record.baseURL, record.url);
     const apiStyle = resolveApiStyle(firstString(record.api, record.apiStyle, record.type));
     const headers = asRecord(record.headers);
+    // pi resolves `"!<cmd>"` values by running the command at request time. The
+    // importer never executes it and never stores the command text as a key, so
+    // the provider is imported without a secret (`hasSecret: false`).
     const secret = firstSecret(
-      resolveSecret(record.apiKey ?? record.api_key, env),
-      secretFromAuthHeader(headers),
+      isShellCommandSecret(record.apiKey ?? record.api_key)
+        ? undefined
+        : resolveSecret(record.apiKey ?? record.api_key, env),
+      isShellCommandSecret(authHeaderValue(headers)) ? undefined : secretFromAuthHeader(headers),
     );
     const modelEntries = Array.isArray(record.models) ? record.models : [];
     const modelIds = uniqueModelIds(modelEntries.map(modelIdFromUnknown));
@@ -455,6 +460,114 @@ export function parsePiModelConfig(
     if (draft) drafts.push(draft);
   }
   return drafts;
+}
+
+export type PiAuthModelConfig = {
+  /**
+   * Plain API keys from auth.json, keyed by provider id. OAuth grants and
+   * `!command` values are omitted; Pi keeps those credentials authoritative.
+   */
+  apiKeys: Record<string, string>;
+  /**
+   * Providers that exist in auth.json and the cached Pi model catalog but have
+   * no provider block in models.json. models.json remains authoritative when
+   * both files describe the same provider.
+   */
+  drafts: ModelConfigImportDraft[];
+};
+
+const PI_API_KEY_AUTH_TYPES = new Set(["api", "apikey", "api_key"]);
+
+/**
+ * Read the credentials Pi stores after `/login` and pair API-key providers with
+ * the model catalog Pi cached for them.
+ *
+ * Only plain API keys cross into the import drafts: OAuth/subscription grants
+ * stay with Pi, and `!command` keys are never executed or stored as literal
+ * secrets. A provider's cached models can span several base URLs / API styles;
+ * a Desktop provider row carries one protocol and one endpoint, so the largest
+ * coherent group wins and the remaining models stay available in Pi.
+ */
+export function parsePiAuthModelConfig(
+  authJson: unknown,
+  modelsStoreJson: unknown,
+  env: ModelConfigImportEnv = {},
+): PiAuthModelConfig {
+  const auth = asRecord(authJson) ?? {};
+  const store = asRecord(modelsStoreJson) ?? {};
+  const apiKeys: Record<string, string> = {};
+  const drafts: ModelConfigImportDraft[] = [];
+
+  for (const [id, raw] of Object.entries(auth)) {
+    const record = asRecord(raw);
+    if (!record) continue;
+    const kind = firstString(record.type, record.kind)?.toLowerCase();
+    // auth.json also holds OAuth/subscription grants, which stay in Pi.
+    if (kind && !PI_API_KEY_AUTH_TYPES.has(kind)) continue;
+    const rawKey = authApiKey(record);
+    if (rawKey && !isShellCommandSecret(rawKey)) {
+      const secret = resolveSecret(rawKey, env);
+      if (secret) apiKeys[id] = secret;
+    }
+
+    const entry = asRecord(store[id]);
+    const models = Array.isArray(entry?.models) ? entry.models : [];
+    const selection = selectPiModelEntry(models);
+    if (!selection) continue;
+    const preset = matchNamedPreset({
+      vendorKey: id,
+      baseUrl: selection.baseUrl,
+      apiStyle: selection.apiStyle,
+    });
+    const draft = finishDraft({
+      source: "pi",
+      externalId: id,
+      name: preset?.name ?? id,
+      baseUrl: selection.baseUrl,
+      apiStyle: selection.apiStyle,
+      vendorHint: id,
+      modelIds: selection.models
+        .map((model) => firstString(asRecord(model)?.id))
+        .filter((modelId): modelId is string => !!modelId),
+      secretValue: apiKeys[id],
+      supportsReasoning: selection.models.some(
+        (model) => asRecord(model)?.reasoning === true,
+      ),
+      models: selection.models
+        .map((model) => bindingFromPiModel(model))
+        .filter((binding): binding is ModelBinding => binding !== null),
+    });
+    if (draft) drafts.push(draft);
+  }
+
+  return { apiKeys, drafts };
+}
+
+type PiModelEntrySelection = {
+  baseUrl: string;
+  apiStyle: CatalogApiStyle;
+  models: unknown[];
+};
+
+function selectPiModelEntry(models: unknown[]): PiModelEntrySelection | null {
+  const groups = new Map<string, PiModelEntrySelection>();
+  for (const raw of models) {
+    const record = asRecord(raw);
+    const modelId = firstString(record?.id);
+    const baseUrl = firstString(record?.baseUrl, record?.baseURL);
+    const apiStyle = resolveApiStyle(firstString(record?.api, record?.apiStyle));
+    if (!modelId || !baseUrl || !apiStyle) continue;
+    const key = `${baseUrl}\n${apiStyle}`;
+    const group = groups.get(key);
+    if (group) group.models.push(raw);
+    else groups.set(key, { baseUrl, apiStyle, models: [raw] });
+  }
+  let selected: PiModelEntrySelection | null = null;
+  for (const group of groups.values()) {
+    // Ties keep the first catalog group so repeated scans stay deterministic.
+    if (!selected || group.models.length > selected.models.length) selected = group;
+  }
+  return selected;
 }
 
 const CC_SWITCH_APP_TYPES = [
@@ -834,11 +947,14 @@ function bindingFromGenericModel(
     ...(record?.nativeWebSearch === true || record?.native_web_search === true
       ? { nativeWebSearch: true }
       : {}),
+    ...(record?.fastModeAllowed === true || record?.fast_mode_allowed === true
+      ? { fastModeAllowed: true }
+      : {}),
   };
 }
 
 /**
- * A config exported by LaboFlow carries the provenance marker; an older or
+ * A config exported by PI-Desktop carries the provenance marker; an older or
  * foreign config does not.
  */
 function importedModelLimitSource(value: unknown): ModelLimitSource | undefined {
@@ -900,14 +1016,22 @@ function authApiKey(value: unknown): string | undefined {
   return firstString(record.key, record.apiKey, record.token);
 }
 
-function secretFromAuthHeader(headers: unknown): string | undefined {
+function isShellCommandSecret(raw: unknown): boolean {
+  return typeof raw === "string" && raw.trim().startsWith("!");
+}
+
+function authHeaderValue(headers: unknown): string | undefined {
   const record = asRecord(headers);
-  const value = firstString(
+  return firstString(
     record?.Authorization,
     record?.authorization,
     record?.["x-api-key"],
     record?.["X-Api-Key"],
   );
+}
+
+function secretFromAuthHeader(headers: unknown): string | undefined {
+  const value = authHeaderValue(headers);
   if (!value) return undefined;
   const bearer = value.match(/^Bearer\s+(.+)$/i);
   return sanitizeSecret(bearer ? bearer[1] : value);

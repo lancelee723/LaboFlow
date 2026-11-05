@@ -194,6 +194,8 @@ loses that. See
 
 | code | retriable | meaning |
 |---|---|---|
+| `VISUALIZATION_HTML_ONLY` | no | a write into the session visualization directory was not a direct-child `.html` fragment; only fragments render as inline visualizations |
+| `EDIT_LEGACY_MATCH_FAILED` | no | the legacy `old_string`/`new_string` edit parameters matched no unique anchor in the file; retry with tagged payloads or refreshed anchors |
 | `EDIT_TAG_REQUIRED` | no | `tag` missing or not 4 hex digits |
 | `EDIT_TAG_MISMATCH` | yes after a `Read` | tag does not hash the live file and drift recovery declined; carries the live tag and current content at the anchors |
 | `EDIT_TAG_UNKNOWN` | yes after a `Read` | tag is well-formed but the session recorded no such content for the path |

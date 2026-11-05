@@ -29,6 +29,7 @@ const [
   enSource,
   zhSource,
   changelogSource,
+  changelogEnSource,
 ] = await Promise.all([
   read("../../../packages/shared/src/protocol.ts"),
   readSharedTypesSource(),
@@ -47,6 +48,7 @@ const [
   read("../../../packages/i18n/src/locales/en/index.ts"),
   read("../../../packages/i18n/src/locales/zh-CN/index.ts"),
   read("../../../packages/shared/src/changelog.ts"),
+  read("../../../packages/shared/src/changelog-en.ts"),
 ]);
 
 test("update IPC channels are declared and whitelisted for the preload bridge", () => {
@@ -320,7 +322,11 @@ test("shared shipped-locale changelog is the in-app notes source of truth", () =
   assert.match(changelogSource, /formatChangelogNotes/);
   assert.match(changelogSource, /"zh-CN"/);
   assert.match(changelogSource, /"zh-TW"/);
-  assert.match(changelogSource, /version: "0\.2\.7"/);
+  // The fork split per-locale catalogs out of changelog.ts; the English
+  // catalog is the source of truth and its latest entry tracks the shipped
+  // version line (0.21.0 train).
+  assert.match(changelogSource, /from "\.\/changelog-en\.js"/);
+  assert.match(changelogEnSource, /version: "0\.21\.0"/);
   assert.match(
     mainSource,
     /getLocale:\s*\(\)\s*=>\s*(?:updaterLocale|mainState\.updaterLocale)/,

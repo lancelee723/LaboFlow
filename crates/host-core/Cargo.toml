@@ -10,6 +10,7 @@ name = "pi-desktop-host-core"
 path = "src/main.rs"
 
 [dependencies]
+ring = "0.17"
 anyhow = "1"
 base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
@@ -39,9 +40,12 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

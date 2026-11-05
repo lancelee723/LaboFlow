@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Api, Model, Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Api, Model, Models, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
 import {
   OPENCODE_CLIENT_HEADER,
   OPENCODE_CLIENT_VALUE,
@@ -74,6 +74,46 @@ describe("compactionRequestOptions", () => {
     expect(options.headers).toEqual({ "X-Team": "platform" });
   });
 
+  it("adds the proxy-safe affinity header to custom Responses summaries", async () => {
+    const responsesProvider: RuntimeProviderConfig = {
+      ...provider,
+      id: "responses-gateway",
+      name: "Responses gateway",
+      vendorKey: "custom",
+      apiStyle: "responses",
+      baseUrl: "https://gateway.example.com/v1",
+    };
+    const responsesModel = {
+      ...model,
+      api: "openai-responses",
+      provider: responsesProvider.id,
+      baseUrl: responsesProvider.baseUrl,
+    } as Model<Api>;
+    let received: ModelsSimpleStreamOptions | undefined;
+    let sentPayload: unknown;
+    const collection = {
+      completeSimple: async (
+        _model: Model<Api>,
+        _context: unknown,
+        options: ModelsSimpleStreamOptions,
+      ) => {
+        received = options;
+        sentPayload = await options.onPayload?.({ input: [] }, responsesModel);
+        return "assistant-message";
+      },
+    } as unknown as Models;
+
+    const wrapped = withCompactionRequestHeaders(
+      collection,
+      responsesProvider,
+      "session-42",
+    );
+    await wrapped.completeSimple(responsesModel, context as never, { maxTokens: 4_096 });
+
+    expect(received?.headers).toMatchObject({ "x-session-affinity": "session-42" });
+    expect(sentPayload).toMatchObject({ prompt_cache_key: "session-42" });
+  });
+
   it("clears a caller-supplied fetch for a Google model, with or without row headers", () => {
     const callerFetch = vi.fn(async () => new Response("ok"));
     const googleModel = {
@@ -135,6 +175,39 @@ describe("withCompactionRequestHeaders", () => {
     // Every other member is still the collection's own.
     expect(wrapped.getModel("row-uuid", "glm-5.3-flash")).toBe(model);
     expect(getModel).toHaveBeenCalledWith("row-uuid", "glm-5.3-flash");
+  });
+
+  it("reports the bounded payload shape for every wire API", async () => {
+    const completeSimple = vi.fn(
+      async (_model: Model<Api>, _context: unknown, options: ModelsSimpleStreamOptions) => {
+        await options.onPayload?.(
+          { messages: [{ role: "user", content: "private" }], max_tokens: 512 },
+          model,
+        );
+        return "assistant-message";
+      },
+    );
+    const shapes: unknown[] = [];
+    const collection = { completeSimple } as unknown as Models;
+    const wrapped = withCompactionRequestHeaders(
+      collection,
+      provider,
+      "session-1",
+      undefined,
+      (shape) => shapes.push(shape),
+    );
+
+    await wrapped.completeSimple(model, { messages: [{ role: "user" }] } as never);
+
+    expect(shapes).toEqual([
+      {
+        api: "openai-completions",
+        topLevelFields: ["messages", "max_tokens"],
+        roleCounts: { user: 1 },
+        toolCount: 0,
+        outputLimit: 512,
+      },
+    ]);
   });
 });
 
@@ -258,4 +331,21 @@ describe("compaction summary conversation key", () => {
     expect(sentMutation.mutated).toBe(true);
     expect(sentMutation.prompt_cache_key).toBe("session-1");
   });
+});
+
+ it("accounts each summary attempt with its account and preserves replay identity", async () => {
+  const reports: import("@pi-desktop/shared").MessageUsage[] = [];
+  const response = (failed: boolean): AssistantMessage => ({ role: "assistant", content: [], api: model.api,
+    provider: model.provider, model: model.id, timestamp: 1, stopReason: failed ? "error" : "stop",
+    usage: { input: 12, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 15,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  const completeSimple = vi.fn().mockResolvedValueOnce(response(true)).mockResolvedValueOnce(response(false));
+  const wrapped = withCompactionRequestHeaders({ completeSimple } as unknown as Models, provider, "summary-session", usage => reports.push(usage));
+  const failed = await wrapped.completeSimple(model, context);
+  await wrapped.completeSimple(model, context);
+  expect(reports).toHaveLength(2);
+  expect(new Set(reports.map(usage => usage.operationId)).size).toBe(2);
+  expect(reports[0]).toMatchObject({ providerId: provider.id, modelId: model.id, totalTokens: 15, costStatus: "unknown" });
+  expect((failed.usage as unknown as { desktopUsage?: { operationId?: string } }).desktopUsage?.operationId).toBe(reports[0]?.operationId);
+  expect(completeSimple.mock.calls[0]?.[2]).toMatchObject({ sessionId: "summary-session", headers: { [OPENCODE_SESSION_HEADER]: "summary-session" } });
 });

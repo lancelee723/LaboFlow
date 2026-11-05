@@ -1,4 +1,9 @@
 use super::*;
+mod composer_transforms;
+mod contribution_ids;
+mod provider_catalog;
+
+use contribution_ids::is_contrib_id;
 
 pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> Result<()> {
     let Some(contributes) = manifest.contributes.as_ref() else {
@@ -37,17 +42,12 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                 bail!("PLUGIN_INVALID: duplicate setting key {key}");
             }
             seen.push(key);
-            // A title may be a plain string or a { en, "zh-CN" } object
-            // (ADR 0280 as amended); the per-locale completeness check belongs
-            // to the SDK validator. Here we only require something rendered.
-            let has_title = match obj.get("title") {
-                Some(Value::String(title)) => !title.trim().is_empty(),
-                Some(Value::Object(map)) => map
-                    .values()
-                    .any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)),
-                _ => false,
-            };
-            if !has_title {
+            if obj
+                .get("title")
+                .and_then(Value::as_str)
+                .map(|title| title.trim().is_empty())
+                .unwrap_or(true)
+            {
                 bail!("PLUGIN_INVALID: setting {key} requires a title");
             }
             let setting_type = obj
@@ -106,14 +106,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                     let option = option.as_object().ok_or_else(|| {
                         anyhow!("PLUGIN_INVALID: select setting {key} has an invalid enum option")
                     })?;
-                    let has_label = match option.get("label") {
-                        Some(Value::String(label)) => !label.trim().is_empty(),
-                        Some(Value::Object(map)) => map
-                            .values()
-                            .any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)),
-                        _ => false,
-                    };
-                    if !has_label
+                    if option.get("label").and_then(Value::as_str).is_none()
                         || !option
                             .get("value")
                             .map(|value| {
@@ -182,6 +175,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
             }
         }
     }
+    composer_transforms::validate(map, manifest)?;
     if let Some(skills) = map.get("skills") {
         let entries = array_of(skills, "contributes.skills")?;
         for entry in entries {
@@ -229,11 +223,6 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
 
     if let Some(providers) = map.get("providers") {
         let entries = array_of(providers, "contributes.providers")?;
-        if entries.len() > MAX_PLUGIN_PROVIDERS {
-            bail!(
-                "PLUGIN_INVALID: contributes.providers allows at most {MAX_PLUGIN_PROVIDERS} entries"
-            );
-        }
         if !entries.is_empty() {
             require_permission(manifest, "provider.register", "contributes.providers")?;
         }
@@ -261,6 +250,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
             {
                 bail!("PLUGIN_INVALID: provider {id} requires a name");
             }
+            provider_catalog::validate_provider_catalog_fields(id, obj)?;
             if let Some(style) = obj.get("apiStyle") {
                 let style = style.as_str().ok_or_else(|| {
                     anyhow!("PLUGIN_INVALID: provider {id} apiStyle must be a string")
@@ -269,14 +259,6 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                     bail!("PLUGIN_INVALID: provider {id} has unsupported apiStyle {style}");
                 }
             }
-            // `oauth` declarations arrive with the Host-owned plugin login
-            // flow. Until it exists, a manifest that asks for one is refused
-            // rather than turned into a row nobody can sign in to.
-            if obj.get("oauth").is_some() {
-                bail!(
-                    "PLUGIN_INVALID: provider {id} declares oauth; plugin OAuth providers are not supported in this release"
-                );
-            }
             let auth_kind = obj
                 .get("authKind")
                 .and_then(Value::as_str)
@@ -284,6 +266,7 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
             if !is_known_auth_kind(auth_kind) {
                 bail!("PLUGIN_INVALID: provider {id} has unsupported authKind {auth_kind}");
             }
+            validate_declared_provider_oauth(id, obj, auth_kind, manifest)?;
             if let Some(base_url) = obj.get("baseUrl").and_then(Value::as_str) {
                 // The runtime reaches this endpoint, so a declaration may only
                 // name an absolute http(s) URL.
@@ -295,10 +278,17 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                 Some(value) => array_of(value, "contributes.providers.models")?,
                 None => bail!("PLUGIN_INVALID: provider {id} requires models"),
             };
-            if models.is_empty() || models.len() > MAX_PLUGIN_PROVIDER_MODELS {
+            if models.len() > MAX_PLUGIN_PROVIDER_MODELS {
                 bail!(
-                    "PLUGIN_INVALID: provider {id} declares 1 to {MAX_PLUGIN_PROVIDER_MODELS} models"
+                    "PLUGIN_INVALID: provider {id} declares more than {MAX_PLUGIN_PROVIDER_MODELS} models"
                 );
+            }
+            let has_base_url = obj
+                .get("baseUrl")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty());
+            if models.is_empty() && (auth_kind != "api_key" || !has_base_url) {
+                bail!("PLUGIN_INVALID: provider {id} may omit models only for an API-key provider with a baseUrl");
             }
             let mut seen_models: Vec<&str> = Vec::new();
             for model in models {
@@ -408,7 +398,9 @@ pub(crate) fn validate_contributions(root: &Path, manifest: &PluginManifest) -> 
                             anyhow!("PLUGIN_INVALID: theme {id} asset missing: {raw}")
                         })?;
                         if !asset_path.starts_with(&package_root) {
-                            bail!("PLUGIN_INVALID: theme {id} asset {raw} resolves outside the plugin package");
+                            bail!(
+                                "PLUGIN_INVALID: theme {id} asset {raw} resolves outside the plugin package"
+                            );
                         }
                         asset_path
                     };
@@ -712,14 +704,18 @@ fn is_shortcut_shape(value: &Value) -> bool {
         .all(|part| matches!(*part, "Mod" | "Ctrl" | "Alt" | "Shift"))
 }
 
-fn array_of<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
+pub(super) fn array_of<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
     value
         .as_array()
         .map(|a| a.as_slice())
         .ok_or_else(|| anyhow!("PLUGIN_INVALID: {field} must be an array"))
 }
 
-fn require_permission(manifest: &PluginManifest, permission: &str, what: &str) -> Result<()> {
+pub(super) fn require_permission(
+    manifest: &PluginManifest,
+    permission: &str,
+    what: &str,
+) -> Result<()> {
     if manifest.permissions.iter().any(|p| p == permission) {
         return Ok(());
     }
@@ -838,17 +834,6 @@ fn is_window_background_color(value: &str) -> bool {
         .all(|character| character.is_ascii_hexdigit())
 }
 
-fn is_contrib_id(value: &str) -> bool {
-    if value.is_empty() || value.len() > 64 {
-        return false;
-    }
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-}
 /// Grammar shared with `contributes.globalShortcuts[].id` in the plugin SDK.
 /// Dots are allowed here (unlike `is_contrib_id`): a shortcut id names a
 /// namespace inside the plugin, e.g. `voice.pushToTalk`.

@@ -5,7 +5,7 @@ use crate::agent_capabilities::{
     CapabilityLevel, CapabilityState, CapabilityTarget,
 };
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -41,15 +41,11 @@ pub struct McpServerRecord {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
     pub enabled: bool,
     #[serde(default)]
     pub scope: ActivationScope,
-    /// `user` (implicit) or `org` — org servers come from /org/bootstrap,
-    /// don't count against the user's server cap and are read-only in the UI.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub org_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -63,10 +59,6 @@ struct McpConfig {
     label: String,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    org_id: Option<String>,
     transport: String,
     #[serde(default)]
     command: Option<String>,
@@ -78,6 +70,8 @@ struct McpConfig {
     url: Option<String>,
     #[serde(default)]
     headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timeout_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -94,13 +88,21 @@ pub struct McpServerInput {
     pub env: Option<BTreeMap<String, String>>,
     pub url: Option<String>,
     pub headers: Option<BTreeMap<String, String>>,
+    #[serde(default, deserialize_with = "deserialize_timeout_override")]
+    pub timeout_seconds: Option<Option<u64>>,
     pub enabled: Option<bool>,
-    /// `org` only: set by the org bootstrap path; renderer saves stay `user`.
-    pub source: Option<String>,
-    pub org_id: Option<String>,
     /// Kept for protocol compatibility; capability state is app-local instead.
     #[allow(dead_code)]
     pub scope: Option<ActivationScope>,
+}
+
+fn deserialize_timeout_override<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<u64>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<u64>::deserialize(deserializer).map(Some)
 }
 
 pub struct McpServerRegistry {
@@ -245,8 +247,6 @@ impl McpServerRegistry {
             records.push(McpServerRecord {
                 id: config.id,
                 label: config.label,
-                source: config.source,
-                org_id: config.org_id,
                 level: Some(level.as_str().to_string()),
                 project_path: owner_project_path.clone(),
                 path: Some(path.to_string_lossy().to_string()),
@@ -257,6 +257,7 @@ impl McpServerRegistry {
                 env: config.env,
                 url: config.url,
                 headers: config.headers,
+                timeout_seconds: config.timeout_seconds,
                 enabled,
                 scope: scope_for(level, owner_project_path.as_deref()),
                 created_at: updated_at.clone(),
@@ -333,6 +334,11 @@ impl McpServerRegistry {
         check_len("label", &config.label)?;
         if let Some(description) = &config.description {
             check_len("description", description)?;
+        }
+        if let Some(timeout) = config.timeout_seconds {
+            if !(1..=600).contains(&timeout) {
+                bail!("MCP_INVALID: timeoutSeconds must be between 1 and 600");
+            }
         }
         match config.transport.as_str() {
             "stdio" => {
@@ -417,25 +423,6 @@ impl McpServerRegistry {
             bail!("MCP_INVALID: a server with this name already exists at this level");
         }
         let previous_same_transport = current.filter(|record| record.transport == transport);
-        let input_source = input
-            .source
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        if let Some(source) = &input_source {
-            if source != "user" && source != "org" {
-                bail!("MCP_INVALID: source must be user or org");
-            }
-        }
-        let effective_source = input_source
-            .or_else(|| current.and_then(|record| record.source.clone()))
-            .unwrap_or_else(|| "user".to_string());
-        if current.map(|record| record.source.as_deref()) == Some(Some("org"))
-            && effective_source != "org"
-        {
-            bail!("MCP_INVALID: an org-provided server is read-only here");
-        }
         let mut config = McpConfig {
             id: input.id.trim().to_string(),
             label,
@@ -445,10 +432,9 @@ impl McpServerRegistry {
                 .filter(|value| !value.is_empty())
                 .or_else(|| current.and_then(|record| record.description.clone())),
             transport,
-            source: Some(effective_source.clone()),
-            org_id: input
-                .org_id
-                .or_else(|| current.and_then(|record| record.org_id.clone())),
+            timeout_seconds: input
+                .timeout_seconds
+                .unwrap_or_else(|| current.and_then(|record| record.timeout_seconds)),
             ..Default::default()
         };
         if config.transport == "stdio" {
@@ -483,11 +469,7 @@ impl McpServerRegistry {
                 .unwrap_or_default();
         }
         Self::validate_config(&config)?;
-        let user_server_count = same_level
-            .iter()
-            .filter(|record| record.source.as_deref() != Some("org"))
-            .count();
-        if user_server_count >= MAX_SERVERS && existing.is_none() && effective_source != "org" {
+        if same_level.len() >= MAX_SERVERS && existing.is_none() {
             bail!("MCP_INVALID: at most {MAX_SERVERS} MCP servers");
         }
         let directory = capability_dir(level, project_path.as_deref(), "servers")?;

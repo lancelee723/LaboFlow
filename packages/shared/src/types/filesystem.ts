@@ -5,8 +5,8 @@ export type FsEntry = {
   size: number;
 };
 
-import type { FsDocumentKind } from "../document-formats.js";
-export type { FsDocumentKind };
+/** Document formats the Files tab renders in-app (pdf/docx/pptx/xlsx). */
+export type FsDocumentKind = "pdf" | "docx" | "pptx" | "xlsx";
 
 export type FsReadResult = {
   kind: "text" | "image" | "document" | "binary" | "tooLarge";
@@ -72,37 +72,11 @@ export type TokenUsageHistoryItem = {
   turnCount: number;
 };
 
-/** Per-model daily series for the usage trend chart (modelId "unknown" = turns
- * recorded before model attribution existed). */
-export type TokenUsageModelSeries = {
-  modelId: string;
-  items: TokenUsageHistoryItem[];
-};
-
-/**
- * The Token Insights plugin's published fact cube (usageFacts in its plugin
- * settings), exposed read-only so the usage stats page can render the same
- * live aggregation the plugin panel shows. Buckets are numeric rows aligned
- * with `columns`; `days`/`models` index into the row's day/model cells.
- */
-export type TokenInsightsFactsResult = {
-  available: boolean;
-  generatedAt?: number;
-  columns?: string[];
-  days?: string[];
-  models?: string[];
-  /** Tool source ids aligned with the row's source cell. Producers ship either
-   * bare ids ("pi-desktop") or {id, label} objects (Token Insights' shape). */
-  sources?: Array<string | { id: string; label?: string }>;
-  buckets?: number[][];
-};
-
 export type TokenUsageHistoryResult = {
   bucket: TokenUsageBucket;
   rangeStart: number;
   rangeEnd: number;
   items: TokenUsageHistoryItem[];
-  models?: TokenUsageModelSeries[];
   totals: {
     inputTokens: number;
     outputTokens: number;
@@ -144,6 +118,8 @@ export type FsChatRefMatchKind =
 
 export type FsChatRefMatch = {
   root: FsChatRefRoot;
+  /** The match belongs to this session's scratch, not the wider read-only store. */
+  sessionScratch?: boolean;
   /** POSIX path relative to the matched root. */
   relativePath: string;
   /** Native absolute path of the matched regular file. */
@@ -162,3 +138,27 @@ export type FsChatRefResolveResult = {
   /** The supplied absolute path is not inside a project, scratch, or attachment root. */
   reason?: "outside-allowed-roots";
 };
+
+export type TokenInsightsFactsResult = {
+  available: boolean;
+  generatedAt?: number;
+  columns?: string[];
+  days?: string[];
+  models?: string[];
+  /** Tool source ids aligned with the row's source cell. Producers ship either
+   * bare ids ("pi-desktop") or {id, label} objects (Token Insights' shape). */
+  sources?: Array<string | { id: string; label?: string }>;
+  buckets?: number[][];
+};
+
+export type TokenUsageModelSeries = {
+  modelId: string;
+  items: TokenUsageHistoryItem[];
+};
+
+/**
+ * The Token Insights plugin's published fact cube (usageFacts in its plugin
+ * settings), exposed read-only so the usage stats page can render the same
+ * live aggregation the plugin panel shows. Buckets are numeric rows aligned
+ * with `columns`; `days`/`models` index into the row's day/model cells.
+ */

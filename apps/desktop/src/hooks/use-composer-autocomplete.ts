@@ -47,7 +47,7 @@ let filesCache: {
   truncated: boolean;
 } | null = null;
 
-const COMMAND_GROUP_ORDER = {
+const COMMAND_GROUP_ORDER: Record<string, number> = {
   template: 0,
   builtin: 1,
   plugin: 2,

@@ -1,14 +1,8 @@
 export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 16 as const;
-export const APP_ID = "com.laboflow.app";
+export const APP_ID = "net.aiuo.pi-desktop";
 export const APP_NAME = "LaboFlow";
-export const APP_VERSION = "0.21.0-beta.3";
-/** Official product name shown to users (About page); APP_NAME stays the
- * process/userData identity so existing installations keep their data. */
-export const APP_DISPLAY_NAME = "LaboFlow Desktop";
-/** Product version codename shown to users; APP_VERSION stays the build semver
- * the updater compares against. */
-export const APP_DISPLAY_VERSION = "Alpha-1.0.0";
+export const APP_VERSION = "0.21.0";
 
 export const APP_MENU_COMMANDS = [
   "newTask",
@@ -45,6 +39,16 @@ export const NATIVE_MENU_ACTIONS = [
 
 export type NativeMenuAction = (typeof NATIVE_MENU_ACTIONS)[number];
 
+export type WorkPanelTabMenuAction = "closeTab" | "closeOtherTabs" | "closeAllTabs";
+export type WorkPanelTabMenuRequest = {
+  closeTabLabel: string;
+  closeOtherTabsLabel: string;
+  closeAllTabsLabel: string;
+  canCloseOthers: boolean;
+  x: number;
+  y: number;
+};
+
 export const WINDOW_CONTROL_ACTIONS = [
   "getState",
   "minimize",
@@ -54,8 +58,20 @@ export const WINDOW_CONTROL_ACTIONS = [
 
 export type WindowControlAction = (typeof WINDOW_CONTROL_ACTIONS)[number];
 
+export type LifecycleDialogKind = "quit-confirmation" | "close-behavior";
+export type LifecycleDialogChoice = "cancel" | "confirm" | "tray" | "quit";
+export type LifecycleDialogRequest = {
+  requestId: string;
+  kind: LifecycleDialogKind;
+};
+export type LifecycleDialogDismiss = { requestId: string };
 export const IPC = {
   invoke: {
+    storageGet: "pi-desktop/storage/get",
+    storageChoose: "pi-desktop/storage/choose",
+    storageMigrate: "pi-desktop/storage/migrate",
+    storageClearCache: "pi-desktop/storage/clearCache",
+    storageRemoveBackup: "pi-desktop/storage/removeBackup",
     appGetVersion: "pi-desktop/app/getVersion",
     appOpenFeedback: "pi-desktop/app/openFeedback",
     appHealth: "pi-desktop/app/health",
@@ -74,6 +90,8 @@ export const IPC = {
     updatesDownload: "pi-desktop/updates/download",
     updatesInstall: "pi-desktop/updates/install",
     updatesOpenReleases: "pi-desktop/updates/openReleases",
+    /** Persist the user's decision to stop nudging about one version (#1317). */
+    updatesDismiss: "pi-desktop/updates/dismiss",
     notificationList: "pi-desktop/notification/list",
     notificationMarkRead: "pi-desktop/notification/markRead",
     notificationMarkAllRead: "pi-desktop/notification/markAllRead",
@@ -82,7 +100,6 @@ export const IPC = {
     notificationSetViewingSession: "pi-desktop/notification/setViewingSession",
     agentPrompt: "pi-desktop/agent/prompt",
     agentSteer: "pi-desktop/agent/steer",
-    promptEnhance: "pi-desktop/prompt/enhance",
     speechTranscribe: "pi-desktop/speech/transcribe",
     speechSynthesize: "pi-desktop/speech/synthesize",
     speechGetStatus: "pi-desktop/speech/getStatus",
@@ -108,8 +125,14 @@ export const IPC = {
     liveVoiceEnd: "pi-desktop/voice/live/end",
     liveVoiceHeartbeat: "pi-desktop/voice/live/heartbeat",
     liveVoiceResolveWorkSelection: "pi-desktop/voice/live/work/resolveSelection",
+    liveVoiceStopWorkOperation: "pi-desktop/voice/live/work/stopOperation",
+    liveVoiceCancelQueuedOperation: "pi-desktop/voice/live/work/cancelQueuedOperation",
+    liveVoiceWidgetAction: "pi-desktop/voice/live/widget/action",
+    liveVoiceWidgetOwnerState: "pi-desktop/voice/live/widget/ownerState",
+    liveVoiceWidgetVisibility: "pi-desktop/voice/live/widget/visibility",
     agentCompact: "pi-desktop/agent/compact",
     agentAbort: "pi-desktop/agent/abort",
+    agentStopSubagents: "pi-desktop/agent/stop-subagents",
     agentStop: "pi-desktop/agent/stop",
     agentQueuePush: "pi-desktop/agent/queue/push",
     agentQueueList: "pi-desktop/agent/queue/list",
@@ -130,13 +153,31 @@ export const IPC = {
     /** Validate and select a durable session from a reviewed host operation. */
     sessionOpen: "pi-desktop/session/open",
     sessionDelete: "pi-desktop/session/delete",
+    /** Isolated sessions in git worktrees (ADR 0329). */
+    worktreeProbe: "pi-desktop/worktree/probe",
+    worktreePreview: "pi-desktop/worktree/preview",
+    worktreeMerge: "pi-desktop/worktree/merge",
+    worktreePendingWork: "pi-desktop/worktree/pendingWork",
+    /** "Sync from project": project commits the session lacks, and the sync. */
+    worktreeBehind: "pi-desktop/worktree/behind",
+    worktreeSync: "pi-desktop/worktree/sync",
+    /** Behind counts of every isolated session, for the sidebar marker. */
+    worktreeBehindAll: "pi-desktop/worktree/behindAll",
+    worktreeSetupLog: "pi-desktop/worktree/setupLog",
+    /** Opens the worktree folder in the OS file manager; no path is returned. */
+    worktreeReveal: "pi-desktop/worktree/reveal",
+    worktreeSetupCommandGet: "pi-desktop/worktree/setupCommand/get",
+    worktreeSetupCommandSet: "pi-desktop/worktree/setupCommand/set",
     sessionRename: "pi-desktop/session/rename",
-    sessionSummarizeTitle: "pi-desktop/session/summarizeTitle",
+    /** Deterministic first-prompt title for a session that is still untitled. */
+    sessionDeriveTitle: "pi-desktop/session/deriveTitle",
     sessionConfigure: "pi-desktop/session/configure",
     sessionImportScan: "pi-desktop/session/importScan",
     sessionImportRun: "pi-desktop/session/importRun",
     modelConfigImportScan: "pi-desktop/modelConfig/importScan",
     modelConfigImportRun: "pi-desktop/modelConfig/importRun",
+    sessionDeleteMessage: "pi-desktop/session/deleteMessage",
+    sessionRetractPendingPrompt: "pi-desktop/session/retractPendingPrompt",
     sessionReplaceMessages: "pi-desktop/session/replaceMessages",
     sessionSaveRevision: "pi-desktop/session/saveRevision",
     sessionListRevisions: "pi-desktop/session/listRevisions",
@@ -147,6 +188,9 @@ export const IPC = {
     settingsGet: "pi-desktop/settings/get",
     settingsSet: "pi-desktop/settings/set",
     configSyncGetState: "pi-desktop/configSync/getState",
+    backgroundTasksList: "pi-desktop/backgroundTasks/list",
+    backgroundTasksOutput: "pi-desktop/backgroundTasks/output",
+    backgroundTasksStop: "pi-desktop/backgroundTasks/stop",
     configSyncConfigure: "pi-desktop/configSync/configure",
     configSyncTest: "pi-desktop/configSync/test",
     configSyncSyncNow: "pi-desktop/configSync/syncNow",
@@ -169,6 +213,7 @@ export const IPC = {
     projectMemoryGet: "pi-desktop/project/memory/get",
     projectMemorySave: "pi-desktop/project/memory/save",
     projectGroupList: "pi-desktop/project-group/list",
+    projectGroupCreateRemote: "pi-desktop/project-group/createRemote",
     projectGroupCreate: "pi-desktop/project-group/create",
     projectGroupRename: "pi-desktop/project-group/rename",
     projectGroupUpdate: "pi-desktop/project-group/update",
@@ -188,31 +233,13 @@ export const IPC = {
     scheduledUpdate: "pi-desktop/scheduled/update",
     scheduledDelete: "pi-desktop/scheduled/delete",
     scheduledRun: "pi-desktop/scheduled/run",
-    expertList: "pi-desktop/expert/list",
-    expertGet: "pi-desktop/expert/get",
-    expertSave: "pi-desktop/expert/save",
-    expertDelete: "pi-desktop/expert/delete",
-    expertToggle: "pi-desktop/expert/toggle",
-    expertInvoke: "pi-desktop/expert/invoke",
-    expertChainInvoke: "pi-desktop/expert/chainInvoke",
-    expertTeamsList: "pi-desktop/expertTeams/list",
-    expertTeamGet: "pi-desktop/expertTeams/get",
-    expertTeamSave: "pi-desktop/expertTeams/save",
-    expertTeamDelete: "pi-desktop/expertTeams/delete",
-    expertTeamInvoke: "pi-desktop/expertTeams/invoke",
-    expertTeamConfirmPlan: "pi-desktop/expertTeams/confirmPlan",
-    expertTeamRetryMember: "pi-desktop/expertTeams/retryMember",
-    kbListUrls: "pi-desktop/kb/listUrls",
-    kbSaveUrl: "pi-desktop/kb/saveUrl",
-    kbDeleteUrl: "pi-desktop/kb/deleteUrl",
-    kbApplyOrgDelivery: "pi-desktop/kb/applyOrgDelivery",
-    kbDisableOrgServers: "pi-desktop/kb/disableOrgServers",
-    kbUsageHistory: "pi-desktop/kb/usageHistory",
     scheduledExecute: "pi-desktop/scheduled/execute",
     scheduledListRuns: "pi-desktop/scheduled/listRuns",
     toolResolvePermission: "pi-desktop/tool/resolvePermission",
+    todosGet: "pi-desktop/todos/get",
     askToolResolve: "pi-desktop/agent/askTool/resolve",
     plansPending: "pi-desktop/plans/pending",
+    pendingInteractive: "pi-desktop/agent/pendingInteractive",
     plansResolve: "pi-desktop/plans/resolve",
     /**
      * List every paired remote `pi-host` this desktop knows, redacted so no
@@ -234,6 +261,13 @@ export const IPC = {
      * crosses this channel.
      */
     remoteHostBootstrap: "pi-desktop/remoteHost/bootstrap",
+    remoteHostReconnect: "pi-desktop/remoteHost/reconnect",
+    remoteHostProjects: "pi-desktop/remoteHost/projects",
+    remoteHostBrowseProjects: "pi-desktop/remoteHost/browseProjects",
+    remoteHostRegisterProject: "pi-desktop/remoteHost/registerProject",
+    remoteHostSessions: "pi-desktop/remoteHost/sessions",
+    remoteHostCreateSession: "pi-desktop/remoteHost/createSession",
+    remoteHostSyncProviders: "pi-desktop/remoteHost/syncProviders",
     providersList: "pi-desktop/providers/list",
     providersReorder: "pi-desktop/providers/reorder",
     providersCreate: "pi-desktop/providers/create",
@@ -246,6 +280,14 @@ export const IPC = {
      */
     providersSetSecret: "pi-desktop/providers/setSecret",
     providersTest: "pi-desktop/providers/testConnection",
+    /**
+     * Check a TypeSafe key before the Jev settings row keeps it.
+     *
+     * Jev is not a provider row, so `providersTest` cannot answer this: the
+     * key is checked by the same System One round trip the Agent's
+     * `JevClassify` tool makes, and only a key that answered is stored.
+     */
+    jevTest: "pi-desktop/jev/test",
     providersListModels: "pi-desktop/providers/listModels",
     /**
      * Look one model id up in the local models.dev snapshot.
@@ -268,6 +310,8 @@ export const IPC = {
     pluginList: "pi-desktop/plugin/list",
     /** A renderer slot component asking its own plugin for one JSON answer. */
     pluginRendererCall: "pi-desktop/plugin/rendererCall",
+    /** Invoke a declared, user-facing Composer transform action. */
+    pluginComposerTransform: "pi-desktop/plugin/composerTransform",
     /** Plugin-contributed agent extensions (D387/D388, ADR 0214). */
     pluginImportExtension: "pi-desktop/plugin/importExtension",
     extensionsCommandRun: "pi-desktop/extensions/commands/run",
@@ -296,6 +340,7 @@ export const IPC = {
     pluginLauncherToggle: "pi-desktop/pluginLauncher/toggle",
     pluginLauncherDismiss: "pi-desktop/pluginLauncher/dismiss",
     pluginThemes: "pi-desktop/plugin/themes",
+    pluginProviderCatalog: "pi-desktop/plugin/providerCatalog",
     pluginScenicThemesDestinations: "pi-desktop/plugin/scenicThemes/destinations",
     pluginScenicThemesSetBlur: "pi-desktop/plugin/scenicThemes/setBlur",
     pluginServices: "pi-desktop/plugin/services",
@@ -304,6 +349,18 @@ export const IPC = {
     pluginViewClose: "pi-desktop/plugin/view/close",
     pluginViewSetBounds: "pi-desktop/plugin/view/setBounds",
     pluginViewSetVisible: "pi-desktop/plugin/view/setVisible",
+    /**
+     * The session the user is looking at, pushed by the renderer. The shell owns
+     * the selection; the main process owns turn identity, so the plugin
+     * `session:activated` snapshot is assembled from both (spec 07-plugins/03).
+     */
+    pluginSessionActive: "pi-desktop/plugin/session/active",
+    /**
+     * The shell's answer to one composer suggestion (`pi.composer.suggest`):
+     * whether it went on screen and, if not, why. The main process is waiting
+     * on this invoke, so a suggestion's caller learns what happened to it.
+     */
+    pluginComposerSuggestionResult: "pi-desktop/plugin/composer/suggestionResult",
     mcpList: "pi-desktop/mcp/list",
     mcpUpsert: "pi-desktop/mcp/upsert",
     mcpRemove: "pi-desktop/mcp/remove",
@@ -318,11 +375,12 @@ export const IPC = {
     mcpImportRun: "pi-desktop/mcp/importRun",
     mcpMarketSearch: "pi-desktop/mcp/market/search",
     skillList: "pi-desktop/skill/list",
+    skillBuiltinList: "pi-desktop/skill/builtin/list",
+    skillBuiltinSetEnabled: "pi-desktop/skill/builtin/setEnabled",
     skillCreate: "pi-desktop/skill/create",
     skillImport: "pi-desktop/skill/import",
     skillImportScan: "pi-desktop/skill/importScan",
     skillImportRun: "pi-desktop/skill/importRun",
-    pullsList: "pi-desktop/pulls/list",
     skillMarketSearch: "pi-desktop/skill/market/search",
     skillMarketFetch: "pi-desktop/skill/market/fetch",
     skillUpdate: "pi-desktop/skill/update",
@@ -332,26 +390,6 @@ export const IPC = {
     skillTransfer: "pi-desktop/skill/transfer",
     skillRead: "pi-desktop/skill/read",
     skillReveal: "pi-desktop/skill/reveal",
-    skillMarketInstall: "pi-desktop/skill/market/install",
-    orgLogin: "pi-desktop/org/login",
-    orgLogout: "pi-desktop/org/logout",
-    orgStatus: "pi-desktop/org/status",
-    orgChangePassword: "pi-desktop/org/changePassword",
-    orgQuotaRemaining: "pi-desktop/org/quotaRemaining",
-    orgWsSessions: "pi-desktop/org/ws/sessions",
-    orgWsCreateSession: "pi-desktop/org/ws/createSession",
-    orgWsEntries: "pi-desktop/org/ws/entries",
-    orgWsConnect: "pi-desktop/org/ws/connect",
-    orgWsDisconnect: "pi-desktop/org/ws/disconnect",
-    orgWsLock: "pi-desktop/org/ws/lock",
-    orgWsRelease: "pi-desktop/org/ws/release",
-    orgWsSay: "pi-desktop/org/ws/say",
-    orgWsDeliverables: "pi-desktop/org/ws/deliverables",
-    orgWsDeliverableUpload: "pi-desktop/org/ws/deliverableUpload",
-    orgWsDeliverableDownload: "pi-desktop/org/ws/deliverableDownload",
-    orgSetCurrent: "pi-desktop/org/setCurrent",
-    orgRemoveSession: "pi-desktop/org/removeSession",
-    orgSetSessionEnabled: "pi-desktop/org/setSessionEnabled",
     subagentList: "pi-desktop/subagent/list",
     subagentCatalog: "pi-desktop/subagent/catalog",
     subagentCreate: "pi-desktop/subagent/create",
@@ -369,6 +407,9 @@ export const IPC = {
     marketCheckUpdates: "pi-desktop/market/checkUpdates",
     marketApplyUpdates: "pi-desktop/market/applyUpdates",
     marketCancelInstall: "pi-desktop/market/cancelInstall",
+    marketReviewSummaries: "pi-desktop/market/reviewSummaries",
+    marketReviewTickers: "pi-desktop/market/reviewTickers",
+    marketReviews: "pi-desktop/market/reviews",
     commandPaletteSearch: "pi-desktop/commandPalette/search",
     commandPaletteExecute: "pi-desktop/commandPalette/execute",
     logOpenFolder: "pi-desktop/log/openFolder",
@@ -377,8 +418,6 @@ export const IPC = {
     composerPickPhotos: "pi-desktop/composer/pickPhotos",
     composerImportFiles: "pi-desktop/composer/importFiles",
     composerPasteFiles: "pi-desktop/composer/pasteFiles",
-    composerAttachSession: "pi-desktop/composer/attachSession",
-    composerAttachSpaceDoc: "pi-desktop/composer/attachSpaceDoc",
     clipboardRecordPaste: "pi-desktop/clipboard/recordPaste",
     composerCommands: "pi-desktop/composer/commands",
     workspaceDiff: "pi-desktop/workspace/diff",
@@ -389,14 +428,15 @@ export const IPC = {
     browserSetVisible: "pi-desktop/browser/setVisible",
     browserOpenExternal: "pi-desktop/browser/openExternal",
     browserGetState: "pi-desktop/browser/getState",
+    browserGetPages: "pi-desktop/browser/getPages",
     fsList: "pi-desktop/fs/list",
     fsRead: "pi-desktop/fs/read",
     fsReadImageDataUrl: "pi-desktop/fs/readImageDataUrl",
     statsGetTokenUsageHistory: "pi-desktop/stats/getTokenUsageHistory",
-    statsGetTokenInsights: "pi-desktop/stats/getTokenInsights",
     fsReveal: "pi-desktop/fs/reveal",
     fsOpen: "pi-desktop/fs/open",
     fsIndex: "pi-desktop/fs/index",
+    fsSearch: "pi-desktop/fs/search",
     fsResolveRef: "pi-desktop/fs/resolveRef",
     windowSetWorkPanelReservation:
       "pi-desktop/window/setWorkPanelReservation",
@@ -405,79 +445,123 @@ export const IPC = {
     windowControl: "pi-desktop/window/control",
     closeBehaviorGet: "pi-desktop/window/closeBehavior/get",
     closeBehaviorSet: "pi-desktop/window/closeBehavior/set",
+    lifecycleDialogReady: "pi-desktop/window/lifecycleDialog/ready",
+    lifecycleDialogRespond: "pi-desktop/window/lifecycleDialog/respond",
     menuRendererReady: "pi-desktop/menu/rendererReady",
+    workPanelTabMenu: "pi-desktop/workPanel/tabMenu",
     traySetSessionPreferences: "pi-desktop/tray/setSessionPreferences",
     nativeMenuAction: "pi-desktop/menu/nativeAction",
-    channelsList: "pi-desktop/channels/list",
-    channelsSave: "pi-desktop/channels/save",
-    channelsDelete: "pi-desktop/channels/delete",
-    channelsConnect: "pi-desktop/channels/connect",
-    channelsDisconnect: "pi-desktop/channels/disconnect",
-    channelsTest: "pi-desktop/channels/test",
-
-    // --- Module 02: Team Spaces (T52.4-11 client slice; SPEC §3.5) ---
-    spaceList: "pi-desktop/space/list",
-    spaceCreate: "pi-desktop/space/create",
-    spaceTree: "pi-desktop/space/tree",
-    spaceNodeCreate: "pi-desktop/space/node/create",
-    spaceNodeRename: "pi-desktop/space/node/rename",
-    spaceNodeMove: "pi-desktop/space/node/move",
-    spaceNodeDelete: "pi-desktop/space/node/delete",
-    spaceNodeRestore: "pi-desktop/space/node/restore",
-    spaceDocGet: "pi-desktop/space/doc/get",
-    spaceDocSave: "pi-desktop/space/doc/save",
-    spaceFileUpload: "pi-desktop/space/file/upload",
-    spaceSaveFromPath: "pi-desktop/space/saveFromPath",
-    spaceFileVersions: "pi-desktop/space/file/versions",
-    spaceFileDownload: "pi-desktop/space/file/download",
-    spaceSearch: "pi-desktop/space/search",
-    spaceYjsAttach: "pi-desktop/space/yjs/attach",
-    spaceYjsDetach: "pi-desktop/space/yjs/detach",
-    spaceYjsSend: "pi-desktop/space/yjs/send",
-    spaceClip: "pi-desktop/space/clip",
-    spaceMembersList: "pi-desktop/space/members/list",
-    spaceMembersAdd: "pi-desktop/space/members/add",
-    spaceMembersUpdate: "pi-desktop/space/members/update",
-    spaceMembersRemove: "pi-desktop/space/members/remove",
-    spaceInviteCreate: "pi-desktop/space/invites/create",
-    spaceInviteRedeem: "pi-desktop/space/invites/redeem",
-    assistantSessionGet: "pi-desktop/assistant/session/get",
     assistantHistory: "pi-desktop/assistant/history",
     assistantSend: "pi-desktop/assistant/send",
+    assistantSessionGet: "pi-desktop/assistant/session/get",
     assistantWebhookGet: "pi-desktop/assistant/webhook/get",
     assistantWebhookSet: "pi-desktop/assistant/webhook/set",
-    spaceNotificationsPull: "pi-desktop/space/notifications/pull",
-    spaceNotificationsRead: "pi-desktop/space/notifications/read",
-    spaceCommentsList: "pi-desktop/space/comments/list",
+    channelsConnect: "pi-desktop/channels/connect",
+    channelsDelete: "pi-desktop/channels/delete",
+    channelsDisconnect: "pi-desktop/channels/disconnect",
+    channelsList: "pi-desktop/channels/list",
+    channelsSave: "pi-desktop/channels/save",
+    channelsTest: "pi-desktop/channels/test",
+    composerAttachSession: "pi-desktop/composer/attachSession",
+    composerAttachSpaceDoc: "pi-desktop/composer/attachSpaceDoc",
+    expertChainInvoke: "pi-desktop/expert/chainInvoke",
+    expertDelete: "pi-desktop/expert/delete",
+    expertGet: "pi-desktop/expert/get",
+    expertInvoke: "pi-desktop/expert/invoke",
+    expertList: "pi-desktop/expert/list",
+    expertSave: "pi-desktop/expert/save",
+    expertToggle: "pi-desktop/expert/toggle",
+    expertTeamConfirmPlan: "pi-desktop/expertTeams/confirmPlan",
+    expertTeamDelete: "pi-desktop/expertTeams/delete",
+    expertTeamGet: "pi-desktop/expertTeams/get",
+    expertTeamInvoke: "pi-desktop/expertTeams/invoke",
+    expertTeamsList: "pi-desktop/expertTeams/list",
+    expertTeamRetryMember: "pi-desktop/expertTeams/retryMember",
+    expertTeamSave: "pi-desktop/expertTeams/save",
+    kbApplyOrgDelivery: "pi-desktop/kb/applyOrgDelivery",
+    kbDeleteUrl: "pi-desktop/kb/deleteUrl",
+    kbDisableOrgServers: "pi-desktop/kb/disableOrgServers",
+    kbListUrls: "pi-desktop/kb/listUrls",
+    kbSaveUrl: "pi-desktop/kb/saveUrl",
+    kbUsageHistory: "pi-desktop/kb/usageHistory",
+    orgChangePassword: "pi-desktop/org/changePassword",
+    orgLogin: "pi-desktop/org/login",
+    orgLogout: "pi-desktop/org/logout",
+    orgQuotaRemaining: "pi-desktop/org/quotaRemaining",
+    orgRemoveSession: "pi-desktop/org/removeSession",
+    orgSetCurrent: "pi-desktop/org/setCurrent",
+    orgSetSessionEnabled: "pi-desktop/org/setSessionEnabled",
+    orgStatus: "pi-desktop/org/status",
+    orgWsConnect: "pi-desktop/org/ws/connect",
+    orgWsCreateSession: "pi-desktop/org/ws/createSession",
+    orgWsDeliverableDownload: "pi-desktop/org/ws/deliverableDownload",
+    orgWsDeliverableUpload: "pi-desktop/org/ws/deliverableUpload",
+    orgWsDeliverables: "pi-desktop/org/ws/deliverables",
+    orgWsDisconnect: "pi-desktop/org/ws/disconnect",
+    orgWsEntries: "pi-desktop/org/ws/entries",
+    orgWsLock: "pi-desktop/org/ws/lock",
+    orgWsRelease: "pi-desktop/org/ws/release",
+    orgWsSay: "pi-desktop/org/ws/say",
+    orgWsSessions: "pi-desktop/org/ws/sessions",
+    promptEnhance: "pi-desktop/prompt/enhance",
+    pullsList: "pi-desktop/pulls/list",
+    sessionSummarizeTitle: "pi-desktop/session/summarizeTitle",
+    skillMarketInstall: "pi-desktop/skill/market/install",
+    spaceClip: "pi-desktop/space/clip",
     spaceCommentsCreate: "pi-desktop/space/comments/create",
+    spaceCommentsList: "pi-desktop/space/comments/list",
     spaceCommentsReply: "pi-desktop/space/comments/reply",
     spaceCommentsResolve: "pi-desktop/space/comments/resolve",
-    spaceRevisionsList: "pi-desktop/space/revisions/list",
-    spaceRevisionsCreate: "pi-desktop/space/revisions/create",
-    spaceRevisionsDecide: "pi-desktop/space/revisions/decide",
-    spaceRevisionsReviewByComments:
-      "pi-desktop/space/revisions/reviewByComments",
-    spaceRewriteSelection: "pi-desktop/space/rewriteSelection",
+    spaceCreate: "pi-desktop/space/create",
+    spaceDocGet: "pi-desktop/space/doc/get",
+    spaceDocSave: "pi-desktop/space/doc/save",
     spaceEventsPull: "pi-desktop/space/events/pull",
     spaceEventsSubscribe: "pi-desktop/space/events/subscribe",
     spaceEventsUnsubscribe: "pi-desktop/space/events/unsubscribe",
+    spaceFileDownload: "pi-desktop/space/file/download",
+    spaceFileUpload: "pi-desktop/space/file/upload",
+    spaceFileVersions: "pi-desktop/space/file/versions",
+    spaceInviteCreate: "pi-desktop/space/invites/create",
+    spaceInviteRedeem: "pi-desktop/space/invites/redeem",
+    spaceList: "pi-desktop/space/list",
+    spaceMembersAdd: "pi-desktop/space/members/add",
+    spaceMembersList: "pi-desktop/space/members/list",
+    spaceMembersRemove: "pi-desktop/space/members/remove",
+    spaceMembersUpdate: "pi-desktop/space/members/update",
+    spaceNodeCreate: "pi-desktop/space/node/create",
+    spaceNodeDelete: "pi-desktop/space/node/delete",
+    spaceNodeMove: "pi-desktop/space/node/move",
+    spaceNodeRename: "pi-desktop/space/node/rename",
+    spaceNodeRestore: "pi-desktop/space/node/restore",
+    spaceNotificationsPull: "pi-desktop/space/notifications/pull",
+    spaceNotificationsRead: "pi-desktop/space/notifications/read",
+    spaceRevisionsCreate: "pi-desktop/space/revisions/create",
+    spaceRevisionsDecide: "pi-desktop/space/revisions/decide",
+    spaceRevisionsList: "pi-desktop/space/revisions/list",
+    spaceRevisionsReviewByComments:
+      "pi-desktop/space/revisions/reviewByComments",
+    spaceRewriteSelection: "pi-desktop/space/rewriteSelection",
+    spaceSaveFromPath: "pi-desktop/space/saveFromPath",
+    spaceSearch: "pi-desktop/space/search",
+    spaceTree: "pi-desktop/space/tree",
+    spaceYjsAttach: "pi-desktop/space/yjs/attach",
+    spaceYjsDetach: "pi-desktop/space/yjs/detach",
+    spaceYjsSend: "pi-desktop/space/yjs/send",
+    statsGetTokenInsights: "pi-desktop/stats/getTokenInsights",
   },
   event: {
     pluginChanged: "pi-desktop/event/pluginChanged",
-    orgWsFrame: "pi-desktop/event/orgWsFrame",
     /** Progress of an install or update, while it is still running. */
     pluginInstallProgress: "pi-desktop/plugin/event/installProgress",
     /** Host-originated app settings mutation (e.g. plugin `app.setTheme`). */
     settingsChanged: "pi-desktop/app/event/settingsChanged",
     configSyncChanged: "pi-desktop/configSync/event/changed",
+    /** A chat-started background task started, exited, or was stopped. */
+    backgroundTasksChanged: "pi-desktop/backgroundTasks/event/changed",
     /** What a running sync is doing, while it is still running. */
     configSyncProgress: "pi-desktop/configSync/event/progress",
     extensionsUiPrompt: "pi-desktop/extensions/event/uiPrompt",
     extensionsStatus: "pi-desktop/extensions/event/status",
-    /** Main -> renderer: a plugin opened one of its own views (pi.ui.openView). */
-    pluginViewActivate: "pi-desktop/plugin/event/viewActivate",
-    /** Main -> renderer: a plugin asked to resume a session turn (pi.session.continueFromPlugin). */
-    pluginSessionContinue: "pi-desktop/plugin/event/sessionContinue",
     pluginLauncherShown: "pi-desktop/pluginLauncher/event/shown",
     agentMessage: "pi-desktop/agent/event/message",
     agentQueueChanged: "pi-desktop/agent/event/queueChanged",
@@ -492,32 +576,53 @@ export const IPC = {
     insecureEndpointNotice: "pi-desktop/network/event/insecureEndpointNotice",
     browserState: "pi-desktop/browser/event/state",
     browserPreview: "pi-desktop/browser/event/preview",
+    browserOpenFile: "pi-desktop/browser/event/openFile",
+    /**
+     * A plugin asked the shell to show one of its own work-panel views
+     * (`pi.ui.revealView`). The shell owns tabs, so it — not the plugin — decides
+     * which session's panel takes the view.
+     */
+    pluginViewReveal: "pi-desktop/plugin/view/event/reveal",
+    /**
+     * One composer suggestion (`pi.composer.suggest`): an offer to show a
+     * plugin's line in the placeholder layer, or the shell's order to drop what
+     * it shows. The shell owns the composer, so it decides and answers over
+     * `pluginComposerSuggestionResult`.
+     */
+    pluginComposerSuggestion: "pi-desktop/plugin/composer/event/suggestion",
     windowMaximized: "pi-desktop/window/event/maximized",
     windowFullScreen: "pi-desktop/window/event/fullscreen",
     windowWorkPanelResize: "pi-desktop/window/event/workPanelResize",
+    lifecycleDialogRequest: "pi-desktop/window/event/lifecycleDialogRequest",
+    lifecycleDialogDismiss: "pi-desktop/window/event/lifecycleDialogDismiss",
     menuCommand: "pi-desktop/menu/event/command",
     traySessionActivated: "pi-desktop/tray/event/sessionActivated",
     notificationChanged: "pi-desktop/notification/event/changed",
     sessionsChanged: "pi-desktop/session/event/changed",
+    remoteInteractions: "pi-desktop/remote/event/interactions",
     notificationActivated: "pi-desktop/notification/event/activated",
     notificationSound: "pi-desktop/notification/event/sound",
     plansChanged: "pi-desktop/plans/event/changed",
+    todosChanged: "pi-desktop/todos/event/changed",
     providersOauth: "pi-desktop/providers/oauth/event",
-    expertTeamRun: "pi-desktop/expert/event/teamRun",
-    updatesState: "pi-desktop/updates/event/state",
-    channelState: "pi-desktop/channel/event/state",
-    /** Module 02: space event frames (per-space poll loop in the main
-     * process; SPEC §3.2 frame types forwarded verbatim). */
-    spaceEvent: "pi-desktop/event/spaceFrame",
-    spaceYjsFrame: "pi-desktop/event/spaceYjsFrame",
-    assistantTurnDone: "pi-desktop/event/assistantTurnDone",
     mcpOauth: "pi-desktop/mcp/oauth/event",
+    updatesState: "pi-desktop/updates/event/state",
     voiceStateChanged: "pi-desktop/voice/event/stateChanged",
     voiceModelProgress: "pi-desktop/voice/event/modelProgress",
     liveVoiceChanged: "pi-desktop/voice/live/event/changed",
     liveVoicePort: "pi-desktop/voice/live/event/port",
     liveVoiceControl: "pi-desktop/voice/live/event/control",
     liveVoiceTranscript: "pi-desktop/voice/live/event/transcript",
+    liveVoiceWidgetState: "pi-desktop/voice/live/event/widgetState",
+    liveVoiceWidgetAction: "pi-desktop/voice/live/event/widgetAction",
+    channelState: "pi-desktop/channel/event/state",
+    assistantTurnDone: "pi-desktop/event/assistantTurnDone",
+    orgWsFrame: "pi-desktop/event/orgWsFrame",
+    spaceEvent: "pi-desktop/event/spaceFrame",
+    spaceYjsFrame: "pi-desktop/event/spaceYjsFrame",
+    expertTeamRun: "pi-desktop/expert/event/teamRun",
+    pluginSessionContinue: "pi-desktop/plugin/event/sessionContinue",
+    pluginViewActivate: "pi-desktop/plugin/event/viewActivate",
   },
 } as const;
 
@@ -525,3 +630,9 @@ export const IPC_WHITELIST = new Set<string>([
   ...Object.values(IPC.invoke),
   ...Object.values(IPC.event),
 ]);
+
+export const APP_DISPLAY_NAME = "LaboFlow Desktop";
+/** Product version codename shown to users; APP_VERSION stays the build semver
+ * the updater compares against. */
+
+export const APP_DISPLAY_VERSION = "Alpha-1.0.0";

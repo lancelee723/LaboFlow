@@ -327,7 +327,7 @@ export function HtmlCollabEditor(props: {
         {peers.map((peer, index) => (
           <span
             key={`${peer.name}-${index}`}
-            className="rounded-full px-2 py-0.5 text-[10px]"
+            className="rounded-full px-2 py-0.5 text-3xs"
             style={{ background: `${peer.color}22`, color: peer.color }}
           >
             {peer.name}
@@ -378,7 +378,7 @@ export function HtmlCollabEditor(props: {
               <div key={block.id} className="group mb-2" data-block-type={block.type}>
                 <div className="flex items-center gap-1">
                   <select
-                    className="rounded border px-1 py-0.5 text-[10px]"
+                    className="rounded border px-1 py-0.5 text-3xs"
                     style={{ borderColor: "var(--ds-border)" }}
                     value={block.type}
                     onChange={(event) => setType(block.id, event.target.value as BlockType)}
@@ -397,7 +397,7 @@ export function HtmlCollabEditor(props: {
                   ))}
                   <button
                     type="button"
-                    className="ml-auto rounded px-1 text-[10px] opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+                    className="ml-auto rounded px-1 text-3xs opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
                     onClick={() => removeBlock(block.id)}
                   >
                     {t("space.html.removeBlock")}
