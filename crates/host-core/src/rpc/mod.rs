@@ -306,8 +306,17 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
     // Keep request tasks bounded as well as tool executions. Tool calls have
     // their own class/session budgets below; this cap protects the host from
     // non-tool RPC bursts and prevents an unbounded tokio task fan-out.
+    //
+    // Long tool calls draw from their own pool so a batch of heavy
+    // `tools.execute` calls cannot leave zero slots for short requests
+    // (`session.get`, permission resolves, health checks) — the echo
+    // starvation mode from the PPT-Master pipeline analysis. Short requests
+    // keep the full general pool; the two pools only partition admission,
+    // tool execution itself stays governed by ToolBudget.
     const MAX_IN_FLIGHT_RPC: usize = 32;
+    const MAX_IN_FLIGHT_LONG_TOOL_RPC: usize = 20;
     let request_slots = Arc::new(Semaphore::new(MAX_IN_FLIGHT_RPC));
+    let long_tool_slots = Arc::new(Semaphore::new(MAX_IN_FLIGHT_LONG_TOOL_RPC));
     let mut request_tasks = tokio::task::JoinSet::new();
 
     // Keep stdio off Tokio's blocking pool. Under process/thread pressure,
@@ -433,7 +442,12 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
                 let params = req.params.unwrap_or(json!({}));
                 let state = state.clone();
                 let tx = tx.clone();
-                let permit = match request_slots.clone().try_acquire_owned() {
+                let slot_pool = if is_long_tool_request(&method, &params) {
+                    long_tool_slots.clone()
+                } else {
+                    request_slots.clone()
+                };
+                let permit = match slot_pool.try_acquire_owned() {
                     Ok(permit) => permit,
                     Err(_) => {
                         let response = JsonRpcResponse {
@@ -455,16 +469,16 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
 
                 request_tasks.spawn(async move {
                     let _permit = permit;
-                    let budget = request_budget_ms(&method, &params);
-                    // Deferred checkpoint writes are committed after the
-                    // handler releases the state lock and before the response
-                    // leaves. Transcript appends are synced inside their write
-                    // path before derived SQLite rows are committed.
+                    // Budgeting lives inside handle_request: the queue gate
+                    // (entry lock wait) and the processing phase are timed
+                    // separately, so queueing never consumes the processing
+                    // budget. Deferred checkpoint writes are committed after
+                    // the handler releases the state lock and before the
+                    // response leaves. Transcript appends are synced inside
+                    // their write path before derived SQLite rows are
+                    // committed.
                     let (handled, committed) = transcripts::commit_writes_of(
-                        with_request_budget(
-                            budget,
-                            handle_request(state, &method, params, tx.clone()),
-                        ),
+                        handle_request(state, &method, params, tx.clone()),
                     )
                     .await;
                     let out = response_for(id, handled, committed);
@@ -522,10 +536,26 @@ pub async fn serve(state: Arc<Mutex<AppState>>) -> Result<()> {
         .unwrap_or(Ok(()))
 }
 
-/// Wall-clock budget for ordinary non-tool RPC requests. The long-running
-/// `configSync.syncNow` is explicitly exempt below; other handlers stuck on the
-/// global state lock must release their in-flight slot rather than accumulate.
-/// Keep this slightly beyond the shared 130s client deadline (issue #1071).
+/// Wall-clock budget for the *queue phase* of a request: arrival until the
+/// dispatch gate acquires the global state lock. Queueing must not consume
+/// the processing budget — a lightweight request that arrives while a heavy
+/// request holds the lock must die as "queued", not as "processed too
+/// slowly" (that mismatch killed even `echo` calls in the PPT-Master
+/// pipeline; docs/laboflow/phase7-ppt-master/RPC-BUDGET-ANALYSIS.md). 135s
+/// matches the old single-phase budget: generous enough that only a
+/// genuinely wedged holder trips it, and it still releases the in-flight
+/// slot.
+const RPC_QUEUE_BUDGET_MS: u64 = 135_000;
+
+/// Wall-clock budget for the *processing phase* of a single non-tool RPC
+/// request, starting once the request is dispatched past the entry gate.
+/// The long-running `configSync.syncNow` is explicitly exempt in
+/// `request_budget_ms` (the Host owns that multi-step cloud workflow). The
+/// JS client gives its calls ~130s before it rejects locally without ever
+/// telling the host (issue #1071), so a request stuck in processing keeps
+/// its in-flight slot after the caller has moved on; 135s sits just past
+/// that client budget: the slot is guaranteed to come back within seconds of
+/// the client giving up, instead of never.
 const RPC_REQUEST_BUDGET_MS: u64 = 135_000;
 
 /// Grace window added on top of a tool's own effective timeout. A
@@ -534,12 +564,16 @@ const RPC_REQUEST_BUDGET_MS: u64 = 135_000;
 /// the grace covers host-side bookkeeping around the actual execution.
 const RPC_TOOL_BUDGET_GRACE_MS: u64 = 90_000;
 
-/// Cap added to the `tools.execute` budget for the permission prompt. Before
-/// the tool runs, the handler may legitimately wait for the user to answer an
-/// ask prompt for tens of seconds — that wait must not eat the tool's own
-/// execution budget, or "slow approval + full-length Bash" would be killed
-/// mid-execution. Unattended callers reject at their own ask budget (~120s),
-/// so the cap matches that order.
+/// Cap for the permission prompt wait, **enforced** by the handler: an ask
+/// prompt that sits unanswered for this long is cancelled and the call is
+/// denied with the shared `PERMISSION_TIMEOUT` code. Before the tool runs,
+/// the handler may legitimately wait for the user to answer for tens of
+/// seconds — that wait must not eat the tool's own execution budget, or
+/// "slow approval + full-length Bash" would be killed mid-execution.
+/// Unattended callers reject at their own ask budget (~120s), so the cap
+/// matches that order. Enforcing it here (rather than letting the wall-clock
+/// budget kill the request) also cleans up the pending permission and
+/// returns a structured denial to the caller instead of a transport timeout.
 const RPC_PERMISSION_WAIT_CAP_MS: u64 = 120_000;
 
 /// Budget for one request. `configSync.syncNow` has no aggregate wall-clock
@@ -589,6 +623,48 @@ fn request_budget_ms(method: &str, params: &Value) -> Option<u64> {
     })
 }
 
+/// Threshold separating "long" tool calls from short ones for slot-pool
+/// purposes. A tools.execute at or above the Bash default timeout holds its
+/// request slot for at least that long, so it draws from the long pool and
+/// cannot crowd short requests out of the general pool.
+const LONG_TOOL_MIN_TIMEOUT_MS: u64 = 60_000;
+
+/// True for tool-execution calls whose effective timeout puts them in the
+/// long pool (see `LONG_TOOL_MIN_TIMEOUT_MS`). The method set and the
+/// background-Bash exemption mirror `request_budget_ms`: `tools.execute` and
+/// `tools.workspaceExecute` both run real tools (including Bash), while a
+/// background Bash call returns as soon as the process is spawned — the task
+/// lives in the registry, not in this request. Wire shape is camelCase, with
+/// the same snake_case fallback as `request_budget_ms` (review on #1208).
+fn is_long_tool_request(method: &str, params: &Value) -> bool {
+    if !matches!(method, "tools.execute" | "tools.workspaceExecute") {
+        return false;
+    }
+    let run_in_background = params
+        .get("runInBackground")
+        .or_else(|| params.get("run_in_background"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if run_in_background {
+        return false;
+    }
+    let tool_name = params
+        .get("toolName")
+        .or_else(|| params.get("tool_name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let timeout_ms = params
+        .get("timeoutMs")
+        .or_else(|| params.get("timeout_ms"))
+        .and_then(|v| v.as_u64());
+    match crate::tools::effective_timeout_ms(tool_name, timeout_ms) {
+        Some(timeout) => timeout >= LONG_TOOL_MIN_TIMEOUT_MS,
+        // Unbounded tools (plugin/MCP dispatch) are bounded in the handler by
+        // their own dispatch timeout, so they stay out of the long pool.
+        None => false,
+    }
+}
+
 /// Wrap one request's handler future in its wall-clock budget (issue #1071).
 ///
 /// The timeout can only fire at an `await` point, so a handler stuck inside a
@@ -615,6 +691,31 @@ where
             Err(JsonRpcError {
                 code: -32030,
                 message: format!("host rpc budget of {budget}ms exceeded"),
+                data: Some(json!({ "errorCode": "HOST_RPC_TIMEOUT" })),
+            })
+        }
+    }
+}
+
+/// Same wrapper for the queue phase, with its own message so a queued request
+/// is diagnosable as "never started processing" rather than looking like a
+/// handler that ran past its budget.
+async fn with_queue_budget<F, T>(budget: u64, fut: F) -> Result<T, JsonRpcError>
+where
+    F: std::future::Future<Output = Result<T, JsonRpcError>>,
+{
+    match tokio::time::timeout(Duration::from_millis(budget), fut).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!(
+                budget_ms = budget,
+                "rpc request exceeded its queue budget before dispatch; slot released"
+            );
+            Err(JsonRpcError {
+                code: -32030,
+                message: format!(
+                    "host rpc queue wait of {budget}ms exceeded; request was never dispatched"
+                ),
                 data: Some(json!({ "errorCode": "HOST_RPC_TIMEOUT" })),
             })
         }
@@ -1931,16 +2032,58 @@ async fn handle_request(
     params: Value,
     tx: mpsc::UnboundedSender<String>,
 ) -> Result<Value, JsonRpcError> {
+    // Phase 1 — dispatch gate. The entry lock wait is the request's queue
+    // time: it gets its own budget so queueing behind a heavy holder never
+    // consumes the processing budget below (the echo starvation mode from
+    // docs/laboflow/phase7-ppt-master/RPC-BUDGET-ANALYSIS.md).
+    let queue_started = std::time::Instant::now();
+    let mut queued_ms: u64 = 0;
     if method != "app.handshake" {
-        let st = state.lock().await;
-        if !st.handshook {
-            return Err(rpc_err(1001, "handshake required", "UNAUTHORIZED"));
-        }
-        if st.shutting_down {
-            return Err(rpc_err(1001, "host is shutting down", "HOST_SHUTTING_DOWN"));
+        let gate_state = state.clone();
+        with_queue_budget(RPC_QUEUE_BUDGET_MS, async move {
+            let st = gate_state.lock().await;
+            if !st.handshook {
+                return Err(rpc_err(1001, "handshake required", "UNAUTHORIZED"));
+            }
+            if st.shutting_down {
+                return Err(rpc_err(1001, "host is shutting down", "HOST_SHUTTING_DOWN"));
+            }
+            Ok(())
+        })
+        .await?;
+        queued_ms = queue_started.elapsed().as_millis() as u64;
+        if queued_ms >= RPC_QUEUE_SLOW_WAIT_LOG_MS {
+            tracing::warn!(
+                method = %method,
+                queue_wait_ms = queued_ms,
+                "rpc request waited long on the dispatch gate"
+            );
         }
     }
 
+    // Phase 2 — processing. The budget starts here, at dispatch: queue time
+    // is already accounted for by the gate above. Fixed-budget methods keep
+    // the old single-phase total (queue + processing ≤ 135s) so issue
+    // #1071's slot-return guarantee is unchanged; tools.execute keeps its
+    // full execution budget regardless of queue time — that exclusion is the
+    // point of the two-phase split.
+    let budget = match request_budget_ms(method, &params) {
+        Some(b) if b == RPC_REQUEST_BUDGET_MS => Some(b.saturating_sub(queued_ms)),
+        other => other,
+    };
+    with_request_budget(budget, dispatch_request(state, method, params, tx)).await
+}
+
+/// Threshold above which a dispatch-gate wait is logged, so a live run can
+/// prove or disprove state-lock contention instead of guessing.
+const RPC_QUEUE_SLOW_WAIT_LOG_MS: u64 = 2_000;
+
+async fn dispatch_request(
+    state: Arc<Mutex<AppState>>,
+    method: &str,
+    params: Value,
+    tx: mpsc::UnboundedSender<String>,
+) -> Result<Value, JsonRpcError> {
     if method.starts_with("configSync.") {
         return config_sync_rpc::handle(state, method, params, tx)
             .await
@@ -4415,6 +4558,7 @@ async fn handle_request(
                     }
                 }
 
+                let mut permission_wait_timed_out = false;
                 let final_decision = if cancelled {
                     PermissionDecision::Deny
                 } else if let Some(d) = auto_decision {
@@ -4434,6 +4578,19 @@ async fn handle_request(
                         _ = wait_for_tool_cancellation(&mut permission_cancellation) => {
                             let _ = cancel_pending_permission(&state, &p).await;
                             cancelled = true;
+                            PermissionDecision::Deny
+                        },
+                        // Enforced prompt cap: an unanswered permission request
+                        // must not hold the request slot until the wall-clock
+                        // budget kills it — that both leaked the pending
+                        // permission (the budget drops the future before it can
+                        // clean up) and surfaced to the caller as a transport
+                        // timeout instead of a structured denial.
+                        _ = tokio::time::sleep(Duration::from_millis(
+                            RPC_PERMISSION_WAIT_CAP_MS,
+                        )) => {
+                            let _ = cancel_pending_permission(&state, &p).await;
+                            permission_wait_timed_out = true;
                             PermissionDecision::Deny
                         },
                     }
@@ -4458,6 +4615,7 @@ async fn handle_request(
                         "externalPathPermission": external_path_permission,
                         "prompted": prompted,
                         "permissionWaitMs": permission_wait_ms,
+                        "permissionWaitTimedOut": permission_wait_timed_out,
                         "totalMs": call_started.elapsed().as_millis() as u64
                     });
                     if let Some(shell_id) = permission_shell_id.as_deref() {
@@ -4475,6 +4633,12 @@ async fn handle_request(
                     );
                     let error_code = if cancelled {
                         "TOOL_ABORTED"
+                    } else if permission_wait_timed_out {
+                        // The registered shared code for an unanswered
+                        // permission prompt (RACP maps it to
+                        // APPROVAL_EXPIRED); the host now enforces the cap it
+                        // documents.
+                        "PERMISSION_TIMEOUT"
                     } else if sessions::is_contract_mode(&durable_mode)
                         && !PermissionManager::plan_mode_allows(&p.tool_name)
                     {
@@ -4492,7 +4656,13 @@ async fn handle_request(
                         "ok": false,
                         "isError": true,
                         "content": {
-                            "error": if cancelled { "tool aborted" } else { "permission denied" },
+                            "error": if cancelled {
+                                "tool aborted"
+                            } else if permission_wait_timed_out {
+                                "permission request was not answered in time"
+                            } else {
+                                "permission denied"
+                            },
                             "code": error_code
                         },
                         "durationMs": 0,
@@ -5796,10 +5966,11 @@ mod tests {
     use tokio::sync::{mpsc, Mutex};
 
     use super::{
-        capability_err, handle_request, parse_capability_query, parse_capability_target,
-        peek_jsonrpc_id, provider_rpc_err, request_budget_ms, resolve_plan_workspace,
-        resolve_tool_workspace, resolve_tool_workspace_for_call, response_for, rpc_err, scope_err,
-        skill_err, with_request_budget, JsonRpcError, RPC_REQUEST_BUDGET_MS,
+        capability_err, handle_request, is_long_tool_request, parse_capability_query,
+        parse_capability_target, peek_jsonrpc_id, provider_rpc_err, request_budget_ms,
+        resolve_plan_workspace, resolve_tool_workspace, resolve_tool_workspace_for_call,
+        response_for, rpc_err, scope_err, skill_err, with_queue_budget, with_request_budget,
+        JsonRpcError, RPC_REQUEST_BUDGET_MS,
     };
     use crate::agent_capabilities::CapabilityLevel;
     use crate::plans::{PlanResolveParams, PlanSubmitParams};
@@ -6171,6 +6342,59 @@ mod tests {
         // like before this change.
         let unbounded = json!({"toolName": "Glob"});
         assert_eq!(request_budget_ms("tools.execute", &unbounded), None);
+    }
+
+    #[test]
+    fn long_tool_requests_draw_from_the_long_pool() {
+        // Bash at the default timeout is the canonical long call: it holds a
+        // request slot for its whole execution and must not crowd short
+        // requests out of the general pool (PPT-Master pipeline analysis).
+        let bash_default = json!({"toolName": "Bash"});
+        assert!(is_long_tool_request("tools.execute", &bash_default));
+        let bash_30s = json!({"toolName": "Bash", "timeoutMs": 30_000});
+        assert!(!is_long_tool_request("tools.execute", &bash_30s));
+        // Everything else stays on the general pool: fast tools, plugin/MCP
+        // dispatch (bounded by its own dispatch timeout), and non-tool
+        // methods.
+        let read = json!({"toolName": "Read"});
+        assert!(!is_long_tool_request("tools.execute", &read));
+        let plugin = json!({"toolName": "plugin_laboflow_ppt_master_ppt_script"});
+        assert!(!is_long_tool_request("tools.execute", &plugin));
+        assert!(!is_long_tool_request("session.get", &json!({})));
+    }
+
+    #[tokio::test]
+    async fn queue_budget_ends_an_undispatched_request_with_a_queue_message() {
+        let started = std::time::Instant::now();
+        let error = with_queue_budget(50, async {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok::<_, JsonRpcError>(json!(null))
+        })
+        .await
+        .expect_err("a gate wait past its budget must fail");
+        assert_eq!(error.code, -32030);
+        assert!(
+            error.message.contains("queue wait"),
+            "queue timeout must be diagnosable as queueing, not processing: {}",
+            error.message
+        );
+        assert_eq!(
+            error
+                .data
+                .as_ref()
+                .and_then(|d| d.get("errorCode"))
+                .and_then(|c| c.as_str()),
+            Some("HOST_RPC_TIMEOUT")
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn queue_budget_passes_a_fast_gate_through() {
+        let result: Value = with_queue_budget(1_000, async { Ok(json!({ "gated": true })) })
+            .await
+            .expect("a fast gate must pass through");
+        assert_eq!(result, json!({ "gated": true }));
     }
 
     #[test]

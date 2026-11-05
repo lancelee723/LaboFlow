@@ -134,7 +134,7 @@ does not turn temporary thread pressure into a host process exit.
 | `SHELL_NOT_FOUND` | no | no effective platform shell is available after catalog fallback; message carries guidance |
 | `COMMAND_SHELL_CHANGED` | no | pinned shell ID or dialect changed before execution |
 | `COMMAND_SHELL_INVALID` | no | settings supplied an unknown, unavailable, or wrong-platform shell ID |
-| `PERMISSION_TIMEOUT` | no | legacy compatibility code for an older permission prompt timeout; current local prompts remain pending instead |
+| `PERMISSION_TIMEOUT` | no | an ask prompt sat unanswered for the host's enforced permission-wait cap (120s) and was cancelled; surfaces remotely as RACP `APPROVAL_EXPIRED` |
 | `PERMISSION_REQUIRED` | no | waiting for user decision |
 | `WRITE_DISABLED_IN_PLAN` | no | contract-mode hard-deny for Write |
 | `EDIT_DISABLED_IN_PLAN` | no | contract-mode hard-deny for Edit |
@@ -427,9 +427,15 @@ the pool it started on. The route in effect is reproduced, never downgraded to a
 direct connection.
 
 ### Permission timeout
-`PERMISSION_TIMEOUT` is a legacy compatibility code and is no longer emitted
-for local desktop permission requests. An unresolved local permission remains
-pending; explicit denial or cancellation is reported as `TOOL_DENIED`.
+The host enforces a 120s cap on an unanswered local permission prompt
+(`RPC_PERMISSION_WAIT_CAP_MS`): the pending permission is cancelled, the tool
+call is denied with `PERMISSION_TIMEOUT` (surfaces remotely as RACP
+`APPROVAL_EXPIRED`), and the in-flight RPC slot is released without waiting
+for the request's wall-clock budget. Before this cap was enforced, an
+unanswered prompt held its slot until the budget killed the request, which
+leaked the pending permission and surfaced to the caller as a transport
+timeout. Explicit denial or cancellation is still reported as `TOOL_DENIED`
+/ `TOOL_ABORTED`.
 
 ### Shell and Plan/Goal checkpoint failures
 
