@@ -239,6 +239,7 @@ export class AgentHost {
     const meta2 = {
       turnId,
       parentToolCallId: envelope.parentToolCallId,
+      nestedParentToolCallId: envelope.nestedParentToolCallId,
       agentName: envelope.agentName,
     };
 
@@ -359,6 +360,7 @@ export class AgentHost {
         this.emit(state, "turn.activity", { event }, meta2);
         return;
       }
+      case "usage":
       case "turn_start":
       case "turn_end":
       case "usage":
@@ -700,11 +702,11 @@ export class AgentHost {
     });
   }
 
-  /** Promote a queued turn to the end of its session's priority block ("send now"). */
+  /** Promote queued input and deliver it into the active turn when possible. */
   async prioritizeTurn(principal: Principal, turnId: string): Promise<RacpTurn> {
     this.requireRole(principal, "turn/prioritize");
     const state = this.stateForTurn(turnId);
-    return this.withAdmission(state.id, async () => {
+    const runtimeTurnId = await this.withAdmission(state.id, async () => {
       const turn = state.turns.get(turnId)!;
       if (turn.deliveryPending || turn.deliveredIntoTurnId || turn.status !== "queued") {
         throw racpError("CONFLICT", "only a queued turn can be prioritized");
@@ -713,8 +715,17 @@ export class AgentHost {
         throw racpError("CONFLICT", "the turn is already prioritized");
       }
       this.afterQueueMove(state, turn.id);
-      return this.toRacpTurn(state, turn);
+      return this.activeRuntimeTurnId(state);
     });
+    // Runtime delivery stays outside admission so slow steering cannot block
+    // cancellation or admission of other inputs.
+    if (runtimeTurnId) await this.deliverPromotedBlock(state, runtimeTurnId, principal);
+    return this.toRacpTurn(state, this.ensureTurn(state, turnId));
+  }
+
+  private activeRuntimeTurnId(state: SessionState): string | undefined {
+    const turn = state.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
+    return turn && isActive(turn.status) ? turn.runtimeTurnId ?? turn.id : undefined;
   }
 
   /**
@@ -830,6 +841,19 @@ export class AgentHost {
     return this.approvals.list(sessionId);
   }
 
+  /**
+   * Open interactive inputs of one session, oldest first: the same entries a
+   * late-attaching client reads as `snapshot().pendingInputs`, without a
+   * history read. The paired original request carries the runtime request id
+   * and tool call the answer has to be resolved against.
+   */
+  pendingInputRequests(sessionId: string): Array<{ input: RacpInputRequest; original: AskToolRequest }> {
+    return [...this.state(sessionId).pendingInputs.values()].map((entry) => ({
+      input: entry.request,
+      original: entry.original,
+    }));
+  }
+
   /** The RACP view of a session the caller already fetched: its durable summary plus live state. */
   describeSession(summary: SessionSummary): RacpSession {
     const state = this.state(summary.id);
@@ -910,7 +934,7 @@ export class AgentHost {
       error?: NonNullable<TurnRecord["error"]>;
       kind: Parameters<EventHub["publish"]>[0]["kind"];
       payload: Record<string, unknown>;
-      meta: { turnId?: string; parentToolCallId?: string; agentName?: string };
+      meta: { turnId?: string; parentToolCallId?: string; nestedParentToolCallId?: string; agentName?: string };
     },
   ): void {
     if (turn) {
@@ -1025,24 +1049,30 @@ export class AgentHost {
   }
 
   /**
-   * Deliver the promoted entries that are still queued into the turn that just
-   * started, so "Send now" twice puts both messages in front of the model
-   * together instead of spreading them over two turns (ADR 0265).
-   *
-   * The runtime only accepts input for a turn whose run is live, so a refusal is
-   * retried a bounded number of times. Anything still undelivered stays queued
-   * and leaves at the next boundary as its own turn: the previous behavior is
-   * the fallback, never a lost prompt.
+   * Deliver promoted input into the active runtime turn (ADR 0265).
+   * Runtime refusals are retried within a bounded budget; undelivered input
+   * remains queued for its own turn at the next boundary.
    */
-  private async deliverPromotedBlock(state: SessionState, runtimeTurnId: string): Promise<void> {
+  private async deliverPromotedBlock(state: SessionState, runtimeTurnId: string, principal?: Principal): Promise<void> {
     const steer = this.runtime.steer?.bind(this.runtime);
     if (!steer) return;
     for (let attempt = 0; attempt < PROMOTED_DELIVERY_ATTEMPTS; attempt += 1) {
       const head = await this.withAdmission(state.id, async () => {
         const record = this.queue.peek(state.id);
         if (!record || record.priority === undefined) return undefined;
-        const active = state.activeTurnId ? state.turns.get(state.activeTurnId) : undefined;
-        if (!active || active.runtimeTurnId !== runtimeTurnId) return undefined;
+        if (this.activeRuntimeTurnId(state) !== runtimeTurnId) return undefined;
+        const active = state.turns.get(state.activeTurnId!);
+        const externalDesktopTurn = active?.principalSubject === undefined && active?.runtimeTurnId === undefined;
+        // Immediate delivery accepts only the paired caller's own input.
+        if (principal && (!principal.pairedDevice || record.principalSubject !== principal.subject)) return undefined;
+        // Desktop turns require a caller because they have no module admission ceiling.
+        if (externalDesktopTurn && !principal) return undefined;
+        // Steering preserves grants: Desktop turns use the session mode;
+        // module-admitted turns use their principal-specific ceiling.
+        const activePermissionMode = externalDesktopTurn
+          ? state.permissionMode
+          : active?.effectivePermissionMode;
+        if (activePermissionMode !== record.effectivePermissionMode) return undefined;
         const turn = this.ensureTurn(state, record.id);
         if (turn.deliveryPending || turn.deliveredIntoTurnId) return undefined;
         turn.deliveryPending = true;
@@ -1193,7 +1223,7 @@ export class AgentHost {
     state: SessionState,
     kind: Parameters<EventHub["publish"]>[0]["kind"],
     payload: unknown,
-    meta: { turnId?: string; parentToolCallId?: string; agentName?: string },
+    meta: { turnId?: string; parentToolCallId?: string; nestedParentToolCallId?: string; agentName?: string },
   ): void {
     const durable = racpDurable(kind);
     if (durable) state.revision += 1;
@@ -1204,6 +1234,7 @@ export class AgentHost {
       revision: state.revision,
       kind,
       ...(meta.parentToolCallId ? { parentToolCallId: meta.parentToolCallId } : {}),
+      ...(meta.nestedParentToolCallId ? { nestedParentToolCallId: meta.nestedParentToolCallId } : {}),
       ...(meta.agentName ? { agentName: meta.agentName } : {}),
       payload: this.boundPayload(payload),
     });
@@ -1280,6 +1311,7 @@ export class AgentHost {
       status,
       createdAt: new Date(envelope.ts).toISOString(),
       ...(envelope.parentToolCallId ? { parentToolCallId: envelope.parentToolCallId } : {}),
+      ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
       ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
       content,
     };
@@ -1298,6 +1330,7 @@ export class AgentHost {
       expiresAt: new Date(this.clock.now() + this.approvalLifetime(state)).toISOString(),
       ...(envelope.agentName ? { agentName: envelope.agentName } : {}),
       ...(envelope.parentToolCallId ? { parentToolCallId: envelope.parentToolCallId } : {}),
+      ...(envelope.nestedParentToolCallId ? { nestedParentToolCallId: envelope.nestedParentToolCallId } : {}),
       questions: request.questions.map((question, index) => ({
         id: `${request.requestId}:${index}`,
         question: question.question,
