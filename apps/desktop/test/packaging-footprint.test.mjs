@@ -210,6 +210,17 @@ test("packaging keeps only shipped locales and excludes non-runtime artifacts", 
       from: "resources/plugins",
       to: "plugins",
     },
+    // PPT-Master integrated module (ADR 0041 v3): loaded directly by
+    // lifecycle.ts, outside host-core's bundled-plugin registry. The tree is
+    // gitignored and provisioned from the standalone repo via
+    // scripts/fetch-bundled-plugins.mjs; electron-builder skips the mapping
+    // with a warning when the dir is absent (verified in app-builder-lib
+    // 26.15.3 fileMatcher copyFiles), so a checkout without provisioning
+    // still packages cleanly without ppt-master.
+    {
+      from: "resources/ppt-master",
+      to: "ppt-master",
+    },
     {
       from: "resources/models.dev",
       to: "models.dev",

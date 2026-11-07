@@ -147,6 +147,10 @@
         "to": "plugins"
       },
       {
+        "from": "resources/ppt-master",
+        "to": "ppt-master"
+      },
+      {
         "from": "resources/models.dev",
         "to": "models.dev"
       }
