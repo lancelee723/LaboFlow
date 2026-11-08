@@ -85,9 +85,12 @@ test("macOS development uses the canonical LaboFlow Dock icon", () => {
     brandingSource,
     /process\.platform !== "darwin" \|\| !isDevelopmentBuild \|\| !app\.dock/,
   );
+  // The dev dock deliberately uses the rounded icon-dev-dock.png variant
+  // (make-icon.py) — macOS does not squircle dock images handed to
+  // app.dock.setIcon, so the corner mask is baked into the asset.
   assert.match(
     brandingSource,
-    /join\(app\.getAppPath\(\), "build", "icon_1024\.png"\)/,
+    /join\(app\.getAppPath\(\), "build", "icon-dev-dock\.png"\)/,
   );
   assert.match(brandingSource, /nativeImage\.createFromPath\(iconPath\)/);
   assert.match(brandingSource, /if \(icon\.isEmpty\(\)\)/);
