@@ -143,6 +143,16 @@ export function createSessionCatalog(deps: HostOperationsDeps): RacpSessionCatal
     async rename(sessionId, title) {
       await requireHost(getHost).call("session.rename", { id: sessionId, title }).catch(hostError);
     },
+    async deriveTitle(sessionId, title) {
+      // Host rule (racp harness parity): the title lands only while the
+      // session still carries the placeholder, and the RPC reports whether
+      // it applied.
+      const host = requireHost(getHost);
+      const result = await host
+        .call<{ updated?: boolean }>("session.deriveTitle", { id: sessionId, title })
+        .catch(hostError);
+      return result.updated === true;
+    },
     async delete(sessionId) {
       if (deps.runtime.isBusy(sessionId)) throw new RacpError("CONFLICT", "the session has an active turn");
       await requireHost(getHost).call("session.delete", { id: sessionId }).catch(hostError);
