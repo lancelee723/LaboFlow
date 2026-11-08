@@ -93,8 +93,11 @@ jobs:
     name: Build ${{ matrix.name }}
     needs: verify
     env:
-      # Tag pushes always sign. workflow_dispatch signs unless explicitly disabled.
-      MACOS_SIGN_RELEASE: ${{ github.event_name != 'workflow_dispatch' || inputs.sign_macos == true }}
+      # CI-branch (ci/win-full-0.21.0-beta.3): this repository has no macOS
+      # signing secrets, so tag builds run the existing unsigned lane instead
+      # of hard-failing on the secrets check. Restore the signed expression
+      # once CSC_LINK and the Apple credentials are configured here.
+      MACOS_SIGN_RELEASE: false
     strategy:
       fail-fast: false
       matrix:
