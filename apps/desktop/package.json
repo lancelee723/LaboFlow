@@ -284,6 +284,7 @@
     "linux": {
       "executableName": "laboflow",
       "syncDesktopName": true,
+      "maintainer": "LaboFlow Team <lancelee0723@gmail.com>",
       "artifactName": "LaboFlow-${version}-linux-${arch}.${ext}",
       "target": [
         {
