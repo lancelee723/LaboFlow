@@ -40,8 +40,25 @@ def main() -> None:
         )
 
     BUILD.mkdir(parents=True, exist_ok=True)
+    # Bake the system-style corner mask into the packaged artwork. macOS 26
+    # applies its automatic squircle only to Icon Composer's .icon format; a
+    # legacy .icns is displayed as-is, so a full-bleed canvas shipped as the
+    # bundle icon rendered square in Dock and Finder (observed on 26.x).
+    # Every packaged asset therefore derives from the masked canvas; the
+    # full-bleed icon_1024.png stays the brand source and keeps feeding the
+    # tray template derivation below.
+    SS = 4
+    mask_big = Image.new("L", (BASE * SS, BASE * SS), 0)
+    mask_draw = ImageDraw.Draw(mask_big)
+    mask_draw.rounded_rectangle(
+        (0, 0, BASE * SS - 1, BASE * SS - 1), radius=230 * SS, fill=255
+    )
+    mask = mask_big.resize((BASE, BASE), Image.LANCZOS)
+    rounded = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 0))
+    rounded.paste(master, (0, 0), mask)
+
     windows_icon = BUILD / "icon.ico"
-    master.save(
+    rounded.save(
         windows_icon,
         format="ICO",
         sizes=[
@@ -54,23 +71,13 @@ def main() -> None:
         ],
     )
     package_icon = BUILD / "icon.png"
-    master.resize((512, 512), Image.LANCZOS).save(package_icon)
+    rounded.resize((512, 512), Image.LANCZOS).save(package_icon)
 
-    # Development dock icon. macOS does not mask images handed to
-    # app.dock.setIcon, so the full-bleed canvas artwork (macOS 26 contract)
-    # renders square in dev. Bake the system-style corner mask into a
-    # separate asset; packaged builds use the icns and need none of this.
-    SS = 4
-    dev_mask_big = Image.new("L", (BASE * SS, BASE * SS), 0)
-    dev_mask_draw = ImageDraw.Draw(dev_mask_big)
-    dev_mask_draw.rounded_rectangle(
-        (0, 0, BASE * SS - 1, BASE * SS - 1), radius=230 * SS, fill=255
-    )
-    dev_mask = dev_mask_big.resize((BASE, BASE), Image.LANCZOS)
-    dev_dock = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 0))
-    dev_dock.paste(master, (0, 0), dev_mask)
+    # Development dock icon: the same masked canvas. macOS does not mask
+    # images handed to app.dock.setIcon either, so dev needs the baked
+    # corners just as much as the packaged bundle does.
     dev_dock_path = BUILD / "icon-dev-dock.png"
-    dev_dock.save(dev_dock_path)
+    rounded.save(dev_dock_path)
 
     # macOS menu bar icons are template images: the opaque pixels are tinted
     # by the system. The application icon has an opaque light tile, so using
@@ -108,8 +115,8 @@ def main() -> None:
     iconset.mkdir()
     sizes = [16, 32, 128, 256, 512]
     for sz in sizes:
-        master.resize((sz, sz), Image.LANCZOS).save(iconset / f"icon_{sz}x{sz}.png")
-        master.resize((sz * 2, sz * 2), Image.LANCZOS).save(
+        rounded.resize((sz, sz), Image.LANCZOS).save(iconset / f"icon_{sz}x{sz}.png")
+        rounded.resize((sz * 2, sz * 2), Image.LANCZOS).save(
             iconset / f"icon_{sz}x{sz}@2x.png"
         )
 
