@@ -1,0 +1,12 @@
+{
+  "name": "laboflow-ppt-master",
+  "private": true,
+  "version": "4.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:it": "PPT_IT=1 node --test test/ppt-master-e2e-python.test.mjs test/ppt-master-longtask.test.mjs",
+    "build:wheelhouse": "node scripts/make-ppt-wheelhouse.mjs --bundled",
+    "e2e:s10": "node scripts/e2e-ppt-master-session.mjs"
+  }
+}
