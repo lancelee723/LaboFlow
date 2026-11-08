@@ -129,7 +129,11 @@ export function createApplicationLifecycle({
   function applyDevelopmentBranding() {
     if (process.platform !== "darwin" || !isDevelopmentBuild || !app.dock) return;
 
-    const iconPath = join(app.getAppPath(), "build", "icon_1024.png");
+    // macOS does not mask images handed to app.dock.setIcon — only bundle
+    // icons get the system squircle. The canvas artwork is full-bleed
+    // (macOS 26 contract), so the dev dock needs the corner mask baked in
+    // or it renders as a square (icon-dev-dock.png from make-icon.py).
+    const iconPath = join(app.getAppPath(), "build", "icon-dev-dock.png");
     const icon = nativeImage.createFromPath(iconPath);
     if (icon.isEmpty()) {
       logger.app("lifecycle", "warn", "development dock icon missing", {

@@ -56,6 +56,22 @@ def main() -> None:
     package_icon = BUILD / "icon.png"
     master.resize((512, 512), Image.LANCZOS).save(package_icon)
 
+    # Development dock icon. macOS does not mask images handed to
+    # app.dock.setIcon, so the full-bleed canvas artwork (macOS 26 contract)
+    # renders square in dev. Bake the system-style corner mask into a
+    # separate asset; packaged builds use the icns and need none of this.
+    SS = 4
+    dev_mask_big = Image.new("L", (BASE * SS, BASE * SS), 0)
+    dev_mask_draw = ImageDraw.Draw(dev_mask_big)
+    dev_mask_draw.rounded_rectangle(
+        (0, 0, BASE * SS - 1, BASE * SS - 1), radius=230 * SS, fill=255
+    )
+    dev_mask = dev_mask_big.resize((BASE, BASE), Image.LANCZOS)
+    dev_dock = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 0))
+    dev_dock.paste(master, (0, 0), dev_mask)
+    dev_dock_path = BUILD / "icon-dev-dock.png"
+    dev_dock.save(dev_dock_path)
+
     # macOS menu bar icons are template images: the opaque pixels are tinted
     # by the system. The application icon has an opaque light tile, so using
     # it directly would turn that tile into the tray silhouette. Derive the
@@ -102,6 +118,7 @@ def main() -> None:
         print(f"used {SOURCE}")
         print(f"wrote {windows_icon}")
         print(f"wrote {package_icon}")
+        print(f"wrote {dev_dock_path}")
         print(f"wrote {tray_icon_mac_path}")
         print("skipped icon.icns (iconutil is unavailable)")
         return
@@ -113,6 +130,7 @@ def main() -> None:
     print(f"used {SOURCE}")
     print(f"wrote {windows_icon}")
     print(f"wrote {package_icon}")
+    print(f"wrote {dev_dock_path}")
     print(f"wrote {tray_icon_mac_path}")
     print(f"wrote {icns}")
 
