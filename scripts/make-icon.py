@@ -83,14 +83,11 @@ def main() -> None:
         ),
         master.getchannel("A"),
     )
-    # The source artwork also contains a soft outline around its light app
-    # tile. Keep the known LaboFlow logo area so that outline cannot leak into
-    # the menu bar template silhouette. The rectangle matches the logo bounds
-    # in the tracked icon_1024.png (25px tile margins, bbox (125,279)-(898,745)).
-    mark_clip = Image.new("L", master.size, 0)
-    mark_draw = ImageDraw.Draw(mark_clip)
-    mark_draw.rectangle((125, 279, 898, 745), fill=255)
-    tray_alpha = ImageChops.multiply(tray_alpha, mark_clip)
+    # The artwork is the full-bleed macOS 26 canvas: white field with the
+    # logo lockup (colored blocks + dark wordmark). Dark pixels are the
+    # wordmark alone — the gray outline that used to need a clip rectangle
+    # is scrubbed from the tracked asset, so no clip is necessary.
+    tray_alpha = tray_alpha
     tray_icon_mac = Image.new("RGBA", master.size, (0, 0, 0, 0))
     tray_icon_mac.putalpha(tray_alpha)
     mark_bounds = tray_alpha.getbbox()
