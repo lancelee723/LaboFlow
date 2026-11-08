@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="pi-plugin-chrome" content="v2">
+<title>PPT 工作台</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    /* Panel pages receive no --pi-* tokens from the host: without these, dark
+       mode painted #1f2328 text on the #181818 window background. Keep --pi-bg
+       equal to builtinWindowBackground so the titlebar sample matches. */
+    --pi-bg: #ffffff;
+    --pi-fg: #1f2328;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --pi-bg: #181818; --pi-fg: #e6e8eb; }
+    /* T10: the amber chip's light-mode text color is too dark on #181818. */
+    #quality .q-chip.q-warn { color: #d4a72c; }
+  }
+  .confirm-error {
+    color: #d1242f; font-size: 12px; margin-top: 6px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .confirm-actions { margin-top: 8px; }
+  .confirm-actions button.primary { background: #2da44e; border-color: #2da44e; color: #fff; font-weight: 600; }
+  .confirm-actions button.primary:disabled { opacity: .45; }
+  .confirm-actions input.hidden { display: none; }
+  .confirm-stage-head { font-weight: 600; margin-bottom: 4px; }
+  .confirm-subcard { margin: 6px 0 0 12px; padding: 6px 10px; border-left: 2px solid color-mix(in srgb, currentColor 25%, transparent); }
+  .keyline { display: flex; gap: 6px; align-items: baseline; }
+  .keyline .k { color: inherit; opacity: .55; flex-shrink: 0; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: calc(var(--pi-plugin-titlebar-height, 0px) + 12px) 14px 14px;
+    font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--pi-fg, #1f2328); background: var(--pi-bg, transparent);
+  }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin: 16px 0 6px; }
+  .card { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 10px; padding: 10px 12px; margin: 6px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { opacity: .6; font-size: 12px; }
+  button { font: inherit; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type="text"] { font: inherit; padding: 5px 8px; border-radius: 8px; flex: 1; min-width: 200px;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 2px 0 10px; }
+  .header-col { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+  /* Pipeline timeline (V6-T2): larger type, roomier layout, distinct
+     three-state motion — done = solid green + strike-free settle, active =
+     pulsing amber dot with a soft glow and a width-animated progress halo,
+     pending = dimmed hollow dot. Nodes breathe on status change. */
+  .timeline-nodes { list-style: none; margin: 6px 0 0; padding: 0; position: relative; }
+  .timeline-nodes::before { content: ""; position: absolute; left: 7px; top: 12px; bottom: 12px; width: 2px;
+    background: color-mix(in srgb, currentColor 18%, transparent); border-radius: 1px; }
+  .tl-node { display: flex; gap: 11px; align-items: center; flex-wrap: wrap; padding: 5px 0 5px 2px;
+    position: relative; font-size: var(--text-sm, 13.2px); }
+  .tl-node .tl-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; align-self: center;
+    border: 2px solid color-mix(in srgb, currentColor 40%, transparent);
+    background: var(--pi-bg); position: relative; z-index: 1; transition: background .3s, border-color .3s; }
+  .tl-node.done .tl-dot { background: #2da44e; border-color: #2da44e; }
+  .tl-node.active .tl-dot { background: #d4a72c; border-color: #d4a72c;
+    animation: pill-pulse 1s ease-in-out infinite alternate; }
+  .tl-node.active::after { content: ""; position: absolute; left: 1px; top: 50%; width: 100%;
+    height: 1px; transform: translateY(-50%) scaleX(0); transform-origin: left;
+    background: linear-gradient(90deg, #d4a72c55, transparent);
+    animation: tl-sweep 2.2s ease-in-out infinite; pointer-events: none; }
+  @keyframes tl-sweep { 0% { transform: translateY(-50%) scaleX(0); opacity: .8; }
+    70% { transform: translateY(-50%) scaleX(1); opacity: 0; } 100% { opacity: 0; } }
+  .tl-node.skipped .tl-dot { border-style: dashed; }
+  .tl-node.pending { opacity: .45; }
+  .tl-node.done, .tl-node.skipped { opacity: .85; }
+  .tl-node.active { opacity: 1; font-weight: 700; }
+  .tl-node .tl-label { font-size: var(--text-sm, 13.2px); }
+  .tl-node.active .tl-label { font-size: var(--text-base, 14px); }
+  .tl-time { opacity: .65; font-size: var(--text-sm, 13.2px); }
+  .tl-badge { font-size: var(--text-sm, 13.2px); border-radius: var(--radius-full); padding: 1px 10px;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent); opacity: .85; }
+  .tl-resume { margin-left: 4px; border-radius: var(--radius-full); padding: 3px 12px; cursor: pointer;
+    font: inherit; font-size: var(--text-sm, 13.2px); border: 1px solid var(--ds-border-default);
+    background: var(--ds-bg-primary); color: var(--ds-text-primary); }
+  .tl-resume:hover { border-color: var(--accent, #4c8dff); color: var(--accent, #4c8dff); }
+  .tl-resume:disabled { opacity: .55; cursor: default; }
+  .tl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .tl-reset { border: 1px solid var(--ds-border-default); background: none; color: var(--ds-text-muted);
+    border-radius: var(--radius-full); padding: 2px 10px; cursor: pointer; font: inherit;
+    font-size: var(--text-sm, 13.2px); }
+  .tl-reset:hover { color: var(--ds-text-primary); border-color: var(--ds-text-muted); }
+  #status-line { font-size: var(--text-sm, 13.2px); }
+  #gate-summary { font-size: var(--text-sm, 13.2px); }
+    /* Quality report section (Workbench-v2 T10): severity chips pass=green,
+     warn=amber, error=red; file rows jump the preview pager to that page. */
+  #quality .q-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; font-size: 12px; }
+  #quality .q-chip.q-pass { color: #1a7f37; border-color: #2da44e; opacity: 1; }
+  #quality .q-chip.q-warn { color: #9a6700; border-color: #d4a72c; opacity: 1; }
+  #quality .q-chip.q-error { color: #d1242f; border-color: #d1242f; opacity: 1; }
+  #quality .q-item { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; font-size: 12px; min-width: 0; }
+  #quality .q-item[data-jump-page] { cursor: pointer; }
+  #quality .q-item[data-jump-page]:hover .q-file,
+  #quality .q-item[data-jump-page]:focus-visible .q-file { text-decoration: underline; }
+  #quality .q-file { flex-shrink: 1; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #quality .q-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .75; min-width: 0; }
+  /* Calibration table (Workbench-v2 T11): one row per measured text role —
+     role/family, size, CJK + Latin chars-per-100px rates, longest planned
+     line. Family renders as a muted sub-line under the role name. */
+  #calibration .cal-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  #calibration .cal-table th { text-align: left; font-weight: 600; opacity: .6; padding: 2px 12px 2px 0; white-space: nowrap; }
+  #calibration .cal-table td { text-align: left; padding: 3px 12px 3px 0; white-space: nowrap; vertical-align: top; }
+  #calibration .cal-role b { font-weight: 600; }
+  #calibration .cal-family { display: block; opacity: .6; font-size: 11px; max-width: 300px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px;
+    padding: 3px 11px; font-size: 12px; max-width: 100%; }
+  .pill.ready { cursor: default; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #d4a72c; flex-shrink: 0; }
+  .pill.ready .dot { background: #2da44e; }
+  .pill.busy .dot { animation: pill-pulse 1s ease-in-out infinite alternate; }
+  @keyframes pill-pulse { from { opacity: .35; } to { opacity: 1; } }
+  .pill .pill-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
+  .hero { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 10px; padding: 10px 12px; margin: 6px 0; }
+  .direction-card { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 8px; padding: 8px 10px; margin: 6px 0; cursor: pointer; }
+  .direction-card:hover, .direction-card:focus-visible { border-color: color-mix(in srgb, currentColor 55%, transparent); }
+  .direction-card.selected { border-color: #2da44e; box-shadow: 0 0 0 1px #2da44e; }
+  .direction-card .d-summary { font-size: 12px; opacity: .75; margin: 2px 0 4px; }
+  /* Stage-2 direction card detail (Workbench-v2 T7): palette swatches,
+     typography line, image strategy block, collapsed behaviors. */
+  .d-palette { margin: 4px 0 2px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .d-color-name { font-size: 12px; opacity: .75; }
+  .swatch-strip { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+  .swatch { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
+  .swatch i { width: 34px; height: 18px; border-radius: 4px; background: #8b949e;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+  .swatch small { font-size: 9px; opacity: .6; max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .swatch code { font-size: 9px; opacity: .7; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .d-typography { font-size: 12px; opacity: .8; margin: 2px 0; }
+  .d-strategy { margin-top: 4px; font-size: 12px; }
+  .d-strategy b { display: block; }
+  .d-behaviors { margin-top: 4px; font-size: 12px; }
+  .d-behaviors summary { cursor: pointer; opacity: .6; }
+  /* Production params panel (Workbench-v2 T7): independent of the selected
+     direction; sits between the direction cards and the confirm buttons. */
+  .stage2-params { margin: 10px 0 2px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent); }
+  .stage2-params > .f-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .stage2-params .param-row { display: flex; gap: 14px; row-gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+  .stage2-params .param-check { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; }
+  .stage2-params .f-field { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; margin: 0; }
+  .stage2-params .param-notes { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin-top: 6px; }
+  .stage2-params select, .stage2-params input[type="text"] { font: inherit; padding: 3px 8px; border-radius: 8px;
+    min-width: 0; flex: 0 1 auto; border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+    background: transparent; color: inherit; }
+  .stage2-params input[type="text"] { width: 90px; }
+  .stage2-params textarea { font: inherit; padding: 5px 8px; border-radius: 8px; resize: vertical;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  /* Stage-1 editable form (Workbench-v2 T6): labeled fields seeded with the
+     recommendation values; each prose field may be cleared to "no constraint". */
+  .stage1-form .f-field { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; }
+  .stage1-form .f-label { font-size: 12px; font-weight: 600; }
+  .stage1-form .f-label .optional { font-weight: 400; opacity: .55; }
+  .stage1-form textarea { font: inherit; padding: 5px 8px; border-radius: 8px; resize: vertical;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  .stage1-form select { font: inherit; padding: 5px 8px; border-radius: 8px; align-self: flex-start;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; }
+  .stage1-form input[type="text"] { min-width: 120px; max-width: 320px; }
+  .stage1-form .radio-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .stage1-form fieldset { border: none; margin: 0; padding: 0; }
+  /* Template candidate checklist (Workbench-v2 T8): checkbox per candidate
+     with a kind chip + note line, visible only under the templates radio. */
+  #template-candidates { margin-top: 4px; }
+  #template-candidates .tpl-candidate { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; padding: 4px 0; }
+  #template-candidates .tpl-candidate input[type="checkbox"] { flex-shrink: 0; align-self: center; }
+  #template-candidates .tpl-candidate .tpl-note { flex-basis: 100%; padding-left: 23px; }
+  .tpl-title { margin-top: 8px; }
+  /* Project selector (Workbench-v2 T2): a compact details-dropdown fed by
+     ppt.listProjects; card items keep chip + counts readable. */
+  #project-selector { position: relative; display: inline-block; max-width: 100%; }
+  #project-selector > summary { list-style: none; cursor: pointer; user-select: none; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; min-width: 200px; max-width: 100%;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 8px; padding: 5px 12px; }
+  #project-selector > summary::-webkit-details-marker { display: none; }
+  #project-selector > summary::after { content: " ▾"; opacity: .55; }
+  #project-selector > summary .chip { margin-left: 8px; }
+  #project-list { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; width: min(440px, 92vw);
+    max-height: 320px; overflow-y: auto; padding: 4px; border-radius: 10px;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: var(--pi-bg);
+    box-shadow: 0 8px 24px color-mix(in srgb, currentColor 20%, transparent); }
+  .project-item { padding: 6px 9px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  .project-item:hover, .project-item:focus-visible { background: color-mix(in srgb, currentColor 8%, transparent); }
+  .project-item.selected { border-color: #2da44e; box-shadow: 0 0 0 1px #2da44e; }
+  .p-line1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .p-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip { font-size: 11px; line-height: 1.6; border-radius: 999px; padding: 0 8px; white-space: nowrap; flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent); opacity: .75; }
+  .chip.done { color: #2da44e; border-color: #2da44e; opacity: 1; }
+  .p-meta { font-size: 11px; opacity: .6; margin-top: 1px; }
+  #advanced-load > summary { cursor: pointer; }
+  #preview-stage { width: 100%; aspect-ratio: 16 / 9; border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); display: flex;
+    align-items: center; justify-content: center; overflow: hidden; }
+  #preview-stage svg { width: 100%; height: 100%; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .filelist { font-size: 12px; }
+  .filelist .f { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  .linkish { text-decoration: underline; cursor: pointer; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1 id="t-title"></h1>
+
+<header>
+  <div class="header-col">
+    <!-- Workbench-v2 T9: vertical pipeline timeline (replaces the horizontal
+         stepper). The status line (T3) is the timeline's header; closed gates
+         keep the click-to-reveal summary affordance. renderTimeline fills
+         #timeline-nodes only — the header and summary are static siblings so
+         a re-render never wipes them. -->
+    <div id="timeline">
+      <div class="tl-head">
+        <div id="status-line" class="muted hidden" role="status"></div>
+        <button type="button" id="tl-reset" class="tl-reset" title=""></button>
+      </div>
+      <ol id="timeline-nodes" class="timeline-nodes"></ol>
+      <div id="gate-summary" class="hidden"></div>
+    </div>
+    <!-- Workbench-v2 T10: QC report under the timeline; visible only while a
+         final-gate report exists (files.qualityReport). refreshQualityReports
+         fills #quality-body and toggles the section — empty/absent stays
+         hidden. Workbench-v2 T11: the text-measure calibration table
+         (#calibration) lives inside the same section, toggled independently —
+         either artifact alone shows its own part. -->
+    <section id="quality" class="hidden">
+      <h2 id="quality-title" data-i18n="quality"></h2>
+      <div id="quality-body" class="card filelist"></div>
+      <div id="calibration" class="hidden">
+        <h2 data-i18n="calibration"></h2>
+        <div id="calibration-body" class="card filelist"></div>
+      </div>
+    </section>
+  </div>
+  <div class="row">
+    <button id="runtime-pill" class="pill" type="button" title=""><span class="dot" aria-hidden="true"></span><span class="pill-label">…</span></button>
+    <button id="btn-refresh"></button>
+  </div>
+</header>
+
+<main>
+  <section id="hero" class="hero hidden">
+    <h2 id="t-confirm-section"></h2>
+    <div id="confirm-body">
+      <div id="hero-stage1" data-hero="stage1" class="hidden"></div>
+      <div id="hero-stage2" data-hero="stage2" class="hidden"></div>
+    </div>
+    <div id="confirm-status" class="muted hidden"></div>
+    <div id="confirm-error" class="confirm-error hidden"></div>
+    <div class="row confirm-actions">
+      <input type="text" id="confirm-reason" class="hidden">
+      <button id="btn-confirm-stage" class="primary"></button>
+      <!-- Workbench-v2 T11: the waive affordance is a co-primary 「快速模式」
+           (Quick mode) button; the waive+reason contract underneath is
+           unchanged (submitConfirm(true) + mandatory reason). -->
+      <button id="btn-waive-stage" class="primary"></button>
+    </div>
+    <div id="quick-mode-hint" class="muted"></div>
+  </section>
+  <section id="preview" class="hidden">
+    <h2 id="t-pages"></h2>
+    <div class="row">
+      <details id="project-selector">
+        <summary><span id="project-selector-label"></span></summary>
+        <div id="project-list" role="listbox"></div>
+      </details>
+      <details id="advanced-load">
+        <summary class="muted" data-i18n="advanced">高级</summary>
+        <div class="row" style="margin-top:6px">
+          <input type="text" id="project-dir">
+          <button id="btn-load"></button>
+        </div>
+      </details>
+      <label class="muted" style="display:inline-flex;gap:4px;align-items:center">
+        <input type="checkbox" id="opt-native-charts">
+        <span id="t-native-charts"></span>
+      </label>
+    </div>
+    <div id="preview-stage"><span class="muted" id="preview-empty"></span></div>
+    <div class="pager hidden" id="pager">
+      <button id="pg-prev">←</button>
+      <span class="muted" id="pg-label">0 / 0</span>
+      <button id="pg-next">→</button>
+      <span class="muted" id="pg-placeholder"></span>
+        <button id="btn-move-prev" class="btn" type="button" title="Move page earlier">&#9664;</button>
+        <button id="btn-move-next" class="btn" type="button" title="Move page later">&#9654;</button>
+        <button id="btn-regen" class="btn" type="button"></button>
+        <button id="btn-del-page" class="btn" type="button"></button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <section id="exports" class="hidden">
+    <h2 id="t-exports"></h2>
+    <div class="card filelist hidden" id="exports-list"></div>
+  </section>
+  <section class="hidden">
+    <h2 id="t-outline"></h2>
+    <div class="card hidden" id="outline-tree"></div>
+  </section>
+  <section class="hidden">
+    <h2 id="t-history"></h2>
+    <div class="card filelist hidden" id="history"></div>
+  </section>
+</footer>
+
+<!-- Workbench-v2 T6/T12: the page script lives in four plain classic
+     <script> modules sharing one scope, loaded in dependency order:
+     wb-i18n.js (dict + pickLocale + esc/helpers) → wb-pipeline.js (pure
+     timeline/quality/calibration derivations + renderers) → wb-hero.js (the
+     stage confirmation hero) → workbench.js (entry: state, bridge calls,
+     wiring, boot). The view entry loads as a file URL, so relative srcs
+     resolve next to this html — same pattern as the bundled
+     pi.token-insights view. -->
+<script src="wb-i18n.js"></script>
+<script src="wb-pipeline.js"></script>
+<script src="wb-hero.js"></script>
+<script src="workbench.js"></script>
+</body>
+</html>
